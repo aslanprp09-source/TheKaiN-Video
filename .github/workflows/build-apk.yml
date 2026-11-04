@@ -1,0 +1,45 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v4
+      - name: Restore TheKaiN Video source project
+        shell: bash
+        run: |
+          cat source-parts/part-*.txt | base64 --decode > thekain-video-source.tar.xz
+          echo "c796870f5bbe1b8769396bb2f6322027116b53663668ea54b1f0a679ae0a2ff0  thekain-video-source.tar.xz" | sha256sum --check
+          tar -xJf thekain-video-source.tar.xz
+          test -e app/build.gradle.kts
+          test -e app/src/main/AndroidManifest.xml
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Install Android 35
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Setup Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Test and assemble debug APK
+        run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug
+      - name: Upload APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: TheKaiN-Video-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
