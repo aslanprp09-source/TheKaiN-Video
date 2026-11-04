@@ -29,8 +29,11 @@ jobs:
       - name: Install Android 35
         run: |
           echo "ANDROID_HOME=$ANDROID_HOME"
-          sdkmanager --version
-          sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+          SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager -print -quit)"
+          if [ -z "$SDKMANAGER" ]; then echo "Android sdkmanager was not found"; exit 1; fi
+          echo "Using $SDKMANAGER"
+          "$SDKMANAGER" --version
+          "$SDKMANAGER" 'platforms;android-35' 'build-tools;35.0.0'
       - name: Setup Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
         with:
