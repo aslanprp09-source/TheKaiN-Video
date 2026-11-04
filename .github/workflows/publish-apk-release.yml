@@ -1,0 +1,42 @@
+name: Publish TheKaiN Video test APK
+
+on:
+  push:
+    paths:
+      - .github/workflows/publish-apk-release.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Retrieve tested build artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gh run view 41833004769 --repo "$GITHUB_REPOSITORY" --json conclusion --jq '.conclusion')" = "success"
+          mkdir -p release
+          gh run download 41833004769 --repo "$GITHUB_REPOSITORY" --name TheKaiN-Video-debug-apk --dir release
+          test -s release/app-debug.apk
+          file release/app-debug.apk
+      - name: Publish downloadable Android test APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view v1.0.2-test --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Test release already exists; not replacing the APK"
+            exit 0
+          fi
+          gh release create v1.0.2-test release/app-debug.apk \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "TheKaiN Video 1.0.2 — Android test APK" \
+            --notes "Experimental debug APK for testing on Android 10 and newer. This is not a production or device-tested release. Download app-debug.apk and install it only if you trust this repository." \
+            --prerelease
