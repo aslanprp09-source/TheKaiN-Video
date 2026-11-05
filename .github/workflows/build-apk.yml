@@ -19,6 +19,11 @@ jobs:
           cat source-parts/part-*.txt | base64 --decode > thekain-video-source.tar.xz
           echo "c796870f5bbe1b8769396bb2f6322027116b53663668ea54b1f0a679ae0a2ff0  thekain-video-source.tar.xz" | sha256sum --check
           tar -xJf thekain-video-source.tar.xz
+          # TheKaiN Video 1.1 - updated app sources are overlaid on the verified base.
+          cat ui-update-parts/part-*.txt | base64 --decode > thekain-video-1.1-update.tar.xz
+          echo "3f96452272edc72b56cd38595eefb21e903cc847cc12d943512ac5cef54f8742  thekain-video-1.1-update.tar.xz" | sha256sum --check
+          tar -xJf thekain-video-1.1-update.tar.xz
+          grep -q 'versionName = "1.1.0"' app/build.gradle.kts
           test -e app/build.gradle.kts
           test -e app/src/main/AndroidManifest.xml
       - name: Setup Java 17
