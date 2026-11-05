@@ -64,6 +64,95 @@ jobs:
           if (-not (Select-String -Path windows/installer.iss -Pattern 'PrivilegesRequiredOverridesAllowed=dialog' -Quiet)) {
             throw "Installer elevation chooser missing"
           }
+      - name: Apply 1.2.2 clipboard, preview and updater fixes
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+          p=Path("windows/app.py")
+          s=p.read_text(encoding="utf-8")
+          s=s.replace('APP_VERSION = "1.2.0"', 'APP_VERSION = "1.2.2"').replace('APP_VERSION = "1.2.1"', 'APP_VERSION = "1.2.2"')
+          s=s.replace('        self.bind_all("<Control-V>", self._on_ctrl_v)', '        self.bind_all("<Control-V>", self._on_ctrl_v)\n        self.url_input._entry.bind("<Control-v>", self._on_ctrl_v)\n        self.url_input._entry.bind("<Control-V>", self._on_ctrl_v)\n        self.url_input._entry.bind("<<Paste>>", self._on_ctrl_v)')
+          s=s.replace('        preview.pack(fill="x", pady=(0, 14))', '        self.preview_card = preview\n        preview.pack_forget()')
+          s=s.replace('        action.pack(fill="x", pady=(0, 14))', '        action.pack(fill="x", pady=(0, 14))\n        self.action_card = action')
+          s=s.replace('        self.thumbnail_toggle = ctk.CTkCheckBox(ob, text="Сохранять обложку рядом с видео",\n                               variable=ctk.BooleanVar(value=self.write_thumbnail), command=self._update_options,\n                               text_color=self.c("text"), fg_color=ACCENT, hover_color=ACCENT_HOVER)\n        self.thumbnail_toggle.pack(anchor="w", pady=(0, 7))', '        self.write_thumbnail = False')
+          s=s.replace('        self.write_thumbnail = bool(self.thumbnail_toggle.get())', '        self.write_thumbnail = False')
+          s=s.replace('    def _invalidate_probe(self, *_):\n', '    def _invalidate_probe(self, *_):\n        self._toggle_preview()\n')
+          s=s.replace('        self._invalidate_metadata()\n        if not self.playlist:\n            self._set_choices', '        self._invalidate_metadata()\n        self._toggle_preview()\n        if not self.playlist:\n            self._set_choices')
+          start=s.index('    def _on_ctrl_v(self, event):')
+          end=s.index('    def _choose_folder(self):',start)
+          s=s[:start]+'''    def _on_ctrl_v(self, event=None):
+              focused = self.focus_get()
+              if focused is not None and focused is not self.url_input._entry:
+                  if focused.winfo_class() in ("Entry", "Text", "TEntry"):
+                      return None
+              self._paste()
+              return "break"
+
+          def _paste(self):
+              try:
+                  data = self.clipboard_get().strip()
+                  if not data:
+                      raise ValueError("Буфер пуст")
+                  self.tabs.set("Скачать")
+                  self.url_input.delete(0, "end")
+                  self.url_input.insert(0, data)
+                  self._invalidate_probe()
+                  self._toggle_preview()
+                  self.url_input.focus_set()
+              except Exception:
+                  messagebox.showinfo(APP_NAME, "Буфер обмена не содержит доступную ссылку")
+
+          def _toggle_preview(self):
+              if not hasattr(self, "preview_card"):
+                  return
+              visible = bool(self.url_input.get().strip())
+              if visible and not self.preview_card.winfo_manager():
+                  self.preview_card.pack(fill="x", pady=(0, 14), before=self.action_card)
+              elif not visible and self.preview_card.winfo_manager():
+                  self.preview_card.pack_forget()
+
+          def _update_ytdlp(self):
+              if getattr(self, "updating_ytdlp", False):
+                  return
+              self.updating_ytdlp = True
+              self.ytdlp_update_button.configure(state="disabled", text="Обновление…")
+              def run():
+                  try:
+                      executable = tools()["yt-dlp"]
+                      if executable is None:
+                          raise FileNotFoundError("yt-dlp.exe не найден")
+                      import shutil
+                      destination = data_dir() / "tools" / "yt-dlp.exe"
+                      destination.parent.mkdir(parents=True, exist_ok=True)
+                      if not destination.is_file():
+                          shutil.copy2(executable, destination)
+                      result = subprocess.run([str(destination), "--update-to", "stable"],
+                                              capture_output=True, text=True, timeout=180,
+                                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                      if result.returncode:
+                          raise RuntimeError((result.stderr or result.stdout)[-900:])
+                      self.post("ytdlp_updated", (True, (result.stdout or "yt-dlp обновлён")[-500:]))
+                  except Exception as exc:
+                      self.post("ytdlp_updated", (False, str(exc)))
+              threading.Thread(target=run, daemon=True).start()
+
+          '''+s[end:]
+          s=s.replace('        self._settings_ui(self.tabs.tab("Настройки"))', '        self._settings_ui(self.tabs.tab("Настройки"))\n        self.ytdlp_update_button = self.button(self.tabs.tab("Настройки"), "Обновить yt-dlp", self._update_ytdlp, width=175)\n        self.ytdlp_update_button.pack(anchor="w", padx=25, pady=(4, 12))')
+          s=s.replace('        self._show_preview()\n\n    def _download_ui', '        self._show_preview()\n        self._toggle_preview()\n\n    def _download_ui')
+          s=s.replace('            elif event == "metadata_error":', '            elif event == "ytdlp_updated":\n                self.updating_ytdlp = False\n                self.ytdlp_update_button.configure(state="normal", text="Обновить yt-dlp")\n                ok, message = value\n                self._refresh_tools_state()\n                (messagebox.showinfo if ok else messagebox.showerror)(APP_NAME, message)\n            elif event == "metadata_error":')
+          p.write_text(s,encoding="utf-8")
+          p=Path("windows/worker.py")
+          s=p.read_text(encoding="utf-8")
+          s=s.replace('        bundled = base / "tools" / name', '        override = Path(os.getenv("APPDATA") or Path.home()) / "TheKaiN Video" / "tools" / name\n        bundled = base / "tools" / name')
+          s=s.replace('        result[key] = bundled if bundled.is_file() else (Path(found) if found else None)', '        result[key] = override if key == "yt-dlp" and override.is_file() else (bundled if bundled.is_file() else (Path(found) if found else None))')
+          p.write_text(s,encoding="utf-8")
+          p=Path("windows/installer.iss")
+          s=p.read_text(encoding="utf-8").replace('1.2.0','1.2.2').replace('1.2.1','1.2.2')
+          p.write_text(s,encoding="utf-8")
+          assert 'APP_VERSION = "1.2.2"' in Path("windows/app.py").read_text(encoding="utf-8")
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw 'Windows 1.2.2 patch failed' }
       - name: Install build dependencies
         shell: pwsh
         run: |
