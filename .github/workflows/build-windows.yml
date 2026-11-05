@@ -42,9 +42,13 @@ jobs:
         run: |
           python -m compileall -q windows
           python -m pytest -q windows/tests
-      - name: Generate Windows application icon
+      - name: Generate selected Windows application icon
         shell: pwsh
-        run: python windows/build_icon.py
+        run: |
+          python windows/build_icon.py
+          $payload = (Get-Content -Raw 'windows-source/selected-icon.webp.base64').Trim()
+          [IO.File]::WriteAllBytes('windows/assets/selected.webp', [Convert]::FromBase64String($payload))
+          python -c "from PIL import Image; im=Image.open('windows/assets/selected.webp').convert('RGB'); im.save('windows/assets/TheKaiN.png'); im.save('windows/assets/TheKaiN.ico', sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])"
       - name: Bundle application with PyInstaller
         shell: pwsh
         run: |
