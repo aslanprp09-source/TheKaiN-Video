@@ -7,6 +7,7 @@ on:
       - 'windows/**'
       - 'windows-v12/**'
       - 'windows-v124/**'
+      - 'windows-v125/**'
       - 'windows-hotfix-121/**'
       - 'windows-optimizations/**'
       - '.github/workflows/build-windows.yml'
@@ -43,6 +44,29 @@ jobs:
           print('Verified complete 1.2.4 source archive', digest)
           '@ | python -
           if ($LASTEXITCODE -ne 0) { throw 'Source verification failed' }
+      - name: Apply verified 1.2.5 completion hotfix
+        shell: pwsh
+        run: |
+          @'
+          import hashlib
+          from pathlib import Path
+          patch = Path('windows-v125/finish-download.patch')
+          digest = hashlib.sha256(patch.read_bytes()).hexdigest()
+          assert digest == '9fb705d5f9cd949e6b3b686bbe6c05963bca560895881d874a49ca051ee16ef8', digest
+          assert 'APP_VERSION = "1.2.4"' in Path('windows/app.py').read_text(encoding='utf-8')
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw 'Completion patch checksum mismatch' }
+          git apply --check windows-v125/finish-download.patch
+          if ($LASTEXITCODE -ne 0) { throw 'Completion patch does not apply' }
+          git apply windows-v125/finish-download.patch
+          if ($LASTEXITCODE -ne 0) { throw 'Completion patch apply failed' }
+          @'
+          from pathlib import Path
+          assert 'APP_VERSION = "1.2.5"' in Path('windows/app.py').read_text(encoding='utf-8')
+          assert Path('windows/tests/test_completion_125.py').is_file()
+          print('Completion fix applied')
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw 'Completion patch incomplete' }
       - name: Install build dependencies
         shell: pwsh
         run: |
@@ -196,14 +220,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = 'v1.2.4-windows-test'
+          $tag = 'v1.2.5-windows-test'
           $installer = 'release/TheKaiN-Video-Setup-x64.exe'
           $portable = 'release/TheKaiN-Video-Windows-x64-portable.zip'
-          $notes = 'TheKaiN Video 1.2.4 for Windows 10/11 x64. Fixed nonfunctional keyboard shortcuts: pre-class Tk bindtag dispatch, Russian and English keyboard layouts via Windows VK keycodes, re-bindings on light/dark theme switch; Ctrl+V, Shift+Insert, Ctrl+L, Ctrl+Enter and Alt+Enter. Keeps video download and cancellation fixes from 1.2.3. 33 Python unit tests; keyboard shortcut GUI smoke test on packaged EXE; local MP4 integration; installer install/launch/uninstall checks. Unsigned beta.'
+          $notes = 'TheKaiN Video 1.2.5 for Windows 10/11 x64. Fixes downloads that stay active after the media file is already saved; distinguishes 100% transfer from completed postprocessing; terminates stuck trailing yt-dlp process only after verified final file, handles end-of-playlist marker, resets stale progress and retry state. Includes all previous keyboard shortcuts and cancellation repairs. 39+ Python tests; packaged EXE GUI and keyboard smoke checks; local MP4 integration and installer install/uninstall tests. Unsigned beta.'
           gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
           if ($LASTEXITCODE -eq 0) {
             gh release upload $tag $installer $portable --clobber --repo $env:GITHUB_REPOSITORY
             gh release edit $tag --notes $notes --repo $env:GITHUB_REPOSITORY
           } else {
-            gh release create $tag $installer $portable --repo $env:GITHUB_REPOSITORY --title 'TheKaiN Video 1.2.4 — Reliable keyboard shortcuts' --notes $notes --prerelease
+            gh release create $tag $installer $portable --repo $env:GITHUB_REPOSITORY --title 'TheKaiN Video 1.2.5 — Download completion and queue fix' --notes $notes --prerelease
           }
