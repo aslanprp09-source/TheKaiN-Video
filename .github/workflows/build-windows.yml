@@ -6,7 +6,7 @@ on:
     paths:
       - 'windows/**'
       - 'windows-v12/**'
-      - 'windows-v123/**'
+      - 'windows-v124/**'
       - 'windows-hotfix-121/**'
       - 'windows-optimizations/**'
       - '.github/workflows/build-windows.yml'
@@ -27,20 +27,20 @@ jobs:
         with:
           python-version: '3.12'
           architecture: 'x64'
-      - name: Restore verified Windows 1.2.3 source
+      - name: Restore verified Windows 1.2.4 source
         shell: pwsh
         run: |
           @'
           import base64, hashlib, io, tarfile
           from pathlib import Path
-          archive = base64.b64decode(Path('windows-v123/source.tar.xz.base64').read_text(encoding='ascii').strip())
+          archive = base64.b64decode(Path('windows-v124/source.tar.xz.base64').read_text(encoding='ascii').strip())
           digest = hashlib.sha256(archive).hexdigest()
-          assert digest == '3bd5847631ae1cba22e42cddd151d912f213114f682a8879f69c23462f55cf01', digest
+          assert digest == '792b46bae3ad05f75b1e80ff099f076fd847a1547e61989a1f6cd40a9a0e01aa', digest
           with tarfile.open(fileobj=io.BytesIO(archive), mode='r:xz') as tar:
               tar.extractall(path='.', filter='data')
-          assert 'APP_VERSION = "1.2.3"' in Path('windows/app.py').read_text(encoding='utf-8')
-          assert Path('windows/tests/integration_download.py').is_file()
-          print('Verified complete 1.2.3 source archive', digest)
+          assert 'APP_VERSION = "1.2.4"' in Path('windows/app.py').read_text(encoding='utf-8')
+          assert Path('windows/tests/test_shortcuts.py').is_file()
+          print('Verified complete 1.2.4 source archive', digest)
           '@ | python -
           if ($LASTEXITCODE -ne 0) { throw 'Source verification failed' }
       - name: Install build dependencies
@@ -117,6 +117,11 @@ jobs:
         run: |
           $p = Start-Process -FilePath (Resolve-Path 'dist/TheKaiN-Video/TheKaiN-Video.exe') -ArgumentList '--ui-smoke' -PassThru -Wait
           if ($p.ExitCode -ne 0) { throw "Desktop GUI test failed ($($p.ExitCode))" }
+      - name: Verify keyboard shortcuts in packaged Windows EXE
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath (Resolve-Path 'dist/TheKaiN-Video/TheKaiN-Video.exe') -ArgumentList '--keyboard-smoke' -PassThru -Wait
+          if ($p.ExitCode -ne 0) { throw "Packaged EXE keyboard test failed ($($p.ExitCode))" }
       - name: Prepare portable release ZIP
         shell: pwsh
         run: |
@@ -191,14 +196,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = 'v1.2.3-windows-test'
+          $tag = 'v1.2.4-windows-test'
           $installer = 'release/TheKaiN-Video-Setup-x64.exe'
           $portable = 'release/TheKaiN-Video-Windows-x64-portable.zip'
-          $notes = 'TheKaiN Video 1.2.3 for Windows 10/11 x64. Critical download fix: --no-simulate, --progress, --ignore-config, actual final media file validation. Cancel removes queue entry and card immediately, terminates subprocess, ignores stale events. 29+ unit tests, bundled yt-dlp and FFmpeg real localhost MP4 download integration, Windows GUI smoke, installer install/self-test/uninstall. Unsigned beta; compatibility with individual sites must be verified on your PC.'
+          $notes = 'TheKaiN Video 1.2.4 for Windows 10/11 x64. Fixed nonfunctional keyboard shortcuts: pre-class Tk bindtag dispatch, Russian and English keyboard layouts via Windows VK keycodes, re-bindings on light/dark theme switch; Ctrl+V, Shift+Insert, Ctrl+L, Ctrl+Enter and Alt+Enter. Keeps video download and cancellation fixes from 1.2.3. 33 Python unit tests; keyboard shortcut GUI smoke test on packaged EXE; local MP4 integration; installer install/launch/uninstall checks. Unsigned beta.'
           gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
           if ($LASTEXITCODE -eq 0) {
             gh release upload $tag $installer $portable --clobber --repo $env:GITHUB_REPOSITORY
             gh release edit $tag --notes $notes --repo $env:GITHUB_REPOSITORY
           } else {
-            gh release create $tag $installer $portable --repo $env:GITHUB_REPOSITORY --title 'TheKaiN Video 1.2.3 — Download and cancel fixes' --notes $notes --prerelease
+            gh release create $tag $installer $portable --repo $env:GITHUB_REPOSITORY --title 'TheKaiN Video 1.2.4 — Reliable keyboard shortcuts' --notes $notes --prerelease
           }
