@@ -51,8 +51,12 @@ jobs:
           import hashlib
           from pathlib import Path
           patch = Path('windows-v125/finish-download.patch')
-          digest = hashlib.sha256(patch.read_bytes()).hexdigest()
+          # Git on Windows checks text files out with CRLF. Normalize the
+          # transport-only newline differences before verifying and applying.
+          content = patch.read_bytes().replace(b'\r\n', b'\n').rstrip(b'\n') + b'\n'
+          digest = hashlib.sha256(content).hexdigest()
           assert digest == '9fb705d5f9cd949e6b3b686bbe6c05963bca560895881d874a49ca051ee16ef8', digest
+          patch.write_bytes(content)
           assert 'APP_VERSION = "1.2.4"' in Path('windows/app.py').read_text(encoding='utf-8')
           '@ | python -
           if ($LASTEXITCODE -ne 0) { throw 'Completion patch checksum mismatch' }
