@@ -6,6 +6,7 @@ on:
     paths:
       - 'windows/**'
       - 'windows-v12/**'
+      - 'windows-v123/**'
       - 'windows-hotfix-121/**'
       - 'windows-optimizations/**'
       - '.github/workflows/build-windows.yml'
@@ -26,133 +27,22 @@ jobs:
         with:
           python-version: '3.12'
           architecture: 'x64'
-      - name: Restore verified Windows source via Python
+      - name: Restore verified Windows 1.2.3 source
         shell: pwsh
         run: |
           @'
           import base64, hashlib, io, tarfile
           from pathlib import Path
-          content = base64.b64decode(Path('windows-v12/source.tar.xz.base64').read_text(encoding='ascii').strip())
-          actual = hashlib.sha256(content).hexdigest()
-          assert actual == '5e938a8c90fb8422970822d566b4ab398b082373b13193b37ea1d59383b607ec', actual
-          with tarfile.open(fileobj=io.BytesIO(content), mode='r:xz') as tar:
+          archive = base64.b64decode(Path('windows-v123/source.tar.xz.base64').read_text(encoding='ascii').strip())
+          digest = hashlib.sha256(archive).hexdigest()
+          assert digest == '3bd5847631ae1cba22e42cddd151d912f213114f682a8879f69c23462f55cf01', digest
+          with tarfile.open(fileobj=io.BytesIO(archive), mode='r:xz') as tar:
               tar.extractall(path='.', filter='data')
-          assert Path('windows/app.py').is_file()
-          assert 'APP_VERSION = "1.2.0"' in Path('windows/app.py').read_text(encoding='utf-8')
-          print('TheKaiN Windows 1.2 archive extracted and verified')
+          assert 'APP_VERSION = "1.2.3"' in Path('windows/app.py').read_text(encoding='utf-8')
+          assert Path('windows/tests/integration_download.py').is_file()
+          print('Verified complete 1.2.3 source archive', digest)
           '@ | python -
-          if ($LASTEXITCODE -ne 0) { throw 'Verified source extraction failed' }
-      - name: Apply verified 1.2.1 installation and download path hotfix
-        shell: pwsh
-        run: |
-          @'
-          import base64, gzip, hashlib
-          from pathlib import Path
-          source = Path("windows-hotfix-121/install-path-fix.patch.gz.base64")
-          content = gzip.decompress(base64.b64decode(source.read_text(encoding="ascii").strip()))
-          digest = hashlib.sha256(content).hexdigest()
-          expected = "41912f451cfb61de12108999e13245b9a4622784ecf278273b76ccddf4988d6e"
-          assert digest == expected, f"Hotfix checksum mismatch: {digest}"
-          Path("install-path-fix.patch").write_bytes(content)
-          print("Verified installer hotfix", digest)
-          '@ | python -
-          if ($LASTEXITCODE -ne 0) { throw "Hotfix decode failed" }
-          git apply --check install-path-fix.patch
-          if ($LASTEXITCODE -ne 0) { throw "Hotfix cannot be applied" }
-          git apply install-path-fix.patch
-          if ($LASTEXITCODE -ne 0) { throw "Hotfix apply failed" }
-          if (-not (Select-String -Path windows/installer.iss -Pattern 'PrivilegesRequiredOverridesAllowed=dialog' -Quiet)) {
-            throw "Installer elevation chooser missing"
-          }
-      - name: Apply 1.2.2 clipboard, preview and updater fixes
-        shell: pwsh
-        run: |
-          @'
-          from pathlib import Path
-          p=Path("windows/app.py")
-          s=p.read_text(encoding="utf-8")
-          s=s.replace('APP_VERSION = "1.2.0"', 'APP_VERSION = "1.2.2"').replace('APP_VERSION = "1.2.1"', 'APP_VERSION = "1.2.2"')
-          s=s.replace('        self.bind_all("<Control-V>", self._on_ctrl_v)', '        self.bind_all("<Control-V>", self._on_ctrl_v)\n        self.url_input._entry.bind("<Control-v>", self._on_ctrl_v)\n        self.url_input._entry.bind("<Control-V>", self._on_ctrl_v)\n        self.url_input._entry.bind("<<Paste>>", self._on_ctrl_v)')
-          s=s.replace('        preview.pack(fill="x", pady=(0, 14))', '        self.preview_card = preview\n        preview.pack_forget()')
-          s=s.replace('        action.pack(fill="x", pady=(0, 14))', '        action.pack(fill="x", pady=(0, 14))\n        self.action_card = action')
-          s=s.replace('        self.thumbnail_toggle = ctk.CTkCheckBox(ob, text="Сохранять обложку рядом с видео",\n                               variable=ctk.BooleanVar(value=self.write_thumbnail), command=self._update_options,\n                               text_color=self.c("text"), fg_color=ACCENT, hover_color=ACCENT_HOVER)\n        self.thumbnail_toggle.pack(anchor="w", pady=(0, 7))', '        self.write_thumbnail = False')
-          s=s.replace('        self.write_thumbnail = bool(self.thumbnail_toggle.get())', '        self.write_thumbnail = False')
-          s=s.replace('    def _invalidate_probe(self, *_):\n', '    def _invalidate_probe(self, *_):\n        self._toggle_preview()\n')
-          s=s.replace('        self._invalidate_metadata()\n        if not self.playlist:\n            self._set_choices', '        self._invalidate_metadata()\n        self._toggle_preview()\n        if not self.playlist:\n            self._set_choices')
-          start=s.index('    def _on_ctrl_v(self, event):')
-          end=s.index('    def _choose_folder(self):',start)
-          s=s[:start]+'''    def _on_ctrl_v(self, event=None):
-              focused = self.focus_get()
-              if focused is not None and focused is not self.url_input._entry:
-                  if focused.winfo_class() in ("Entry", "Text", "TEntry"):
-                      return None
-              self._paste()
-              return "break"
-
-          def _paste(self):
-              try:
-                  data = self.clipboard_get().strip()
-                  if not data:
-                      raise ValueError("Буфер пуст")
-                  self.tabs.set("Скачать")
-                  self.url_input.delete(0, "end")
-                  self.url_input.insert(0, data)
-                  self._invalidate_probe()
-                  self._toggle_preview()
-                  self.url_input.focus_set()
-              except Exception:
-                  messagebox.showinfo(APP_NAME, "Буфер обмена не содержит доступную ссылку")
-
-          def _toggle_preview(self):
-              if not hasattr(self, "preview_card"):
-                  return
-              visible = bool(self.url_input.get().strip())
-              if visible and not self.preview_card.winfo_manager():
-                  self.preview_card.pack(fill="x", pady=(0, 14), before=self.action_card)
-              elif not visible and self.preview_card.winfo_manager():
-                  self.preview_card.pack_forget()
-
-          def _update_ytdlp(self):
-              if getattr(self, "updating_ytdlp", False):
-                  return
-              self.updating_ytdlp = True
-              self.ytdlp_update_button.configure(state="disabled", text="Обновление…")
-              def run():
-                  try:
-                      executable = tools()["yt-dlp"]
-                      if executable is None:
-                          raise FileNotFoundError("yt-dlp.exe не найден")
-                      import shutil
-                      destination = data_dir() / "tools" / "yt-dlp.exe"
-                      destination.parent.mkdir(parents=True, exist_ok=True)
-                      if not destination.is_file():
-                          shutil.copy2(executable, destination)
-                      result = subprocess.run([str(destination), "--update-to", "stable"],
-                                              capture_output=True, text=True, timeout=180,
-                                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-                      if result.returncode:
-                          raise RuntimeError((result.stderr or result.stdout)[-900:])
-                      self.post("ytdlp_updated", (True, (result.stdout or "yt-dlp обновлён")[-500:]))
-                  except Exception as exc:
-                      self.post("ytdlp_updated", (False, str(exc)))
-              threading.Thread(target=run, daemon=True).start()
-
-          '''.replace('\n          def ', '\n    def ')+s[end:]
-          s=s.replace('        self._settings_ui(self.tabs.tab("Настройки"))', '        self._settings_ui(self.tabs.tab("Настройки"))\n        self.ytdlp_update_button = self.button(self.tabs.tab("Настройки"), "Обновить yt-dlp", self._update_ytdlp, width=175)\n        self.ytdlp_update_button.pack(anchor="w", padx=25, pady=(4, 12))')
-          s=s.replace('        self._show_preview()\n\n    def _download_ui', '        self._show_preview()\n        self._toggle_preview()\n\n    def _download_ui')
-          s=s.replace('            elif event == "metadata_error":', '            elif event == "ytdlp_updated":\n                self.updating_ytdlp = False\n                self.ytdlp_update_button.configure(state="normal", text="Обновить yt-dlp")\n                ok, message = value\n                self._refresh_tools_state()\n                (messagebox.showinfo if ok else messagebox.showerror)(APP_NAME, message)\n            elif event == "metadata_error":')
-          p.write_text(s,encoding="utf-8")
-          p=Path("windows/worker.py")
-          s=p.read_text(encoding="utf-8")
-          s=s.replace('        bundled = base / "tools" / name', '        override = Path(os.getenv("APPDATA") or Path.home()) / "TheKaiN Video" / "tools" / name\n        bundled = base / "tools" / name')
-          s=s.replace('        result[key] = bundled if bundled.is_file() else (Path(found) if found else None)', '        result[key] = override if key == "yt-dlp" and override.is_file() else (bundled if bundled.is_file() else (Path(found) if found else None))')
-          p.write_text(s,encoding="utf-8")
-          p=Path("windows/installer.iss")
-          s=p.read_text(encoding="utf-8").replace('1.2.0','1.2.2').replace('1.2.1','1.2.2')
-          p.write_text(s,encoding="utf-8")
-          assert 'APP_VERSION = "1.2.2"' in Path("windows/app.py").read_text(encoding="utf-8")
-          '@ | python -
-          if ($LASTEXITCODE -ne 0) { throw 'Windows 1.2.2 patch failed' }
+          if ($LASTEXITCODE -ne 0) { throw 'Source verification failed' }
       - name: Install build dependencies
         shell: pwsh
         run: |
@@ -212,6 +102,11 @@ jobs:
           Expand-Archive -Path $denozip -DestinationPath $denoextract -Force
           Copy-Item "$denoextract/deno.exe" "$out/deno.exe"
           & "$out/deno.exe" --version | Select-Object -First 1
+      - name: Real media download with bundled yt-dlp (localhost integration)
+        shell: pwsh
+        run: |
+          python windows/tests/integration_download.py
+          if ($LASTEXITCODE -ne 0) { throw 'Actual media download regression failed' }
       - name: Desktop smoke test
         shell: pwsh
         run: |
@@ -299,7 +194,7 @@ jobs:
           $tag = 'v1.2.1-windows-test'
           $installer = 'release/TheKaiN-Video-Setup-x64.exe'
           $portable = 'release/TheKaiN-Video-Windows-x64-portable.zip'
-          $notes = 'TheKaiN Video 1.2.1 Windows hotfix. Installer always displays custom installation folder. Users may choose per-user install without admin, or all-users install with elevation (for Program Files). Warnings for protected system paths in per-user mode. Download directory selection now tests write access before saving settings. Tests include spaces and Cyrillic paths, install/run/uninstall. Other 1.2 functionality unchanged. Unsigned beta build.'
+          $notes = 'TheKaiN Video 1.2.3 for Windows 10/11 x64. Critical download fix: --no-simulate, --progress, --ignore-config, actual final media file validation. Cancel removes queue entry and card immediately, terminates subprocess, ignores stale events. 29+ unit tests, bundled yt-dlp and FFmpeg real localhost MP4 download integration, Windows GUI smoke, installer install/self-test/uninstall. Unsigned beta; compatibility with individual sites must be verified on your PC.'
           gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
           if ($LASTEXITCODE -eq 0) {
             gh release upload $tag $installer $portable --clobber --repo $env:GITHUB_REPOSITORY
