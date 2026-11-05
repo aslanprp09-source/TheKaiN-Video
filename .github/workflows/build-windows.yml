@@ -20,24 +20,27 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-      - name: Restore Windows 1.2 application source
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $payload = (Get-Content -Raw 'windows-v12/source.tar.xz.base64').Trim()
-          [IO.File]::WriteAllBytes('windows-v12-source.tar.xz', [Convert]::FromBase64String($payload))
-          $actual = (Get-FileHash 'windows-v12-source.tar.xz' -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($actual -ne '5e938a8c90fb8422970822d566b4ab398b082373b13193b37ea1d59383b607ec') { throw "Source integrity failure $actual" }
-          tar -xJf windows-v12-source.tar.xz
-          if ($LASTEXITCODE -ne 0) { throw 'Archive unpack failed' }
-          if (-not (Test-Path 'windows/worker.py')) { throw 'Worker module missing' }
-          if (-not (Test-Path 'windows/app.py')) { throw 'Desktop GUI missing' }
-          Select-String -Path 'windows/app.py' -Pattern 'APP_VERSION = "1.2.0"' -Quiet | Out-Null
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
           architecture: 'x64'
+      - name: Restore verified Windows source via Python
+        shell: pwsh
+        run: |
+          @'
+          import base64, hashlib, io, tarfile
+          from pathlib import Path
+          content = base64.b64decode(Path('windows-v12/source.tar.xz.base64').read_text(encoding='ascii').strip())
+          actual = hashlib.sha256(content).hexdigest()
+          assert actual == '5e938a8c90fb8422970822d566b4ab398b082373b13193b37ea1d59383b607ec', actual
+          with tarfile.open(fileobj=io.BytesIO(content), mode='r:xz') as tar:
+              tar.extractall(path='.', filter='data')
+          assert Path('windows/app.py').is_file()
+          assert 'APP_VERSION = "1.2.0"' in Path('windows/app.py').read_text(encoding='utf-8')
+          print('TheKaiN Windows 1.2 archive extracted and verified')
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw 'Verified source extraction failed' }
       - name: Install build dependencies
         shell: pwsh
         run: |
