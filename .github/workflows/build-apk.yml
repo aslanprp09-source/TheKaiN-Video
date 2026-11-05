@@ -23,6 +23,8 @@ jobs:
           cat ui-update-parts/part-*.txt | base64 --decode > thekain-video-1.1-update.tar.xz
           echo "3f96452272edc72b56cd38595eefb21e903cc847cc12d943512ac5cef54f8742  thekain-video-1.1-update.tar.xz" | sha256sum --check
           tar -xJf thekain-video-1.1-update.tar.xz
+          # Kotlin View has its own foreground property; resolve the Activity color explicitly.
+          sed -i 's/setTextColor(foreground)/setTextColor(this@MainActivity.foreground)/g' app/src/main/java/com/thekain/video/MainActivity.kt
           grep -q 'versionName = "1.1.0"' app/build.gradle.kts
           test -e app/build.gradle.kts
           test -e app/src/main/AndroidManifest.xml
