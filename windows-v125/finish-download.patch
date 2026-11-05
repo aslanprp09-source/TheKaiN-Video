@@ -1,0 +1,333 @@
+diff --git a/windows/worker.py b/windows/worker.py
+index 25614da..7fc6bd8 100644
+--- a/windows/worker.py
++++ b/windows/worker.py
+@@ -74,6 +74,10 @@ class Job:
+ class DownloadWorker:
+     """Thread-safe sequential worker: no stale queue item may start a process."""
+ 
++    # A confirmed after_move marker means the final media file is already on disk.
++    # Do not keep a finished single-video job active because a child handle hangs.
++    completion_grace_seconds = 4.0
++
+     def __init__(self, notify: Callable[[str, int], None], start_thread: bool = True):
+         self.notify = notify
+         self.work: queue.Queue[tuple[int, int]] = queue.Queue()
+@@ -239,15 +243,24 @@ class DownloadWorker:
+                 job.progress = progress.percent
+             job.speed, job.eta = progress.speed, progress.eta
+             job.downloaded, job.total_bytes_label = progress.downloaded, progress.total
+-            job.phase = "Загрузка данных"
++            if progress.percent is not None and progress.percent >= 100 and not job.playlist:
++                job.phase = "Получено 100% · обработка и сохранение файла…"
++                job.speed, job.eta = "", ""
++            else:
++                job.phase = "Загрузка данных"
+             return True
+         if "TKDONE|" in line:
+             path = line.split("TKDONE|", 1)[1].strip()
+             if path:
+                 job.saved_files.append(Path(path))
+             job.completed += 1
+-            job.phase = f"Сохранено файлов: {job.completed}"
++            job.phase = f"Сохранено файлов: {job.completed} · завершение процесса…"
+             job.progress = 0.0 if job.playlist else 100.0
++            job.speed, job.eta = "", ""
++            return True
++        if "TKPLAYLISTEND|" in line:
++            job.phase = "Плейлист обработан · завершаем процессы…"
++            job.speed, job.eta = "", ""
+             return True
+         if "TKITEM|" in line:
+             fields = line.split("TKITEM|", 1)[1].split("|", 2)
+@@ -280,7 +293,7 @@ class DownloadWorker:
+             except OSError:
+                 continue
+         if existing:
+-            return True, f"Сохранено файлов: {len(existing)}"
++            return True, f"Сохранено файлов: {len(set(existing))}"
+         if job.playlist and job.completed == 0:
+             return False, "Новые видео не сохранены. Возможно, они уже находятся в архиве загрузок или недоступны."
+         return False, ("yt-dlp завершился без сохранённого видео. "
+@@ -292,6 +305,14 @@ class DownloadWorker:
+         if ytdlp is None:
+             raise FileNotFoundError("Не найден yt-dlp.exe в папке tools")
+         job.folder.mkdir(parents=True, exist_ok=True)
++        # Retries must validate files produced in this attempt, not paths left
++        # in memory by a previous (possibly failed) attempt.
++        job.saved_files.clear()
++        job.completed = 0
++        job.progress = 0.0
++        job.speed = job.eta = ""
++        job.downloaded = job.total_bytes_label = ""
++        job.current_index = ""
+         command = download_arguments(ytdlp, job.url, job.choice, job.folder, job.playlist,
+                                      paths["ffmpeg"].parent if paths["ffmpeg"] else None,
+                                      paths["deno"], write_thumbnail=job.write_thumbnail,
+@@ -311,10 +332,19 @@ class DownloadWorker:
+         was_warned = False
+         exitcode: int | None = None
+         timeout_error: str | None = None
++        final_file_at: float | None = None
++        force_finalize = False
+         try:
+             while True:
+                 if job.stop_reason:
+                     break
++                # yt-dlp may keep a pipe/child process alive after its final
++                # after_move marker. That marker, PLUS an existing nonempty
++                # file, is the only safe reason to bound the trailing wait.
++                if (final_file_at is not None and
++                        time.monotonic() - final_file_at >= self.completion_grace_seconds):
++                    force_finalize = proc.poll() is None
++                    break
+                 try:
+                     line = output.get(timeout=0.5)
+                 except queue.Empty:
+@@ -342,6 +372,10 @@ class DownloadWorker:
+                 was_warned = False
+                 with self.lock:
+                     changed = self._apply_line(job, line)
++                    terminal_marker = (("TKDONE|" in line and not job.playlist) or
++                                       ("TKPLAYLISTEND|" in line and job.playlist))
++                    if terminal_marker and self._verify_saved_files(job)[0]:
++                        final_file_at = now
+                     job.updated_at = now
+                     send = changed and (now - job.last_notification >= 0.3 or
+                                         "TKDONE|" in line or "TKITEM|" in line)
+@@ -349,11 +383,16 @@ class DownloadWorker:
+                         job.last_notification = now
+                 if send:
+                     self.notify("progress", job.identifier)
+-            if timeout_error is None and not job.stop_reason:
++            if timeout_error is None and not job.stop_reason and not force_finalize:
+                 try:
+-                    exitcode = proc.wait(timeout=12)
++                    exitcode = proc.wait(timeout=self.completion_grace_seconds if final_file_at else 12)
+                 except subprocess.TimeoutExpired:
+-                    timeout_error = "Процесс загрузки не завершился вовремя."
++                    # The file may be complete even if yt-dlp does not return
++                    # from its process teardown (e.g. a stuck child handle).
++                    if final_file_at is not None and self._verify_saved_files(job)[0]:
++                        force_finalize = True
++                    else:
++                        timeout_error = "Процесс загрузки не завершился вовремя."
+         finally:
+             if proc.poll() is None:
+                 self._stop_process_tree(proc)
+@@ -372,10 +411,13 @@ class DownloadWorker:
+                 elif timeout_error is not None:
+                     job.status, job.phase = "Ошибка", "Источник не отвечает"
+                     job.last_error = timeout_error
+-                elif exitcode == 0:
++                elif exitcode == 0 or force_finalize:
+                     valid, message = self._verify_saved_files(job)
+                     if valid:
+                         job.status, job.phase, job.progress = "Готово", message, 100.0
++                        job.speed, job.eta = "", ""
++                        if force_finalize:
++                            job.phase += " · зависший процесс остановлен"
+                     else:
+                         job.status, job.phase = "Ошибка", "Видео не сохранено"
+                         job.last_error = message + ("\n" + "\n".join(job.log_tail[-5:]) if job.log_tail else "")
+diff --git a/windows/app.py b/windows/app.py
+index ed44dcf..6f50dec 100644
+--- a/windows/app.py
++++ b/windows/app.py
+@@ -23,7 +23,7 @@ from core import (Choice, choices_for_playlist, choices_for_video, compact_size,
+ from worker import DownloadWorker, Job, popen_options, tools
+ 
+ APP_NAME = "TheKaiN Video"
+-APP_VERSION = "1.2.4"
++APP_VERSION = "1.2.5"
+ ACCENT = "#E9283F"
+ ACCENT_HOVER = "#C91E34"
+ GREEN = "#15AA78"
+@@ -755,9 +755,9 @@ class TheKaiNApp(ctk.CTk):
+         bits = []
+         if job.downloaded:
+             bits.append(job.downloaded + (f" / {job.total_bytes_label}" if job.total_bytes_label else ""))
+-        if job.speed:
++        if job.speed and active:
+             bits.append("Скорость: " + job.speed)
+-        if job.eta:
++        if job.eta and active:
+             bits.append("Осталось: " + job.eta)
+         if elapsed and active:
+             bits.append(f"В работе: {elapsed // 60:02d}:{elapsed % 60:02d}")
+diff --git a/windows/core.py b/windows/core.py
+index 150988a..89207cb 100644
+--- a/windows/core.py
++++ b/windows/core.py
+@@ -244,6 +244,7 @@ def download_arguments(executable: Path, url: str, choice: Choice, directory: Pa
+                 raise ValueError("Диапазон плейлиста: например 1:10 или 1,3,5")
+             args += ["--playlist-items", playlist_items]
+         args += ["--yes-playlist", "--ignore-errors", "--download-archive", str(archive_path(directory, url)),
++                 "--print", "playlist:TKPLAYLISTEND|%(playlist_count)s",
+                  "--print", "before_dl:TKITEM|%(playlist_index)s|%(playlist_count)s|%(title)s",
+                  "--output", "%(playlist_index)s - %(title).150B [%(id)s].%(ext)s"]
+     else:
+diff --git a/windows/installer.iss b/windows/installer.iss
+index 6c30819..8174cad 100644
+--- a/windows/installer.iss
++++ b/windows/installer.iss
+@@ -1,6 +1,6 @@
+ ; TheKaiN Video for Windows 10/11 x64. Per-user install, no elevation needed.
+ #define MyAppName "TheKaiN Video"
+-#define MyAppVersion "1.2.4"
++#define MyAppVersion "1.2.5"
+ #define MyAppExeName "TheKaiN-Video.exe"
+ 
+ [Setup]
+@@ -31,7 +31,7 @@ UsePreviousAppDir=yes
+ DirExistsWarning=auto
+ CloseApplications=yes
+ RestartApplications=no
+-VersionInfoVersion=1.2.4.0
++VersionInfoVersion=1.2.5.0
+ 
+ [Languages]
+ Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
+diff --git a/windows/tests/test_install_paths.py b/windows/tests/test_install_paths.py
+index a8ef049..e9b9cc4 100644
+--- a/windows/tests/test_install_paths.py
++++ b/windows/tests/test_install_paths.py
+@@ -25,5 +25,5 @@ def test_windows_installer_offers_user_and_admin_modes():
+     for line in ("PrivilegesRequired=lowest", "PrivilegesRequiredOverridesAllowed=dialog",
+                  "UsePreviousPrivileges=no", "DefaultDirName={autopf}\\TheKaiN Video",
+                  "DisableDirPage=no", "AlwaysShowDirOnReadyPage=yes",
+-                 "VersionInfoVersion=1.2.4.0", "function NextButtonClick("):
++                 "VersionInfoVersion=1.2.5.0", "function NextButtonClick("):
+         assert line in iss
+diff --git a/windows/tests/test_completion_125.py b/windows/tests/test_completion_125.py
+new file mode 100644
+index 0000000..80cfbea
+--- /dev/null
++++ b/windows/tests/test_completion_125.py
+@@ -0,0 +1,126 @@
++"""Regression tests for 100% progress, postprocessing and stuck process teardown."""
++from __future__ import annotations
++
++import io
++from pathlib import Path
++import subprocess
++import sys
++sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
++
++import worker as engine
++from core import Choice
++from worker import DownloadWorker, Job
++
++
++def make_job(tmp_path, playlist=False):
++    return Job(1001, "https://example.org/test", "clip", Choice("Auto", "best"), tmp_path, playlist)
++
++
++def test_100_percent_is_not_completion_before_file_is_finalized(tmp_path):
++    dw = DownloadWorker(lambda *x: None, start_thread=False)
++    j = make_job(tmp_path)
++    assert dw._apply_line(j, "TKPROGRESS| 100.0%|20MiB|20MiB|3MiB/s|00:00")
++    assert j.progress == 100 and j.status != "Готово"
++    assert "обработка и сохранение" in j.phase
++    assert not j.speed and not j.eta
++
++
++def test_after_move_clears_speed_eta_and_deduplicates_path(tmp_path):
++    dw = DownloadWorker(lambda *x: None, start_thread=False)
++    j = make_job(tmp_path)
++    final = tmp_path / "sample.mp4"
++    final.write_bytes(b"video")
++    dw._apply_line(j, "TKPROGRESS|99%|1MiB|1MiB|1MiB/s|00:01")
++    dw._apply_line(j, f"TKDONE|{final}")
++    dw._apply_line(j, f"TKDONE|{final}")
++    assert (j.speed, j.eta) == ("", "")
++    assert dw._verify_saved_files(j) == (True, "Сохранено файлов: 1")
++
++
++def test_hung_process_after_confirmed_file_becomes_finished(tmp_path, monkeypatch):
++    media = tmp_path / "Ролик.mp4"
++    media.write_bytes(b"mock media with nonzero byte length")
++    class HangingProcess:
++        def __init__(self):
++            self.stdout = io.StringIO("TKPROGRESS| 100.0%|3MiB|3MiB|3MiB/s|00:00\n"+f"TKDONE|{media}\n")
++            self.running = True
++            self.wait_called = 0
++        def poll(self):
++            return None if self.running else 1
++        def wait(self, timeout=None):
++            self.wait_called += 1
++            if self.running:
++                raise subprocess.TimeoutExpired("yt-dlp", timeout)
++            return 1
++        def kill(self):
++            self.running = False
++    process = HangingProcess()
++    monkeypatch.setattr(engine, "tools", lambda: {"yt-dlp":Path("yt-dlp.exe"), "ffmpeg":None, "deno":None})
++    monkeypatch.setattr(engine.subprocess, "Popen", lambda *args, **kwargs: process)
++    monkeypatch.setattr(engine.DownloadWorker, "_stop_process_tree", staticmethod(lambda p: p.kill()))
++    dw = DownloadWorker(lambda *x: None, start_thread=False)
++    dw.completion_grace_seconds = 0.01
++    j = make_job(tmp_path)
++    dw.enqueue(j)
++    dw._run(j)
++    assert j.status == "Готово", (j.status, j.last_error, j.log_tail)
++    assert j.progress == 100
++    assert "зависший процесс остановлен" in j.phase
++    assert process.running is False
++    assert (j.speed, j.eta) == ("", "")
++
++
++def test_hang_without_final_file_does_not_fake_success(tmp_path, monkeypatch):
++    class HangingProcess:
++        def __init__(self):
++            self.stdout = io.StringIO("TKPROGRESS| 100.0%|3MiB|3MiB|2MiB/s|00:00\n")
++            self.running = True
++        def poll(self):
++            return None if self.running else -1
++        def wait(self, timeout=None):
++            if self.running:
++                raise subprocess.TimeoutExpired("yt-dlp", timeout)
++            return -1
++        def kill(self):
++            self.running = False
++    process = HangingProcess()
++    monkeypatch.setattr(engine, "tools", lambda: {"yt-dlp":Path("yt-dlp.exe"), "ffmpeg":None, "deno":None})
++    monkeypatch.setattr(engine.subprocess, "Popen", lambda *args, **kwargs: process)
++    monkeypatch.setattr(engine.DownloadWorker, "_stop_process_tree", staticmethod(lambda p: p.kill()))
++    dw = DownloadWorker(lambda *x: None, start_thread=False)
++    dw.completion_grace_seconds = 0.01
++    j = make_job(tmp_path)
++    dw.enqueue(j)
++    dw._run(j)
++    assert j.status == "Ошибка"
++    assert j.progress == 100  # Received 100%, but not a confirmed completed media file.
++
++
++def test_stale_saved_files_from_previous_run_not_accepted(tmp_path, monkeypatch):
++    old = tmp_path / "old.mp4"
++    old.write_bytes(b"old")
++    class CompletedWithoutFile:
++        def __init__(self):self.stdout = io.StringIO("[download] 100%\n")
++        def poll(self):return 0
++        def wait(self, timeout=None):return 0
++    monkeypatch.setattr(engine, "tools", lambda: {"yt-dlp":Path("yt-dlp.exe"), "ffmpeg":None, "deno":None})
++    monkeypatch.setattr(engine.subprocess, "Popen", lambda *args, **kwargs: CompletedWithoutFile())
++    dw = DownloadWorker(lambda *x: None, start_thread=False)
++    j = make_job(tmp_path)
++    j.saved_files.append(old)
++    dw.enqueue(j)
++    dw._run(j)
++    assert j.status == "Ошибка" and not j.saved_files
++
++
++def test_playlist_terminal_marker_is_separate_from_each_video(tmp_path):
++    from core import download_arguments
++    dw = DownloadWorker(lambda *x: None, start_thread=False)
++    j = make_job(tmp_path, playlist=True)
++    dw._apply_line(j, "TKITEM|1|2|First")
++    dw._apply_line(j, "TKDONE|first.mp4")
++    assert j.progress == 0.0 and "Сохранено" in j.phase
++    dw._apply_line(j, "TKPLAYLISTEND|2")
++    assert "Плейлист обработан" in j.phase
++    args = download_arguments(Path("yt-dlp.exe"), j.url, j.choice, tmp_path, True)
++    assert "playlist:TKPLAYLISTEND|%(playlist_count)s" in args
