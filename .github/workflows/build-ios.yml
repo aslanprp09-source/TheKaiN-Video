@@ -1,0 +1,63 @@
+name: Build iOS unsigned IPA
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'branding/**'
+      - 'iOS/**'
+      - '.github/workflows/build-ios.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  ios:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Xcode and icon renderer
+        run: |
+          xcodebuild -version
+          brew install xcodegen librsvg
+      - name: Generate selected K icon for iOS
+        run: |
+          mkdir -p iOS/TheKaiNVideo/Assets.xcassets/AppIcon.appiconset
+          mkdir -p iOS/TheKaiNVideo/Assets.xcassets/IconPreview.imageset
+          rsvg-convert --width 1024 --height 1024 branding/thekain-icon.svg > iOS/TheKaiNVideo/Assets.xcassets/AppIcon.appiconset/AppIcon.png
+          rsvg-convert --width 256 --height 256 branding/thekain-icon.svg > iOS/TheKaiNVideo/Assets.xcassets/IconPreview.imageset/IconPreview.png
+      - name: Generate Xcode project
+        run: |
+          cd iOS
+          xcodegen generate
+          xcodebuild -list -project TheKaiNVideo.xcodeproj
+      - name: Build iPhone device application (no Apple signature)
+        run: |
+          set -eo pipefail
+          cd iOS
+          xcodebuild -project TheKaiNVideo.xcodeproj -scheme TheKaiNVideo -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath "$GITHUB_WORKSPACE/iosbuild" CODE_SIGNING_ALLOWED=NO build
+          test -f "$GITHUB_WORKSPACE/iosbuild/Build/Products/Release-iphoneos/TheKaiNVideo.app/Info.plist"
+      - name: Package unsigned IPA
+        run: |
+          mkdir -p ios-ipa/Payload
+          cp -R iosbuild/Build/Products/Release-iphoneos/TheKaiNVideo.app ios-ipa/Payload/
+          cd ios-ipa
+          zip -qry TheKaiNVideo-unsigned.ipa Payload
+          unzip -t TheKaiNVideo-unsigned.ipa >/dev/null
+          ls -lh TheKaiNVideo-unsigned.ipa
+      - name: Upload unsigned IPA and project
+        uses: actions/upload-artifact@v4
+        with:
+          name: TheKaiN-Video-iOS-unsigned
+          path: ios-ipa/TheKaiNVideo-unsigned.ipa
+          if-no-files-found: error
+      - name: Publish unsigned IPA with signing warning
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          notes="UNSIGNED technical IPA for testing build output only. Cannot be installed on a normal iPhone until it is signed using a valid Apple certificate and provisioning profile. iOS 18+ including iOS 26.6.2. Native SwiftUI supports direct HTTP videos and text/m3u playlists; no YouTube/VK webpage extraction, HLS or DRM bypass."
+          if gh release view v0.1-ios-unsigned --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload v0.1-ios-unsigned ios-ipa/TheKaiNVideo-unsigned.ipa --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create v0.1-ios-unsigned ios-ipa/TheKaiNVideo-unsigned.ipa --repo "$GITHUB_REPOSITORY" --title "TheKaiN Video iOS 0.1 · unsigned IPA" --notes "$notes" --prerelease
+          fi

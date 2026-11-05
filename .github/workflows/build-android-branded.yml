@@ -1,0 +1,77 @@
+name: Build Android branded APK
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'branding/**'
+      - '.github/workflows/build-android-branded.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  android:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore verified Android sources
+        run: |
+          cat source-parts/part-*.txt | base64 --decode > base.tar.xz
+          echo "c796870f5bbe1b8769396bb2f6322027116b53663668ea54b1f0a679ae0a2ff0  base.tar.xz" | sha256sum --check
+          tar -xJf base.tar.xz
+          cat ui-update-parts/part-*.txt | base64 --decode > ui.tar.xz
+          echo "3f96452272edc72b56cd38595eefb21e903cc847cc12d943512ac5cef54f8742  ui.tar.xz" | sha256sum --check
+          tar -xJf ui.tar.xz
+          sed -i 's/setTextColor(foreground)/setTextColor(this@MainActivity.foreground)/g' app/src/main/java/com/thekain/video/MainActivity.kt
+          sed -i 's/versionCode = 4/versionCode = 5/g;s/versionName = "1.1.0"/versionName = "1.2.0"/g' app/build.gradle.kts
+      - name: Create selected launcher icon
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq librsvg2-bin
+          mkdir -p app/src/main/res/drawable-nodpi app/src/main/res/drawable app/src/main/res/mipmap-anydpi-v26
+          rsvg-convert -w 512 -h 512 branding/thekain-icon.svg > app/src/main/res/drawable-nodpi/ic_brand.png
+          cat > app/src/main/res/drawable/ic_brand_safe.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <inset xmlns:android="http://schemas.android.com/apk/res/android" android:drawable="@drawable/ic_brand" android:insetLeft="16dp" android:insetRight="16dp" android:insetTop="16dp" android:insetBottom="16dp"/>
+          EOF
+          cat > app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android"><background android:drawable="@android:color/white"/><foreground android:drawable="@drawable/ic_brand_safe"/></adaptive-icon>
+          EOF
+          sed -i 's|@drawable/ic_thekain_video|@mipmap/ic_launcher|g' app/src/main/AndroidManifest.xml
+          grep -q 'versionName = "1.2.0"' app/build.gradle.kts
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install Android 35
+        run: |
+          SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager -print -quit)"
+          "$SDKMANAGER" 'platforms;android-35' 'build-tools;35.0.0'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Compile and test
+        run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug
+      - name: Verify generated APK
+        run: |
+          test -s app/build/outputs/apk/debug/app-debug.apk
+          unzip -t app/build/outputs/apk/debug/app-debug.apk > /dev/null
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging app/build/outputs/apk/debug/app-debug.apk | tee badging.txt
+          grep -q "versionName='1.2.0'" badging.txt
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: TheKaiN-Video-1.2-branded-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+      - name: Publish branded test APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          notes="TheKaiN Video Android 1.2.0 test APK. Selected K icon, original 1.1 download interface and engine. Device testing pending. This is a debug-signed build, so installing over an earlier debug APK may require uninstalling it."
+          if gh release view v1.2.0-test --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload v1.2.0-test app/build/outputs/apk/debug/app-debug.apk --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create v1.2.0-test app/build/outputs/apk/debug/app-debug.apk --repo "$GITHUB_REPOSITORY" --title "TheKaiN Video 1.2.0 — new K icon" --notes "$notes" --prerelease
+          fi
