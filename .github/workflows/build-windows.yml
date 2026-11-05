@@ -1,0 +1,123 @@
+name: Build Windows TheKaiN Video
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'windows/**'
+      - '.github/workflows/build-windows.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows-x64:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Restore and verify Windows desktop source
+        shell: pwsh
+        run: |
+          $payload = (Get-Content -Raw 'windows-source/source.tar.xz.base64').Trim()
+          [IO.File]::WriteAllBytes('source.tar.xz', [Convert]::FromBase64String($payload))
+          $actual = (Get-FileHash 'source.tar.xz' -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne '47804125b1b2dafba800e1d216d898cdebd0d52585ba76173798b06d598fc40e') { throw "Source integrity failure: $actual" }
+          tar -xJf source.tar.xz
+          if (-not (Test-Path 'windows/app.py')) { throw 'Missing windows/app.py' }
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: 'x64'
+      - name: Install build dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r windows/requirements-build.txt
+      - name: Verify Windows source and tests
+        shell: pwsh
+        run: |
+          python -m compileall -q windows
+          python -m pytest -q windows/tests
+      - name: Generate Windows application icon
+        shell: pwsh
+        run: python windows/build_icon.py
+      - name: Bundle application with PyInstaller
+        shell: pwsh
+        run: |
+          python -m PyInstaller --noconfirm --clean --windowed --onedir --name TheKaiN-Video --paths windows --icon windows/assets/TheKaiN.ico --add-data 'windows/assets;assets' --collect-data customtkinter windows/app.py
+          if (-not (Test-Path 'dist/TheKaiN-Video/TheKaiN-Video.exe')) { throw 'Executable missing' }
+      - name: Include yt-dlp, FFmpeg and Deno
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ProgressPreference = 'SilentlyContinue'
+          $out = Join-Path $PWD 'dist/TheKaiN-Video/tools'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          Invoke-WebRequest 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe' -OutFile "$out/yt-dlp.exe"
+          & "$out/yt-dlp.exe" --version
+
+          $ffzip = Join-Path $env:RUNNER_TEMP 'ffmpeg.zip'
+          try {
+            Invoke-WebRequest 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip' -OutFile $ffzip
+          } catch {
+            Write-Host 'Primary FFmpeg mirror unavailable, using GitHub mirror'
+            Invoke-WebRequest 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip' -OutFile $ffzip
+          }
+          $ffextract = Join-Path $env:RUNNER_TEMP 'thekain-ffmpeg'
+          New-Item -ItemType Directory -Force -Path $ffextract | Out-Null
+          Expand-Archive -Path $ffzip -DestinationPath $ffextract -Force
+          $ff = Get-ChildItem $ffextract -Filter ffmpeg.exe -File -Recurse | Select-Object -First 1
+          $fp = Get-ChildItem $ffextract -Filter ffprobe.exe -File -Recurse | Select-Object -First 1
+          if (!$ff -or !$fp) { throw 'FFmpeg or ffprobe missing in upstream archive' }
+          Copy-Item $ff.FullName "$out/ffmpeg.exe"
+          Copy-Item $fp.FullName "$out/ffprobe.exe"
+          & "$out/ffmpeg.exe" -version | Select-Object -First 1
+
+          $denozip = Join-Path $env:RUNNER_TEMP 'deno.zip'
+          Invoke-WebRequest 'https://github.com/denoland/deno/releases/latest/download/deno-x86_64-pc-windows-msvc.zip' -OutFile $denozip
+          $denoextract = Join-Path $env:RUNNER_TEMP 'thekain-deno'
+          New-Item -ItemType Directory -Force -Path $denoextract | Out-Null
+          Expand-Archive -Path $denozip -DestinationPath $denoextract -Force
+          Copy-Item "$denoextract/deno.exe" "$out/deno.exe"
+          & "$out/deno.exe" --version | Select-Object -First 1
+      - name: Desktop smoke test
+        shell: pwsh
+        run: |
+          & 'dist/TheKaiN-Video/TheKaiN-Video.exe' --self-test
+          if ($LASTEXITCODE -ne 0) { throw "Desktop smoke test failed ($LASTEXITCODE)" }
+      - name: Prepare portable release ZIP
+        shell: pwsh
+        run: |
+          Copy-Item 'windows/README_RU.md' 'dist/TheKaiN-Video/README_RU.md'
+          Copy-Item 'windows/THIRD_PARTY_NOTICES.txt' 'dist/TheKaiN-Video/THIRD_PARTY_NOTICES.txt'
+          New-Item -ItemType Directory -Path release -Force | Out-Null
+          Compress-Archive -Path 'dist/TheKaiN-Video' -DestinationPath 'release/TheKaiN-Video-Windows-x64-portable.zip' -CompressionLevel Optimal
+          $zip = Get-Item 'release/TheKaiN-Video-Windows-x64-portable.zip'
+          if ($zip.Length -lt 10000000) { throw 'Portable ZIP is unexpectedly small' }
+          Write-Host "Portable ZIP size: $($zip.Length) bytes"
+      - name: Upload Windows ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: TheKaiN-Video-Windows-x64-portable
+          path: release/TheKaiN-Video-Windows-x64-portable.zip
+          if-no-files-found: error
+      - name: Publish Windows pre-release
+        if: github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = 'v1.0.0-windows-test'
+          $file = 'release/TheKaiN-Video-Windows-x64-portable.zip'
+          $notes = 'TheKaiN Video desktop for Windows 10/11 x64. Unzip all files, then launch TheKaiN-Video.exe. Includes yt-dlp, FFmpeg and Deno. Downloading from sites varies by support and DRM restrictions. Unsigned test build; not yet tested on a physical Windows PC.'
+          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $file --clobber --repo $env:GITHUB_REPOSITORY
+            gh release edit $tag --notes $notes --repo $env:GITHUB_REPOSITORY
+          } else {
+            gh release create $tag $file --repo $env:GITHUB_REPOSITORY --title 'TheKaiN Video 1.0.0 — Windows portable' --notes $notes --prerelease
+          }
