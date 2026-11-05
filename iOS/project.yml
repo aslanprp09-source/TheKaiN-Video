@@ -1,0 +1,30 @@
+name: TheKaiNVideo
+options:
+  bundleIdPrefix: com.thekain
+settings:
+  base:
+    SWIFT_VERSION: '5.0'
+    IPHONEOS_DEPLOYMENT_TARGET: '18.0'
+    TARGETED_DEVICE_FAMILY: '1,2'
+    ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+targets:
+  TheKaiNVideo:
+    type: application
+    platform: iOS
+    deploymentTarget: '18.0'
+    sources:
+      - path: TheKaiNVideo
+    info:
+      path: TheKaiNVideo/Info.plist
+      properties:
+        CFBundleDisplayName: TheKaiN Video
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+        UILaunchScreen: {}
+        ITSAppUsesNonExemptEncryption: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.thekain.video.ios
+        PRODUCT_NAME: TheKaiNVideo
+        CODE_SIGN_STYLE: Manual
+        SWIFT_STRICT_CONCURRENCY: minimal
