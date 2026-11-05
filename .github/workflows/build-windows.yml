@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'windows/**'
+      - 'windows-optimizations/**'
       - '.github/workflows/build-windows.yml'
   workflow_dispatch:
 
@@ -26,6 +27,17 @@ jobs:
           $actual = (Get-FileHash 'source.tar.xz' -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($actual -ne '47804125b1b2dafba800e1d216d898cdebd0d52585ba76173798b06d598fc40e') { throw "Source integrity failure: $actual" }
           tar -xJf source.tar.xz
+          # Validated source overlay: worker refactor, tests, installer, and unified diff.
+          $extra = (Get-Content 'windows-optimizations/part-*.txt' | Out-String).Trim() -replace '\s',''
+          [IO.File]::WriteAllBytes('windows-optimized.tar.xz', [Convert]::FromBase64String($extra))
+          $patchHash = (Get-FileHash 'windows-optimized.tar.xz' -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($patchHash -ne 'f6830626815175553058c1a5e3cd73ceb37a6ed14433215cd7132bd79033f48e') { throw "Optimized patch checksum mismatch: $patchHash" }
+          tar -xJf windows-optimized.tar.xz
+          git apply --check windows-update.patch
+          if ($LASTEXITCODE -ne 0) { throw 'Optimized source patch does not apply' }
+          git apply windows-update.patch
+          if ($LASTEXITCODE -ne 0) { throw 'Optimized source patch failed' }
+          if (-not (Test-Path 'windows/worker.py')) { throw 'Optimized worker was not restored' }
           if (-not (Test-Path 'windows/app.py')) { throw 'Missing windows/app.py' }
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -42,6 +54,9 @@ jobs:
         run: |
           python -m compileall -q windows
           python -m pytest -q windows/tests
+          if ($LASTEXITCODE -ne 0) { throw 'Python unit tests failed' }
+          $tests = (python -m pytest --collect-only -q windows/tests | Select-String 'tests collected')
+          Write-Host "Test discovery: $tests"
       - name: Generate selected Windows application icon
         shell: pwsh
         run: |
@@ -103,25 +118,70 @@ jobs:
           $zip = Get-Item 'release/TheKaiN-Video-Windows-x64-portable.zip'
           if ($zip.Length -lt 10000000) { throw 'Portable ZIP is unexpectedly small' }
           Write-Host "Portable ZIP size: $($zip.Length) bytes"
+      - name: Install Inno Setup compiler
+        shell: pwsh
+        run: |
+          choco install innosetup --yes --no-progress --limit-output
+          if ($LASTEXITCODE -ne 0) { throw 'Inno Setup installation failed' }
+          $compiler = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6/ISCC.exe'
+          if (-not (Test-Path $compiler)) { throw 'ISCC.exe was not installed' }
+      - name: Compile Windows EXE installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $compiler = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6/ISCC.exe'
+          & $compiler '/Qp' 'windows/installer.iss'
+          if ($LASTEXITCODE -ne 0) { throw "ISCC compilation failed with code $LASTEXITCODE" }
+          $setup = 'release/TheKaiN-Video-Setup-x64.exe'
+          if (-not (Test-Path $setup)) { throw 'Setup EXE not found' }
+          if ((Get-Item $setup).Length -lt 5000000) { throw 'Setup EXE size is implausibly small' }
+          Get-FileHash $setup -Algorithm SHA256 | Format-List
+      - name: Verify installation, launch and uninstall
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $setup = (Resolve-Path 'release/TheKaiN-Video-Setup-x64.exe').Path
+          $install = Join-Path $env:RUNNER_TEMP 'TheKaiN-SMOKE'
+          $p = Start-Process -FilePath $setup -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',"/DIR=$install") -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Installer returned $($p.ExitCode)" }
+          $app = Join-Path $install 'TheKaiN-Video.exe'
+          if (-not (Test-Path $app)) { throw 'Installed app missing' }
+          foreach ($tool in @('yt-dlp.exe','ffmpeg.exe','ffprobe.exe','deno.exe')) {
+            if (-not (Test-Path (Join-Path $install "tools/$tool"))) { throw "Installer missing tool: $tool" }
+          }
+          $test = Start-Process -FilePath $app -ArgumentList '--self-test' -Wait -PassThru
+          if ($test.ExitCode -ne 0) { throw "Installed app self-test failed $($test.ExitCode)" }
+          $uninstaller = Join-Path $install 'unins000.exe'
+          if (-not (Test-Path $uninstaller)) { throw 'Uninstaller missing' }
+          $un = Start-Process -FilePath $uninstaller -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART') -Wait -PassThru
+          if ($un.ExitCode -ne 0) { throw "Uninstaller returned $($un.ExitCode)" }
+          Write-Host 'Windows installer install/launch/uninstall checks passed'
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: TheKaiN-Video-Windows-x64-installer
+          path: release/TheKaiN-Video-Setup-x64.exe
+          if-no-files-found: error
       - name: Upload Windows ZIP
         uses: actions/upload-artifact@v4
         with:
           name: TheKaiN-Video-Windows-x64-portable
           path: release/TheKaiN-Video-Windows-x64-portable.zip
           if-no-files-found: error
-      - name: Publish Windows pre-release
+      - name: Publish optimized Windows installer and portable ZIP
         if: github.ref == 'refs/heads/main'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = 'v1.0.0-windows-test'
-          $file = 'release/TheKaiN-Video-Windows-x64-portable.zip'
-          $notes = 'TheKaiN Video desktop for Windows 10/11 x64. Unzip all files, then launch TheKaiN-Video.exe. Includes yt-dlp, FFmpeg and Deno. Downloading from sites varies by support and DRM restrictions. Unsigned test build; not yet tested on a physical Windows PC.'
+          $tag = 'v1.1.0-windows-test'
+          $installer = 'release/TheKaiN-Video-Setup-x64.exe'
+          $portable = 'release/TheKaiN-Video-Windows-x64-portable.zip'
+          $notes = 'TheKaiN Video 1.1 for Windows 10/11 x64. Improved queue and pause/resume safety, refreshed URL format handling, 12 Python tests, Windows EXE smoke test, installer install/self-test/uninstall verification. Includes yt-dlp, FFmpeg and Deno. Unsigned test build; not yet tested on a physical Windows PC. The installer installs per-user without requesting administrator rights. The portable ZIP remains available.'
           gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
           if ($LASTEXITCODE -eq 0) {
-            gh release upload $tag $file --clobber --repo $env:GITHUB_REPOSITORY
+            gh release upload $tag $installer $portable --clobber --repo $env:GITHUB_REPOSITORY
             gh release edit $tag --notes $notes --repo $env:GITHUB_REPOSITORY
           } else {
-            gh release create $tag $file --repo $env:GITHUB_REPOSITORY --title 'TheKaiN Video 1.0.0 — Windows portable' --notes $notes --prerelease
+            gh release create $tag $installer $portable --repo $env:GITHUB_REPOSITORY --title 'TheKaiN Video 1.1.0 — Windows installer' --notes $notes --prerelease
           }
