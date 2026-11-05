@@ -1,0 +1,49 @@
+name: Publish TheKaiN Video 1.1 test APK
+
+on:
+  workflow_run:
+    workflows: ["Build Android APK"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  release:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download successful build output
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+          if [ -n "$RUN_ID" ]; then
+            run_id="$RUN_ID"
+          else
+            run_id="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow build-apk.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId')"
+          fi
+          test "$(gh run view "$run_id" --repo "$GITHUB_REPOSITORY" --json conclusion --jq .conclusion)" = success
+          mkdir -p release
+          gh run download "$run_id" --repo "$GITHUB_REPOSITORY" --name TheKaiN-Video-debug-apk --dir release
+          test -s release/app-debug.apk
+          unzip -t release/app-debug.apk >/dev/null
+      - name: Publish APK release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view v1.1.0-test --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release already exists; not replacing it"
+            exit 0
+          fi
+          gh release create v1.1.0-test release/app-debug.apk \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "TheKaiN Video 1.1.0 — redesigned Android test APK" \
+            --notes "Test build for Android 10+. Updated dark interface, clear-link button, pause/resume and playlist mode. yt-dlp resumability depends on the source; some streams cannot be resumed. APK is a debug build, not device-tested. Existing v1.0.2 remains available." \
+            --prerelease
