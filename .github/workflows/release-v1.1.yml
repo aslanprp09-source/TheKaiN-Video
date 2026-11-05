@@ -32,18 +32,23 @@ jobs:
           gh run download "$run_id" --repo "$GITHUB_REPOSITORY" --name TheKaiN-Video-debug-apk --dir release
           test -s release/app-debug.apk
           unzip -t release/app-debug.apk >/dev/null
+          aapt_bin="$(find "$ANDROID_HOME/build-tools" -type f -name aapt -print -quit)"
+          test -n "$aapt_bin"
+          "$aapt_bin" dump badging release/app-debug.apk | tee release/badging.txt
+          grep -q "versionName='1.1.0'" release/badging.txt
       - name: Publish APK release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          notes="TheKaiN Video 1.1.0 · tested compile Android 10+. YouTube-inspired dark UI, format picker, one-tap clear, playlist mode, pause/resume. Resume is best-effort, depends on site. Debug build; phone testing pending. A different debug signing key may require uninstalling the previous APK."
           if gh release view v1.1.0-test --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Release already exists; not replacing it"
-            exit 0
+            gh release upload v1.1.0-test release/app-debug.apk --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit v1.1.0-test --notes "$notes" --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create v1.1.0-test release/app-debug.apk \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "TheKaiN Video 1.1.0 — redesigned Android test APK" \
+              --notes "$notes" --prerelease
           fi
-          gh release create v1.1.0-test release/app-debug.apk \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "TheKaiN Video 1.1.0 — redesigned Android test APK" \
-            --notes "Test build for Android 10+. Updated dark interface, clear-link button, pause/resume and playlist mode. yt-dlp resumability depends on the source; some streams cannot be resumed. APK is a debug build, not device-tested. Existing v1.0.2 remains available." \
-            --prerelease
