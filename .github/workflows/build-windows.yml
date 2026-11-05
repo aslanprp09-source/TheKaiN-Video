@@ -191,7 +191,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = 'v1.2.1-windows-test'
+          $tag = 'v1.2.3-windows-test'
           $installer = 'release/TheKaiN-Video-Setup-x64.exe'
           $portable = 'release/TheKaiN-Video-Windows-x64-portable.zip'
           $notes = 'TheKaiN Video 1.2.3 for Windows 10/11 x64. Critical download fix: --no-simulate, --progress, --ignore-config, actual final media file validation. Cancel removes queue entry and card immediately, terminates subprocess, ignores stale events. 29+ unit tests, bundled yt-dlp and FFmpeg real localhost MP4 download integration, Windows GUI smoke, installer install/self-test/uninstall. Unsigned beta; compatibility with individual sites must be verified on your PC.'
@@ -200,5 +200,5 @@ jobs:
             gh release upload $tag $installer $portable --clobber --repo $env:GITHUB_REPOSITORY
             gh release edit $tag --notes $notes --repo $env:GITHUB_REPOSITORY
           } else {
-            gh release create $tag $installer $portable --repo $env:GITHUB_REPOSITORY --title 'TheKaiN Video 1.2.1 — Windows path hotfix' --notes $notes --prerelease
+            gh release create $tag $installer $portable --repo $env:GITHUB_REPOSITORY --title 'TheKaiN Video 1.2.3 — Download and cancel fixes' --notes $notes --prerelease
           }
