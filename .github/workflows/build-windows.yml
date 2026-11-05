@@ -6,6 +6,7 @@ on:
     paths:
       - 'windows/**'
       - 'windows-v12/**'
+      - 'windows-hotfix-121/**'
       - 'windows-optimizations/**'
       - '.github/workflows/build-windows.yml'
   workflow_dispatch:
@@ -41,6 +42,28 @@ jobs:
           print('TheKaiN Windows 1.2 archive extracted and verified')
           '@ | python -
           if ($LASTEXITCODE -ne 0) { throw 'Verified source extraction failed' }
+      - name: Apply verified 1.2.1 installation and download path hotfix
+        shell: pwsh
+        run: |
+          @'
+          import base64, gzip, hashlib
+          from pathlib import Path
+          source = Path("windows-hotfix-121/install-path-fix.patch.gz.base64")
+          content = gzip.decompress(base64.b64decode(source.read_text(encoding="ascii").strip()))
+          digest = hashlib.sha256(content).hexdigest()
+          expected = "41912f451cfb61de12108999e13245b9a4622784ecf278273b76ccddf4988d6e"
+          assert digest == expected, f"Hotfix checksum mismatch: {digest}"
+          Path("install-path-fix.patch").write_bytes(content)
+          print("Verified installer hotfix", digest)
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw "Hotfix decode failed" }
+          git apply --check install-path-fix.patch
+          if ($LASTEXITCODE -ne 0) { throw "Hotfix cannot be applied" }
+          git apply install-path-fix.patch
+          if ($LASTEXITCODE -ne 0) { throw "Hotfix apply failed" }
+          if (-not (Select-String -Path windows/installer.iss -Pattern 'PrivilegesRequiredOverridesAllowed=dialog' -Quiet)) {
+            throw "Installer elevation chooser missing"
+          }
       - name: Install build dependencies
         shell: pwsh
         run: |
@@ -143,21 +166,29 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $setup = (Resolve-Path 'release/TheKaiN-Video-Setup-x64.exe').Path
-          $install = Join-Path $env:RUNNER_TEMP 'TheKaiN-SMOKE'
-          $p = Start-Process -FilePath $setup -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',"/DIR=$install") -Wait -PassThru
-          if ($p.ExitCode -ne 0) { throw "Installer returned $($p.ExitCode)" }
-          $app = Join-Path $install 'TheKaiN-Video.exe'
-          if (-not (Test-Path $app)) { throw 'Installed app missing' }
-          foreach ($tool in @('yt-dlp.exe','ffmpeg.exe','ffprobe.exe','deno.exe')) {
-            if (-not (Test-Path (Join-Path $install "tools/$tool"))) { throw "Installer missing tool: $tool" }
+          $targets = @(
+            (Join-Path $env:RUNNER_TEMP 'TheKaiN Path With Spaces'),
+            (Join-Path $env:RUNNER_TEMP 'TheKaiN Папка с пробелами')
+          )
+          foreach ($install in $targets) {
+            Write-Host "Testing custom installation folder: $install"
+            $quotedPath = '/DIR="' + $install + '"'
+            $arguments = '/CURRENTUSER /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- ' + $quotedPath
+            $p = Start-Process -FilePath $setup -ArgumentList $arguments -Wait -PassThru
+            if ($p.ExitCode -ne 0) { throw "Installer returned $($p.ExitCode) in $install" }
+            $app = Join-Path $install 'TheKaiN-Video.exe'
+            if (-not (Test-Path $app)) { throw "Installed app missing: $app" }
+            foreach ($tool in @('yt-dlp.exe','ffmpeg.exe','ffprobe.exe','deno.exe')) {
+              if (-not (Test-Path (Join-Path $install "tools/$tool"))) { throw "Installer missing tool: $tool" }
+            }
+            $test = Start-Process -FilePath $app -ArgumentList '--self-test' -Wait -PassThru
+            if ($test.ExitCode -ne 0) { throw "Installed app self-test failed $($test.ExitCode)" }
+            $uninstaller = Join-Path $install 'unins000.exe'
+            if (-not (Test-Path $uninstaller)) { throw "Uninstaller missing: $install" }
+            $un = Start-Process -FilePath $uninstaller -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART' -Wait -PassThru
+            if ($un.ExitCode -ne 0) { throw "Uninstaller returned $($un.ExitCode)" }
           }
-          $test = Start-Process -FilePath $app -ArgumentList '--self-test' -Wait -PassThru
-          if ($test.ExitCode -ne 0) { throw "Installed app self-test failed $($test.ExitCode)" }
-          $uninstaller = Join-Path $install 'unins000.exe'
-          if (-not (Test-Path $uninstaller)) { throw 'Uninstaller missing' }
-          $un = Start-Process -FilePath $uninstaller -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART') -Wait -PassThru
-          if ($un.ExitCode -ne 0) { throw "Uninstaller returned $($un.ExitCode)" }
-          Write-Host 'Windows installer install/launch/uninstall checks passed'
+          Write-Host 'Custom paths with spaces / Cyrillic: install, launch, uninstall passed'
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:
@@ -176,14 +207,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = 'v1.2.0-windows-test'
+          $tag = 'v1.2.1-windows-test'
           $installer = 'release/TheKaiN-Video-Setup-x64.exe'
           $portable = 'release/TheKaiN-Video-Windows-x64-portable.zip'
-          $notes = 'TheKaiN Video 1.2 for Windows 10/11 x64. Dark/light themes, Ctrl+V and Ctrl+Enter shortcuts, thumbnail preview, download button under URL, progress phases and timeout diagnostics, file size estimates, MP3, playlist selection, optional subtitles and thumbnails. 20+ Python unit tests, Windows GUI smoke (both themes), installer install/run/uninstall checks. Bundled yt-dlp, FFmpeg and Deno. Unsigned beta build; media-service testing on your PC is still required.'
+          $notes = 'TheKaiN Video 1.2.1 Windows hotfix. Installer always displays custom installation folder. Users may choose per-user install without admin, or all-users install with elevation (for Program Files). Warnings for protected system paths in per-user mode. Download directory selection now tests write access before saving settings. Tests include spaces and Cyrillic paths, install/run/uninstall. Other 1.2 functionality unchanged. Unsigned beta build.'
           gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
           if ($LASTEXITCODE -eq 0) {
             gh release upload $tag $installer $portable --clobber --repo $env:GITHUB_REPOSITORY
             gh release edit $tag --notes $notes --repo $env:GITHUB_REPOSITORY
           } else {
-            gh release create $tag $installer $portable --repo $env:GITHUB_REPOSITORY --title 'TheKaiN Video 1.2.0 — Windows installer' --notes $notes --prerelease
+            gh release create $tag $installer $portable --repo $env:GITHUB_REPOSITORY --title 'TheKaiN Video 1.2.1 — Windows path hotfix' --notes $notes --prerelease
           }
