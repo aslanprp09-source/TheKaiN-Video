@@ -87,8 +87,8 @@ jobs:
       - name: Desktop smoke test
         shell: pwsh
         run: |
-          & 'dist/TheKaiN-Video/TheKaiN-Video.exe' --self-test
-          if ($LASTEXITCODE -ne 0) { throw "Desktop smoke test failed ($LASTEXITCODE)" }
+          $p = Start-Process -FilePath (Resolve-Path 'dist/TheKaiN-Video/TheKaiN-Video.exe') -ArgumentList '--self-test' -PassThru -Wait
+          if ($p.ExitCode -ne 0) { throw "Desktop smoke test failed ($($p.ExitCode))" }
       - name: Prepare portable release ZIP
         shell: pwsh
         run: |
