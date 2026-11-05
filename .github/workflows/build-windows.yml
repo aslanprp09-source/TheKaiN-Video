@@ -89,7 +89,7 @@ jobs:
               self._paste()
               return "break"
 
-    def _paste(self):
+          def _paste(self):
               try:
                   data = self.clipboard_get().strip()
                   if not data:
@@ -103,7 +103,7 @@ jobs:
               except Exception:
                   messagebox.showinfo(APP_NAME, "Буфер обмена не содержит доступную ссылку")
 
-    def _toggle_preview(self):
+          def _toggle_preview(self):
               if not hasattr(self, "preview_card"):
                   return
               visible = bool(self.url_input.get().strip())
@@ -112,7 +112,7 @@ jobs:
               elif not visible and self.preview_card.winfo_manager():
                   self.preview_card.pack_forget()
 
-    def _update_ytdlp(self):
+          def _update_ytdlp(self):
               if getattr(self, "updating_ytdlp", False):
                   return
               self.updating_ytdlp = True
@@ -137,7 +137,7 @@ jobs:
                       self.post("ytdlp_updated", (False, str(exc)))
               threading.Thread(target=run, daemon=True).start()
 
-          '''+s[end:]
+          '''.replace('\n          def ', '\n    def ')+s[end:]
           s=s.replace('        self._settings_ui(self.tabs.tab("Настройки"))', '        self._settings_ui(self.tabs.tab("Настройки"))\n        self.ytdlp_update_button = self.button(self.tabs.tab("Настройки"), "Обновить yt-dlp", self._update_ytdlp, width=175)\n        self.ytdlp_update_button.pack(anchor="w", padx=25, pady=(4, 12))')
           s=s.replace('        self._show_preview()\n\n    def _download_ui', '        self._show_preview()\n        self._toggle_preview()\n\n    def _download_ui')
           s=s.replace('            elif event == "metadata_error":', '            elif event == "ytdlp_updated":\n                self.updating_ytdlp = False\n                self.ytdlp_update_button.configure(state="normal", text="Обновить yt-dlp")\n                ok, message = value\n                self._refresh_tools_state()\n                (messagebox.showinfo if ok else messagebox.showerror)(APP_NAME, message)\n            elif event == "metadata_error":')
