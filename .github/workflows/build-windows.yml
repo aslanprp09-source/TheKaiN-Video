@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'windows/**'
+      - 'windows-v12/**'
       - 'windows-optimizations/**'
       - '.github/workflows/build-windows.yml'
   workflow_dispatch:
@@ -19,26 +20,19 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-      - name: Restore and verify Windows desktop source
+      - name: Restore Windows 1.2 application source
         shell: pwsh
         run: |
-          $payload = (Get-Content -Raw 'windows-source/source.tar.xz.base64').Trim()
-          [IO.File]::WriteAllBytes('source.tar.xz', [Convert]::FromBase64String($payload))
-          $actual = (Get-FileHash 'source.tar.xz' -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($actual -ne '47804125b1b2dafba800e1d216d898cdebd0d52585ba76173798b06d598fc40e') { throw "Source integrity failure: $actual" }
-          tar -xJf source.tar.xz
-          # Validated source overlay: worker refactor, tests, installer, and unified diff.
-          $extra = (Get-Content 'windows-optimizations/part-*.txt' | Out-String).Trim() -replace '\s',''
-          [IO.File]::WriteAllBytes('windows-optimized.tar.xz', [Convert]::FromBase64String($extra))
-          $patchHash = (Get-FileHash 'windows-optimized.tar.xz' -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($patchHash -ne 'f6830626815175553058c1a5e3cd73ceb37a6ed14433215cd7132bd79033f48e') { throw "Optimized patch checksum mismatch: $patchHash" }
-          tar -xJf windows-optimized.tar.xz
-          git apply --check windows-update.patch
-          if ($LASTEXITCODE -ne 0) { throw 'Optimized source patch does not apply' }
-          git apply windows-update.patch
-          if ($LASTEXITCODE -ne 0) { throw 'Optimized source patch failed' }
-          if (-not (Test-Path 'windows/worker.py')) { throw 'Optimized worker was not restored' }
-          if (-not (Test-Path 'windows/app.py')) { throw 'Missing windows/app.py' }
+          $ErrorActionPreference = 'Stop'
+          $payload = (Get-Content -Raw 'windows-v12/source.tar.xz.base64').Trim()
+          [IO.File]::WriteAllBytes('windows-v12-source.tar.xz', [Convert]::FromBase64String($payload))
+          $actual = (Get-FileHash 'windows-v12-source.tar.xz' -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne '5e938a8c90fb8422970822d566b4ab398b082373b13193b37ea1d59383b607ec') { throw "Source integrity failure $actual" }
+          tar -xJf windows-v12-source.tar.xz
+          if ($LASTEXITCODE -ne 0) { throw 'Archive unpack failed' }
+          if (-not (Test-Path 'windows/worker.py')) { throw 'Worker module missing' }
+          if (-not (Test-Path 'windows/app.py')) { throw 'Desktop GUI missing' }
+          Select-String -Path 'windows/app.py' -Pattern 'APP_VERSION = "1.2.0"' -Quiet | Out-Null
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
@@ -108,6 +102,11 @@ jobs:
         run: |
           $p = Start-Process -FilePath (Resolve-Path 'dist/TheKaiN-Video/TheKaiN-Video.exe') -ArgumentList '--self-test' -PassThru -Wait
           if ($p.ExitCode -ne 0) { throw "Desktop smoke test failed ($($p.ExitCode))" }
+      - name: Windows GUI smoke test with theme switching
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath (Resolve-Path 'dist/TheKaiN-Video/TheKaiN-Video.exe') -ArgumentList '--ui-smoke' -PassThru -Wait
+          if ($p.ExitCode -ne 0) { throw "Desktop GUI test failed ($($p.ExitCode))" }
       - name: Prepare portable release ZIP
         shell: pwsh
         run: |
@@ -174,14 +173,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = 'v1.1.0-windows-test'
+          $tag = 'v1.2.0-windows-test'
           $installer = 'release/TheKaiN-Video-Setup-x64.exe'
           $portable = 'release/TheKaiN-Video-Windows-x64-portable.zip'
-          $notes = 'TheKaiN Video 1.1 for Windows 10/11 x64. Improved queue and pause/resume safety, refreshed URL format handling, 12 Python tests, Windows EXE smoke test, installer install/self-test/uninstall verification. Includes yt-dlp, FFmpeg and Deno. Unsigned test build; not yet tested on a physical Windows PC. The installer installs per-user without requesting administrator rights. The portable ZIP remains available.'
+          $notes = 'TheKaiN Video 1.2 for Windows 10/11 x64. Dark/light themes, Ctrl+V and Ctrl+Enter shortcuts, thumbnail preview, download button under URL, progress phases and timeout diagnostics, file size estimates, MP3, playlist selection, optional subtitles and thumbnails. 20+ Python unit tests, Windows GUI smoke (both themes), installer install/run/uninstall checks. Bundled yt-dlp, FFmpeg and Deno. Unsigned beta build; media-service testing on your PC is still required.'
           gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
           if ($LASTEXITCODE -eq 0) {
             gh release upload $tag $installer $portable --clobber --repo $env:GITHUB_REPOSITORY
             gh release edit $tag --notes $notes --repo $env:GITHUB_REPOSITORY
           } else {
-            gh release create $tag $installer $portable --repo $env:GITHUB_REPOSITORY --title 'TheKaiN Video 1.1.0 — Windows installer' --notes $notes --prerelease
+            gh release create $tag $installer $portable --repo $env:GITHUB_REPOSITORY --title 'TheKaiN Video 1.2.0 — Windows installer' --notes $notes --prerelease
           }
