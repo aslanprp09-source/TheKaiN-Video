@@ -89,7 +89,7 @@ jobs:
               self._paste()
               return "break"
 
-          def _paste(self):
+    def _paste(self):
               try:
                   data = self.clipboard_get().strip()
                   if not data:
@@ -103,7 +103,7 @@ jobs:
               except Exception:
                   messagebox.showinfo(APP_NAME, "Буфер обмена не содержит доступную ссылку")
 
-          def _toggle_preview(self):
+    def _toggle_preview(self):
               if not hasattr(self, "preview_card"):
                   return
               visible = bool(self.url_input.get().strip())
@@ -112,7 +112,7 @@ jobs:
               elif not visible and self.preview_card.winfo_manager():
                   self.preview_card.pack_forget()
 
-          def _update_ytdlp(self):
+    def _update_ytdlp(self):
               if getattr(self, "updating_ytdlp", False):
                   return
               self.updating_ytdlp = True
