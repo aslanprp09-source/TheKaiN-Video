@@ -10,6 +10,7 @@ on:
       - 'windows-v125/**'
       - 'windows-v130/**'
       - 'windows-v140/**'
+      - 'windows-v141/**'
       - 'windows-hotfix-121/**'
       - 'windows-optimizations/**'
       - '.github/workflows/build-windows.yml'
@@ -49,6 +50,22 @@ jobs:
           print('Verified complete Windows 1.4.0 source archive:', digest)
           '@ | python -
           if ($LASTEXITCODE -ne 0) { throw 'Windows 1.4 source verification failed' }
+      - name: Apply verified 1.4.1 download completion fix
+        shell: pwsh
+        run: |
+          @'
+          import base64, hashlib, io, tarfile
+          from pathlib import Path
+          payload = base64.b64decode(Path("windows-v141/hotfix.tar.xz.base64").read_text(encoding="ascii").strip())
+          digest = hashlib.sha256(payload).hexdigest()
+          assert digest == "b084664502b72c18cf51537d13ecbcc9882ecb2b154f401d7620e8456a4b0a50", digest
+          with tarfile.open(fileobj=io.BytesIO(payload), mode="r:xz") as tar:
+              tar.extractall(path=".", filter="data")
+          assert 'APP_VERSION = "1.4.1"' in Path("windows/app.py").read_text(encoding="utf-8")
+          assert Path("windows/tests/test_finish_141.py").is_file()
+          print("Windows 1.4.1 completion fixes applied:", digest)
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw 'Completion fix source verification failed' }
       - name: Install build dependencies
         shell: pwsh
         run: |
@@ -134,6 +151,11 @@ jobs:
         run: |
           python windows/tests/integration_recovery.py
           if ($LASTEXITCODE -ne 0) { throw 'FFmpeg recovery integration failed' }
+      - name: End-to-end verification of hanging finalization with real FFprobe
+        shell: pwsh
+        run: |
+          python windows/tests/integration_finish.py
+          if ($LASTEXITCODE -ne 0) { throw 'Windows finalization regression test failed' }
       - name: Desktop smoke test
         shell: pwsh
         run: |
@@ -223,14 +245,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = 'v1.4.0-windows-test'
+          $tag = 'v1.4.1-windows-test'
           $installer = 'release/TheKaiN-Video-Setup-x64.exe'
           $portable = 'release/TheKaiN-Video-Windows-x64-portable.zip'
-          $notes = 'TheKaiN Video 1.4.0 x64: intelligent and maximum-speed presets, parallel DASH/HLS fragments up to 16, bundled official aria2c multi-connection downloader for direct HTTP, native yt-dlp fallback, 1-4 simultaneous videos, FFmpeg recovery. 53+ unit tests, real offline video download, HTTP Range transfer checksum and multiple-range integration, GUI and keyboard smoke, installer custom-path install/uninstall. Unsinged beta; speed limited by source and connection.'
+          $notes = 'TheKaiN Video 1.4.1 x64: fixes downloads stuck at 100 percent or never completing after FFmpeg. Tracks actual output file activity rather than repeated console percentages, validates newly created video with bundled ffprobe, handles a lost after_move event or hung child process, and errors cleanly on a truly stalled process while retaining recovery streams. Preserves accelerated aria2c/yt-dlp, 1-4 simultaneous tasks, themes and shortcuts. 60 unit tests, real FFprobe stuck-process regression, media integration, GUI/keyboard smoke and installer path verification. Unsigned beta.'
           gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
           if ($LASTEXITCODE -eq 0) {
             gh release upload $tag $installer $portable --clobber --repo $env:GITHUB_REPOSITORY
             gh release edit $tag --notes $notes --repo $env:GITHUB_REPOSITORY
           } else {
-            gh release create $tag $installer $portable --repo $env:GITHUB_REPOSITORY --title 'TheKaiN Video 1.4.0 — Faster downloads with aria2c' --notes $notes --prerelease
+            gh release create $tag $installer $portable --repo $env:GITHUB_REPOSITORY --title 'TheKaiN Video 1.4.1 — Fix stalled completion and verify output' --notes $notes --prerelease
           }
