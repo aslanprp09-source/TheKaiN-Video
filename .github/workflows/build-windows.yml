@@ -11,6 +11,7 @@ on:
       - 'windows-v130/**'
       - 'windows-v140/**'
       - 'windows-v141/**'
+      - 'windows-v200/**'
       - 'windows-hotfix-121/**'
       - 'windows-optimizations/**'
       - '.github/workflows/build-windows.yml'
@@ -66,6 +67,23 @@ jobs:
           print("Windows 1.4.1 completion fixes applied:", digest)
           '@ | python -
           if ($LASTEXITCODE -ne 0) { throw 'Completion fix source verification failed' }
+      - name: Install the fully rewritten Windows 2.0 transfer engine
+        shell: pwsh
+        run: |
+          @'
+          import base64, hashlib, io, tarfile
+          from pathlib import Path
+          content = base64.b64decode(Path("windows-v200/engine-overlay.tar.xz.base64").read_text(encoding="ascii").strip())
+          digest = hashlib.sha256(content).hexdigest()
+          assert digest == "7a91af033002c54cdb253a659be37822f8d9963a69f91d9b7de512c780f8a9aa", digest
+          with tarfile.open(fileobj=io.BytesIO(content), mode="r:xz") as tar:
+              tar.extractall(path=".", filter="data")
+          assert 'APP_VERSION = "2.0.0"' in Path("windows/app.py").read_text(encoding="utf-8")
+          assert Path("windows/engine_v2.py").is_file()
+          assert Path("windows/tests_v2/test_transfer_engine.py").is_file()
+          print("Verified TheKaiN Windows 2.0 clean pipeline", digest)
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw 'Windows 2.0 pipeline source verification failed' }
       - name: Install build dependencies
         shell: pwsh
         run: |
@@ -75,9 +93,9 @@ jobs:
         shell: pwsh
         run: |
           python -m compileall -q windows
-          python -m pytest -q windows/tests
-          if ($LASTEXITCODE -ne 0) { throw 'Python unit tests failed' }
-          $tests = (python -m pytest --collect-only -q windows/tests | Select-String 'tests collected')
+          python -m pytest -q windows/tests/test_core.py windows/tests/test_shortcuts.py windows/tests/test_speed.py windows/tests/test_install_paths.py
+          if ($LASTEXITCODE -ne 0) { throw 'Compatibility unit tests failed' }
+          $tests = (python -m pytest --collect-only -q windows/tests/test_core.py windows/tests/test_shortcuts.py windows/tests/test_speed.py windows/tests/test_install_paths.py | Select-String 'tests collected')
           Write-Host "Test discovery: $tests"
       - name: Generate selected Windows application icon
         shell: pwsh
@@ -136,6 +154,12 @@ jobs:
           if (-not $ariaExe) { throw 'Official aria2c.exe not found' }
           Copy-Item $ariaExe.FullName "$out/aria2c.exe"
           & "$out/aria2c.exe" --version | Select-Object -First 1
+      - name: Verify new transfer engine with FFprobe and interruption regressions
+        shell: pwsh
+        run: |
+          $env:PATH = (Resolve-Path 'dist/TheKaiN-Video/tools').Path + ';' + $env:PATH
+          python -m pytest -q windows/tests_v2/test_transfer_engine.py
+          if ($LASTEXITCODE -ne 0) { throw 'Transfer v2 regressions failed' }
       - name: Verify fast HTTP Range transfer via yt-dlp and aria2c
         shell: pwsh
         run: |
@@ -151,11 +175,11 @@ jobs:
         run: |
           python windows/tests/integration_recovery.py
           if ($LASTEXITCODE -ne 0) { throw 'FFmpeg recovery integration failed' }
-      - name: End-to-end verification of hanging finalization with real FFprobe
+      - name: End-to-end yt-dlp download through new transfer engine
         shell: pwsh
         run: |
-          python windows/tests/integration_finish.py
-          if ($LASTEXITCODE -ne 0) { throw 'Windows finalization regression test failed' }
+          python windows/tests_v2/integration_http.py
+          if ($LASTEXITCODE -ne 0) { throw 'New engine failed local HTTP MP4 end-to-end integration' }
       - name: Desktop smoke test
         shell: pwsh
         run: |
@@ -175,6 +199,7 @@ jobs:
         shell: pwsh
         run: |
           Copy-Item 'windows/README_RU.md' 'dist/TheKaiN-Video/README_RU.md'
+          Copy-Item 'windows/ARCHITECTURE_2_0_RU.md' 'dist/TheKaiN-Video/ARCHITECTURE_2_0_RU.md'
           Copy-Item 'windows/THIRD_PARTY_NOTICES.txt' 'dist/TheKaiN-Video/THIRD_PARTY_NOTICES.txt'
           New-Item -ItemType Directory -Path release -Force | Out-Null
           Compress-Archive -Path 'dist/TheKaiN-Video' -DestinationPath 'release/TheKaiN-Video-Windows-x64-portable.zip' -CompressionLevel Optimal
@@ -245,14 +270,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = 'v1.4.1-windows-test'
+          $tag = 'v2.0.0-windows-test'
           $installer = 'release/TheKaiN-Video-Setup-x64.exe'
           $portable = 'release/TheKaiN-Video-Windows-x64-portable.zip'
-          $notes = 'TheKaiN Video 1.4.1 x64: fixes downloads stuck at 100 percent or never completing after FFmpeg. Tracks actual output file activity rather than repeated console percentages, validates newly created video with bundled ffprobe, handles a lost after_move event or hung child process, and errors cleanly on a truly stalled process while retaining recovery streams. Preserves accelerated aria2c/yt-dlp, 1-4 simultaneous tasks, themes and shortcuts. 60 unit tests, real FFprobe stuck-process regression, media integration, GUI/keyboard smoke and installer path verification. Unsigned beta.'
+          $notes = 'TheKaiN Video 2.0.0 Windows: fully rewritten download orchestration. Per-job isolated stage, FFprobe validation, atomic publish, resumable private workspaces, idempotent published journal, safe pause/cancel, queue 1-4 and diagnostic logs. 100 percent never means completed. yt-dlp remains replaceable engine for sites, with FFmpeg, Deno, optional aria2. Research of yt-dlp, Stacher, JDownloader, Seal, YTDLnis in included architecture report. Regression, media integration, GUI, installer verification. Unsigned beta.'
           gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
           if ($LASTEXITCODE -eq 0) {
             gh release upload $tag $installer $portable --clobber --repo $env:GITHUB_REPOSITORY
             gh release edit $tag --notes $notes --repo $env:GITHUB_REPOSITORY
           } else {
-            gh release create $tag $installer $portable --repo $env:GITHUB_REPOSITORY --title 'TheKaiN Video 1.4.1 — Fix stalled completion and verify output' --notes $notes --prerelease
+            gh release create $tag $installer $portable --repo $env:GITHUB_REPOSITORY --title 'TheKaiN Video 2.0.0 — Rewritten download engine' --notes $notes --prerelease
           }
