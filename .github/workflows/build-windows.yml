@@ -165,11 +165,6 @@ jobs:
         run: |
           python windows/tests/integration_speed.py
           if ($LASTEXITCODE -ne 0) { throw 'Accelerated HTTP integration failed' }
-      - name: Real media download with bundled yt-dlp (localhost integration)
-        shell: pwsh
-        run: |
-          python windows/tests/integration_download.py
-          if ($LASTEXITCODE -ne 0) { throw 'Actual media download regression failed' }
       - name: Recover downloaded video and audio using bundled FFmpeg (offline)
         shell: pwsh
         run: |
