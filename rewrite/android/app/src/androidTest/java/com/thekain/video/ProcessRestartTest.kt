@@ -25,7 +25,7 @@ import javax.net.ssl.HttpsURLConnection
 /** Host script separates phases with force-stop/relaunch, not a fake repository reset. */
 @RunWith(AndroidJUnit4::class)
 class ProcessRestartTest {
-    @Test fun seedFixture() = runBlocking {
+    @Test fun seedFixture() = runBlocking<Unit> {
         assumeTrue(InstrumentationRegistry.getArguments().getString("process_phase") == "seed")
         val app = ApplicationProvider.getApplicationContext<TheKaiNApp>()
         val graph = app.graph
@@ -51,7 +51,7 @@ class ProcessRestartTest {
         } finally { graph.connections = systemConnections; server.shutdown() }
     }
 
-    @Test fun verifyColdProcess() = runBlocking {
+    @Test fun verifyColdProcess() = runBlocking<Unit> {
         assumeTrue(InstrumentationRegistry.getArguments().getString("process_phase") == "verify")
         val app = ApplicationProvider.getApplicationContext<TheKaiNApp>()
         val graph = app.graph

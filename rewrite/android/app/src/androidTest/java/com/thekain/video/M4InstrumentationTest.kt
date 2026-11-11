@@ -57,7 +57,7 @@ class M4InstrumentationTest {
         publisher = MediaPublisher(context, verifier)
     }
 
-    @After fun cleanup() = runBlocking {
+    @After fun cleanup() = runBlocking<Unit> {
         repo.all().mapNotNull { it.outputUri }.forEach { value -> runCatching { context.contentResolver.delete(Uri.parse(value), null, null) } }
         outputs.forEach { runCatching { context.contentResolver.delete(it, null, null) } }
         db.close()
@@ -73,7 +73,7 @@ class M4InstrumentationTest {
         setHeader("Content-Type", "video/mp4")
     }
 
-    @Test fun directHttpsMp4IsVerifiedAndMediaStorePendingClearedBeforeCompleted() = runBlocking {
+    @Test fun directHttpsMp4IsVerifiedAndMediaStorePendingClearedBeforeCompleted() = runBlocking<Unit> {
         server.enqueue(response()) // Ignores Range: pause must remain unavailable.
         val task = create()
         val seen = mutableListOf<DownloadTask>()
@@ -94,7 +94,7 @@ class M4InstrumentationTest {
         assertFalse(permissions.any { it in setOf("android.permission.WRITE_EXTERNAL_STORAGE", "android.permission.MANAGE_EXTERNAL_STORAGE", "android.permission.READ_EXTERNAL_STORAGE", "android.permission.READ_MEDIA_VIDEO", "android.permission.READ_MEDIA_AUDIO") })
     }
 
-    @Test fun unknownSizeStaysUnknownAndOnlyVerifiedOutputCompletes() = runBlocking {
+    @Test fun unknownSizeStaysUnknownAndOnlyVerifiedOutputCompletes() = runBlocking<Unit> {
         server.enqueue(response(chunked = true))
         val task = create()
         val seen = mutableListOf<DownloadTask>()
@@ -103,7 +103,7 @@ class M4InstrumentationTest {
         assertEquals(body.size.toLong(), repo.get(task.id).verifiedBytes)
     }
 
-    @Test fun corruptContainerFailsEvenAfterAllBytesArrive() = runBlocking {
+    @Test fun corruptContainerFailsEvenAfterAllBytesArrive() = runBlocking<Unit> {
         server.enqueue(response("owned corrupt bytes".toByteArray()))
         val task = create("/corrupt.mp4")
         assertEquals(EngineResult.FAILED, engine().run(task.id))
@@ -113,7 +113,7 @@ class M4InstrumentationTest {
         assertEquals(99, failed.percent)
     }
 
-    @Test fun forbiddenAndMissingAreDistinctAndNeverAutoRetry() = runBlocking {
+    @Test fun forbiddenAndMissingAreDistinctAndNeverAutoRetry() = runBlocking<Unit> {
         for ((code, expected) in listOf(403 to TransferError.REMOTE_FORBIDDEN, 404 to TransferError.REMOTE_MISSING)) {
             server.enqueue(MockResponse().setResponseCode(code))
             val task = create("/$code.mp4")
@@ -122,7 +122,7 @@ class M4InstrumentationTest {
         }
     }
 
-    @Test fun rateLimitAndServerErrorsPersistRetryThenSucceed() = runBlocking {
+    @Test fun rateLimitAndServerErrorsPersistRetryThenSucceed() = runBlocking<Unit> {
         for (code in listOf(429, 503)) {
             server.enqueue(MockResponse().setResponseCode(code).setHeader("Retry-After", "0"))
             server.enqueue(response())
@@ -134,7 +134,7 @@ class M4InstrumentationTest {
         }
     }
 
-    @Test fun noSpaceNeverPublishesAndCanBeRetriedExplicitly() = runBlocking {
+    @Test fun noSpaceNeverPublishesAndCanBeRetriedExplicitly() = runBlocking<Unit> {
         server.enqueue(response())
         val task = create()
         assertEquals(EngineResult.FAILED, engine(DirectTransfer(connections, freeBytes = { 0 })).run(task.id))
@@ -146,7 +146,7 @@ class M4InstrumentationTest {
         assertEquals(2, repo.get(task.id).attempt)
     }
 
-    @Test fun duplicateNamesProduceDistinctRowsWithoutOverwriting() = runBlocking {
+    @Test fun duplicateNamesProduceDistinctRowsWithoutOverwriting() = runBlocking<Unit> {
         server.enqueue(response()); server.enqueue(response())
         val first = create(); val second = create()
         assertEquals(EngineResult.COMPLETED, engine().run(first.id))
@@ -159,7 +159,7 @@ class M4InstrumentationTest {
         assertEquals(a.digest, b.digest)
     }
 
-    @Test fun queuedCancelNeverStartsNetworkOrPublishes() = runBlocking {
+    @Test fun queuedCancelNeverStartsNetworkOrPublishes() = runBlocking<Unit> {
         val task = create()
         assertTrue(repo.requestCancel(task.id))
         assertEquals(EngineResult.STOPPED, engine().run(task.id))
@@ -168,7 +168,7 @@ class M4InstrumentationTest {
         assertNull(repo.get(task.id).outputUri)
     }
 
-    @Test fun activeCancelAcknowledgesWithoutPublishingEvenAtFullTransfer() = runBlocking {
+    @Test fun activeCancelAcknowledgesWithoutPublishingEvenAtFullTransfer() = runBlocking<Unit> {
         server.enqueue(response())
         val task = create()
         var requested = false
@@ -182,7 +182,7 @@ class M4InstrumentationTest {
         assertNull(repo.get(task.id).outputUri)
     }
 
-    @Test fun realPauseAcknowledgesAndResumeRevalidatesRange() = runBlocking {
+    @Test fun realPauseAcknowledgesAndResumeRevalidatesRange() = runBlocking<Unit> {
         // A valid ISO BMFF free box pads our owned clip so the transfer can pause.
         val padding = java.nio.ByteBuffer.allocate(512 * 1024).apply {
             putInt(capacity()); put("free".toByteArray(Charsets.US_ASCII))
@@ -211,7 +211,7 @@ class M4InstrumentationTest {
         assertEquals("bytes=$offset-", server.takeRequest().getHeader("Range"))
     }
 
-    @Test fun publicationNoSpaceRetainsPendingIntentAndRetryReusesUri() = runBlocking {
+    @Test fun publicationNoSpaceRetainsPendingIntentAndRetryReusesUri() = runBlocking<Unit> {
         server.enqueue(response())
         val task = create()
         val full = object : OutputPublisher by publisher {
@@ -230,7 +230,7 @@ class M4InstrumentationTest {
         assertEquals(1, server.requestCount)
     }
 
-    @Test fun interruptedUnprovenPartialDoesNotPretendToResume() = runBlocking {
+    @Test fun interruptedUnprovenPartialDoesNotPretendToResume() = runBlocking<Unit> {
         val task = create()
         repo.change(task.id) { it.copy(state = TransferState.DOWNLOADING) }
         val pipeline = engine()
@@ -240,7 +240,7 @@ class M4InstrumentationTest {
         assertEquals(0, server.requestCount)
     }
 
-    @Test fun persistedPartialReopensRoomAndResumesOnlyMatching206() = runBlocking {
+    @Test fun persistedPartialReopensRoomAndResumesOnlyMatching206() = runBlocking<Unit> {
         val dbName = "m4-reopen-${UUID.randomUUID()}.db"
         var disk = Room.databaseBuilder(context, DownloadsDb::class.java, dbName).build()
         try {
@@ -262,7 +262,7 @@ class M4InstrumentationTest {
         } finally { disk.close(); context.deleteDatabase(dbName) }
     }
 
-    @Test fun publicationRecoveryReusesExistingUriWithoutNetwork() = runBlocking {
+    @Test fun publicationRecoveryReusesExistingUriWithoutNetwork() = runBlocking<Unit> {
         server.enqueue(response())
         val task = create()
         var saved = false
@@ -283,7 +283,7 @@ class M4InstrumentationTest {
         assertEquals(1, server.requestCount)
     }
 
-    @Test fun legacyAppSpecificPublicationUsesFileProviderWithoutStoragePermission() = runBlocking {
+    @Test fun legacyAppSpecificPublicationUsesFileProviderWithoutStoragePermission() = runBlocking<Unit> {
         server.enqueue(response())
         val task = create()
         val legacy = MediaPublisher(context, verifier, api = 28)
@@ -295,9 +295,9 @@ class M4InstrumentationTest {
         File(context.getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS), DirectLinks.publishedName(task.name, task.id)).delete()
     }
 
-    @Test fun activityRecreationUsesSameWorkAndCompletedRecord() = runBlocking { activityTransfer(true) }
+    @Test fun activityRecreationUsesSameWorkAndCompletedRecord() = runBlocking<Unit> { activityTransfer(true) }
 
-    @Test fun retryAfterForegroundFailureCreatesFreshWorkAndAttempt() = runBlocking { activityTransfer(true, retryFailure = true) }
+    @Test fun retryAfterForegroundFailureCreatesFreshWorkAndAttempt() = runBlocking<Unit> { activityTransfer(true, retryFailure = true) }
 
     internal suspend fun activityTransfer(grant: Boolean, retryFailure: Boolean = false) {
         val app = context.applicationContext as TheKaiNApp
