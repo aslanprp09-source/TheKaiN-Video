@@ -48,7 +48,7 @@ jobs:
     timeout-minutes: 25
     env:
       ANDROID_SERIAL: emulator-5554
-      ANDROID_AVD_HOME: ${{ runner.temp }}/m4-avd
+      ANDROID_AVD_HOME: /tmp/thekain-m4-avd
     defaults:
       run:
         working-directory: rewrite/android
