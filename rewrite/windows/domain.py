@@ -18,6 +18,13 @@ class ErrorCode(str, Enum):
     TOOL_MISSING = "TOOL_MISSING"
     CANCELED = "CANCELED"
     UNKNOWN = "UNKNOWN"
+    REMOTE_SERVER = "REMOTE_SERVER"
+    NO_DISK_SPACE = "NO_DISK_SPACE"
+    PERMISSION_DENIED = "PERMISSION_DENIED"
+    RESUME_UNSUPPORTED = "RESUME_UNSUPPORTED"
+    MERGE_FAILED = "MERGE_FAILED"
+    VERIFY_FAILED = "VERIFY_FAILED"
+    INTERRUPTED = "INTERRUPTED"
 
 
 MESSAGES_RU = {
@@ -32,9 +39,16 @@ MESSAGES_RU = {
     ErrorCode.RATE_LIMITED: "Источник ограничил запросы (429). Попробуйте позже.",
     ErrorCode.TIMEOUT: "Время ожидания истекло. Проверьте сеть и повторите анализ.",
     ErrorCode.NETWORK_LOST: "Не удалось связаться с источником. Проверьте подключение.",
-    ErrorCode.TOOL_MISSING: "Не найден yt-dlp. Установите зависимости Windows-приложения.",
+    ErrorCode.TOOL_MISSING: "Не найден необходимый инструмент: yt-dlp, FFmpeg или FFprobe. Проверьте зависимости.",
     ErrorCode.CANCELED: "Анализ отменён.",
     ErrorCode.UNKNOWN: "Не удалось разобрать ответ источника. Повторите анализ или выберите другую ссылку.",
+    ErrorCode.REMOTE_SERVER: "Ошибка сервера источника. Повторим запрос с задержкой.",
+    ErrorCode.NO_DISK_SPACE: "Недостаточно места на диске. Освободите место и повторите задачу.",
+    ErrorCode.PERMISSION_DENIED: "Нет доступа к папке или операция сохранения не поддерживается.",
+    ErrorCode.RESUME_UNSUPPORTED: "Источник не подтвердил безопасное продолжение. Начните новую попытку.",
+    ErrorCode.MERGE_FAILED: "Не удалось объединить дорожки. Проверьте FFmpeg и повторите задачу.",
+    ErrorCode.VERIFY_FAILED: "Проверка файла не пройдена. Файл не отмечен сохранённым.",
+    ErrorCode.INTERRUPTED: "Задача прервана. Проверьте источник и начните новую попытку.",
 }
 
 

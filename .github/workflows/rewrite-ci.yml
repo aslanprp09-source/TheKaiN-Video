@@ -11,6 +11,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: Install media verification tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends ffmpeg
       - run: python -m unittest discover -s rewrite/windows -p "test_*.py" -v
   android-debug:
     runs-on: ubuntu-latest
