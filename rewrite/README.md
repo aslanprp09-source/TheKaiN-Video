@@ -10,9 +10,11 @@ Python 3.11+ and FFmpeg (for merging video/audio and converting MP3). Run:
     python -m pip install -r requirements.txt
     python app.py
 
-Includes pasted URL, one-click clear, format selection, folder selection, download, pause and resume through yt-dlp partial files. Processes only one task at a time; playlists, concurrency, format previews and production installers are scheduled for later. Requires authorized downloads. Run offline tests with:
+Includes pasted URL, one-click clear, cancelable metadata analysis, actual format selection, folder selection, download, pause and resume through yt-dlp partial files. Formats are discovered first; unknown sizes stay unknown and video/audio merges require FFmpeg. Audio retains its offered container; there is no synthetic MP3 or resolution option. Processes only one task at a time; playlists, concurrency, thumbnail rendering and production installers are scheduled for later. Requires authorized downloads. Run offline tests with:
 
     python -m unittest discover -s rewrite/windows -p "test_*.py" -v
+
+See [M1 validation and limitations](docs/M1_EXTRACTOR.md) for deterministic fixtures, UI smoke checks, screenshots and manual steps. M1 does not implement the persistent/verified queue planned for M2.
 
 ## Android prototype 0.1
 

@@ -5,7 +5,9 @@ import threading
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
-from engine import Engine, Options, FORMAT_CHOICES, command_for
+from engine import Engine, Options, command_for
+from extractor import SourceAnalyzer
+from domain import AnalyzeResult, DownloadError, ErrorCode
 
 
 class App(tk.Tk):
@@ -16,10 +18,15 @@ class App(tk.Tk):
         self.engine = Engine()
         self.events = queue.Queue()
         self.busy = False
+        self.analyzer = SourceAnalyzer()
+        self.analysis_cancel = threading.Event()
+        self.analysis_generation = 0
+        self.analyzing = False
+        self.media = None
         self.url = tk.StringVar()
         self.folder = tk.StringVar(value=str(Path.home() / "Downloads"))
-        self.quality = tk.StringVar(value=FORMAT_CHOICES[0])
-        self.status = tk.StringVar(value="Вставьте ссылку и выберите качество.")
+        self.quality = tk.StringVar()
+        self.status = tk.StringVar(value="Вставьте ссылку и определите доступные форматы.")
         self.progress = tk.DoubleVar()
         frm = ttk.Frame(self, padding=22)
         frm.pack(fill="both", expand=True)
@@ -33,13 +40,16 @@ class App(tk.Tk):
         choice = ttk.Frame(frm)
         choice.pack(fill="x", pady=7)
         ttk.Label(choice, text="Формат").pack(side="left")
-        ttk.Combobox(choice, textvariable=self.quality, values=FORMAT_CHOICES, width=19, state="readonly").pack(side="left", padx=9)
+        self.formats = ttk.Combobox(choice, textvariable=self.quality, values=(), width=29, state="readonly")
+        self.formats.pack(side="left", padx=9)
         ttk.Label(choice, text="Папка").pack(side="left", padx=(5, 0))
-        ttk.Entry(choice, textvariable=self.folder).pack(side="left", fill="x", expand=True, padx=6)
+        ttk.Entry(choice, textvariable=self.folder, width=12).pack(side="left", fill="x", expand=True, padx=6)
         ttk.Button(choice, text="…", command=self.choose_folder).pack(side="left")
         controls = ttk.Frame(frm)
         controls.pack(anchor="w", pady=10)
-        self.start_btn = ttk.Button(controls, text="Скачать / продолжить", command=self.start)
+        self.analyze_btn = ttk.Button(controls, text="Определить видео", command=self.analyze)
+        self.analyze_btn.pack(side="left", padx=(0, 7))
+        self.start_btn = ttk.Button(controls, text="Скачать / продолжить", command=self.start, state="disabled")
         self.start_btn.pack(side="left")
         self.pause_btn = ttk.Button(controls, text="Пауза", command=lambda: self.stop("paused"), state="disabled")
         self.pause_btn.pack(side="left", padx=7)
@@ -48,6 +58,7 @@ class App(tk.Tk):
         ttk.Progressbar(frm, variable=self.progress, maximum=100).pack(fill="x", pady=7)
         ttk.Label(frm, textvariable=self.status, wraplength=580).pack(anchor="w")
         self.after(100, self.pump)
+        self.url.trace_add("write", self.url_changed)
         self.protocol("WM_DELETE_WINDOW", self.close)
 
     def paste(self):
@@ -62,13 +73,16 @@ class App(tk.Tk):
             self.folder.set(folder)
 
     def start(self):
-        if self.busy:
+        if self.busy or self.analyzing or self.media is None:
             return
-        job = Options(self.url.get(), Path(self.folder.get()), self.quality.get())
+        index = self.formats.current()
+        if not 0 <= index < len(self.media.formats):
+            return
+        job = Options(self.url.get(), Path(self.folder.get()), self.media.formats[index])
         try:
             command_for(job)
-            if job.quality == "MP3" and not shutil.which("ffmpeg"):
-                raise ValueError("Для MP3 требуется FFmpeg в PATH")
+            if job.quality.requires_merge and not shutil.which("ffmpeg"):
+                raise ValueError("Для объединения выбранных дорожек требуется FFmpeg в PATH")
         except (ValueError, OSError) as exc:
             messagebox.showerror("Ошибка", str(exc))
             return
@@ -76,6 +90,7 @@ class App(tk.Tk):
         self.progress.set(0)
         self.status.set("Скачивание началось…")
         self.start_btn.config(state="disabled")
+        self.analyze_btn.config(state="disabled")
         self.pause_btn.config(state="normal")
         self.cancel_btn.config(state="normal")
         threading.Thread(target=self.worker, args=(job,), daemon=True).start()
@@ -83,8 +98,8 @@ class App(tk.Tk):
     def worker(self, job):
         try:
             outcome = self.engine.run(job, lambda key, val: self.events.put((key, val)))
-        except Exception as exc:
-            self.events.put(("log", str(exc)))
+        except Exception:
+            self.events.put(("log", DownloadError(ErrorCode.UNKNOWN).message))
             outcome = "failed"
         self.events.put(("done", outcome))
 
@@ -92,17 +107,72 @@ class App(tk.Tk):
         if self.engine.stop(reason):
             self.status.set("Останавливаем…")
 
+    def url_changed(self, *_):
+        self.analysis_cancel.set()
+        self.analysis_generation += 1
+        self.analyzing = False
+        self.media = None
+        self.quality.set("")
+        self.formats.config(values=())
+        self.start_btn.config(state="disabled")
+        self.analyze_btn.config(text="Определить видео", state="disabled" if self.busy else "normal")
+        if not self.busy:
+            self.status.set("Определите доступные форматы для новой ссылки.")
+
+    def analyze(self):
+        if self.busy:
+            return
+        if self.analyzing:
+            self.url_changed()
+            self.status.set("Анализ отменён.")
+            return
+        self.analysis_cancel = threading.Event()
+        self.analysis_generation += 1
+        generation, url, cancel = self.analysis_generation, self.url.get(), self.analysis_cancel
+        self.analyzing = True
+        self.media = None
+        self.formats.config(values=())
+        self.quality.set("")
+        self.start_btn.config(state="disabled")
+        self.analyze_btn.config(text="Отменить анализ")
+        self.status.set("Определяем доступные форматы…")
+        threading.Thread(target=self.analyze_worker, args=(generation, url, cancel), daemon=True).start()
+
+    def analyze_worker(self, generation, url, cancel):
+        try:
+            result = self.analyzer.analyze(url, cancel)
+        except Exception:
+            result = AnalyzeResult(error=DownloadError(ErrorCode.UNKNOWN))
+        self.events.put(("analysis", (generation, result)))
+
+    def apply_analysis(self, generation, result):
+        if generation != self.analysis_generation:
+            return
+        self.analyzing = False
+        self.analyze_btn.config(text="Определить видео")
+        if result.error:
+            self.status.set(result.error.message)
+            return
+        self.media = result.media
+        self.formats.config(values=tuple(v.label for v in self.media.formats))
+        self.formats.current(0)
+        self.start_btn.config(state="normal")
+        self.status.set(f"{self.media.display_title} · {self.media.source_host}. Выберите формат.")
+
     def pump(self):
         try:
             while True:
                 event, value = self.events.get_nowait()
-                if event == "progress":
+                if event == "analysis":
+                    self.apply_analysis(*value)
+                elif event == "progress":
                     self.progress.set(value)
                 elif event in ("log", "result"):
                     self.status.set(str(value))
                 elif event == "done":
                     self.busy = False
-                    self.start_btn.config(state="normal")
+                    self.start_btn.config(state="normal" if self.media else "disabled")
+                    self.analyze_btn.config(state="normal")
                     self.pause_btn.config(state="disabled")
                     self.cancel_btn.config(state="disabled")
                     if value == "completed":
@@ -116,6 +186,7 @@ class App(tk.Tk):
         self.after(100, self.pump)
 
     def close(self):
+        self.analysis_cancel.set()
         self.engine.stop("paused")
         self.destroy()
 

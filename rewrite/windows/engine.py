@@ -5,16 +5,9 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Lock
-from urllib.parse import urlparse
+from domain import FormatVariant
+from extractor import classify_error, validate_url
 
-FORMAT_CHOICES = ("Лучшее видео", "1080p", "720p", "480p", "MP3")
-FORMAT_IDS = {
-    "Лучшее видео": "bv*+ba/b",
-    "1080p": "bv*[height<=1080]+ba/b[height<=1080]",
-    "720p": "bv*[height<=720]+ba/b[height<=720]",
-    "480p": "bv*[height<=480]+ba/b[height<=480]",
-    "MP3": "ba/b",
-}
 PROGRESS = re.compile(r"\[download\]\s+(\d+(?:\.\d+)?)%")
 
 
@@ -22,26 +15,25 @@ PROGRESS = re.compile(r"\[download\]\s+(\d+(?:\.\d+)?)%")
 class Options:
     url: str
     folder: Path
-    quality: str = "Лучшее видео"
+    quality: FormatVariant | None = None
 
 
 def command_for(job):
-    url = job.url.strip()
-    parsed = urlparse(url)
-    if parsed.scheme not in ("https", "http") or not parsed.hostname:
-        raise ValueError("Введите корректную HTTP(S)-ссылку")
-    if parsed.username or parsed.password or any(c in url for c in ("\n", "\r", "\x00")):
-        raise ValueError("В ссылке есть недопустимые символы или учётные данные")
-    if job.quality not in FORMAT_IDS:
-        raise ValueError("Неизвестный формат")
-    cmd = [sys.executable, "-m", "yt_dlp", "--newline", "--progress", "--no-quiet", "--no-simulate", "--continue", "--no-playlist",
+    url = validate_url(job.url)
+    variant = job.quality
+    if not isinstance(variant, FormatVariant):
+        raise ValueError("Сначала определите доступные форматы")
+    for format_id in (variant.extractor_format_id, variant.audio_format_id):
+        if format_id is not None and not re.fullmatch(r"[A-Za-z0-9_.-]+", format_id):
+            raise ValueError("Недопустимый идентификатор формата")
+    if not re.fullmatch(r"[A-Za-z0-9]+", variant.final_extension):
+        raise ValueError("Недопустимое расширение")
+    cmd = [sys.executable, "-m", "yt_dlp", "--ignore-config", "--newline", "--progress", "--no-quiet", "--no-simulate", "--continue", "--no-playlist",
            "--no-mtime", "-P", str(job.folder), "-o", "%(title).150B [%(id)s].%(ext)s",
-           "--print", "after_move:THEKAIN_FILE:%(filepath)s", "-f", FORMAT_IDS[job.quality]]
-    if job.quality == "MP3":
-        cmd += ["-x", "--audio-format", "mp3"]
-    else:
-        cmd += ["--merge-output-format", "mp4"]
-    return cmd + [url]
+           "--print", "after_move:THEKAIN_FILE:%(filepath)s", "-f", variant.selector]
+    if variant.requires_merge:
+        cmd += ["--merge-output-format", variant.final_extension]
+    return cmd + ["--", url]
 
 
 class Engine:
@@ -83,7 +75,9 @@ class Engine:
                     if match:
                         callback("progress", min(99.0, float(match.group(1))))
                     elif "ERROR" in line or "WARNING" in line:
-                        callback("log", line[:300])
+                        # Upstream diagnostics can contain signed URLs/credentials.
+                        # Expose only a localized classification, never raw stderr.
+                        callback("log", classify_error(line).message)
             code = proc.wait()
             with self.lock:
                 stop_reason = self.stop_reason
