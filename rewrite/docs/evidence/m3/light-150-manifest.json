@@ -1,0 +1,98 @@
+[
+  {
+    "file": "light-150-empty.png",
+    "theme": "light",
+    "scale": 1.5,
+    "logical_size": [
+      1180,
+      760
+    ],
+    "pixel_size": [
+      1770,
+      1140
+    ],
+    "state": "empty",
+    "job_state": null,
+    "progress_bytes": null
+  },
+  {
+    "file": "light-150-ready.png",
+    "theme": "light",
+    "scale": 1.5,
+    "logical_size": [
+      1180,
+      760
+    ],
+    "pixel_size": [
+      1770,
+      1140
+    ],
+    "state": "ready",
+    "job_state": null,
+    "progress_bytes": null
+  },
+  {
+    "file": "light-150-downloading.png",
+    "theme": "light",
+    "scale": 1.5,
+    "logical_size": [
+      1180,
+      760
+    ],
+    "pixel_size": [
+      1770,
+      1140
+    ],
+    "state": "downloading",
+    "job_state": "DOWNLOADING",
+    "progress_bytes": 65536
+  },
+  {
+    "file": "light-150-completed.png",
+    "theme": "light",
+    "scale": 1.5,
+    "logical_size": [
+      1180,
+      760
+    ],
+    "pixel_size": [
+      1770,
+      1140
+    ],
+    "state": "completed",
+    "job_state": "COMPLETED",
+    "progress_bytes": 320044
+  },
+  {
+    "file": "light-150-failed.png",
+    "theme": "light",
+    "scale": 1.5,
+    "logical_size": [
+      1180,
+      760
+    ],
+    "pixel_size": [
+      1770,
+      1140
+    ],
+    "state": "failed",
+    "job_state": "FAILED",
+    "progress_bytes": 21
+  },
+  {
+    "file": "light-150-settings.png",
+    "theme": "light",
+    "scale": 1.5,
+    "logical_size": [
+      1180,
+      760
+    ],
+    "pixel_size": [
+      1770,
+      1140
+    ],
+    "state": "settings",
+    "job_state": null,
+    "progress_bytes": null
+  }
+]

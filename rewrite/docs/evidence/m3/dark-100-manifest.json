@@ -1,0 +1,98 @@
+[
+  {
+    "file": "dark-100-empty.png",
+    "theme": "dark",
+    "scale": 1.0,
+    "logical_size": [
+      1180,
+      760
+    ],
+    "pixel_size": [
+      1180,
+      760
+    ],
+    "state": "empty",
+    "job_state": null,
+    "progress_bytes": null
+  },
+  {
+    "file": "dark-100-ready.png",
+    "theme": "dark",
+    "scale": 1.0,
+    "logical_size": [
+      1180,
+      760
+    ],
+    "pixel_size": [
+      1180,
+      760
+    ],
+    "state": "ready",
+    "job_state": null,
+    "progress_bytes": null
+  },
+  {
+    "file": "dark-100-downloading.png",
+    "theme": "dark",
+    "scale": 1.0,
+    "logical_size": [
+      1180,
+      760
+    ],
+    "pixel_size": [
+      1180,
+      760
+    ],
+    "state": "downloading",
+    "job_state": "DOWNLOADING",
+    "progress_bytes": 65536
+  },
+  {
+    "file": "dark-100-completed.png",
+    "theme": "dark",
+    "scale": 1.0,
+    "logical_size": [
+      1180,
+      760
+    ],
+    "pixel_size": [
+      1180,
+      760
+    ],
+    "state": "completed",
+    "job_state": "COMPLETED",
+    "progress_bytes": 320044
+  },
+  {
+    "file": "dark-100-failed.png",
+    "theme": "dark",
+    "scale": 1.0,
+    "logical_size": [
+      1180,
+      760
+    ],
+    "pixel_size": [
+      1180,
+      760
+    ],
+    "state": "failed",
+    "job_state": "FAILED",
+    "progress_bytes": 21
+  },
+  {
+    "file": "dark-100-settings.png",
+    "theme": "dark",
+    "scale": 1.0,
+    "logical_size": [
+      1180,
+      760
+    ],
+    "pixel_size": [
+      1180,
+      760
+    ],
+    "state": "settings",
+    "job_state": null,
+    "progress_bytes": null
+  }
+]
