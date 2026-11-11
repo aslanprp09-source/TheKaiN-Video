@@ -297,7 +297,9 @@ class M4InstrumentationTest {
 
     @Test fun activityRecreationUsesSameWorkAndCompletedRecord() = runBlocking { activityTransfer(true) }
 
-    internal suspend fun activityTransfer(grant: Boolean) {
+    @Test fun retryAfterForegroundFailureCreatesFreshWorkAndAttempt() = runBlocking { activityTransfer(true, retryFailure = true) }
+
+    internal suspend fun activityTransfer(grant: Boolean, retryFailure: Boolean = false) {
         val app = context.applicationContext as TheKaiNApp
         val graph = app.graph
         graph.recoveryReady.await()
@@ -306,6 +308,7 @@ class M4InstrumentationTest {
             assertEquals(if (grant) android.content.pm.PackageManager.PERMISSION_GRANTED else android.content.pm.PackageManager.PERMISSION_DENIED,
                 context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS))
         }
+        if (retryFailure) server.enqueue(MockResponse().setResponseCode(403))
         server.enqueue(response())
         val source = server.url("/activity.mp4").toString()
         var id: String? = null
@@ -314,6 +317,16 @@ class M4InstrumentationTest {
                 scenario.onActivity { activity ->
                     activity.findViewById<android.widget.EditText>(R.id.source_input).setText(source)
                     activity.findViewById<android.widget.Button>(R.id.download_button).performClick()
+                }
+                if (retryFailure) {
+                    withTimeout(90_000) {
+                        while (true) {
+                            val failed = graph.repository.all().singleOrNull { it.url == source && it.state == TransferState.FAILED }
+                            if (failed != null) { id = failed.id; break }
+                            delay(10)
+                        }
+                    }
+                    graph.retry(id!!) // The previous Worker may still be returning its failure.
                 }
                 withTimeout(90_000) {
                     while (true) {
@@ -331,7 +344,8 @@ class M4InstrumentationTest {
                     val list = activity.findViewById<android.widget.LinearLayout>(R.id.task_list)
                     assertEquals(1, (0 until list.childCount).count { list.getChildAt(it).tag == id })
                 }
-                assertEquals(1, server.requestCount)
+                assertEquals(if (retryFailure) 2 else 1, server.requestCount)
+                assertEquals(if (retryFailure) 2 else 1, graph.repository.get(id!!).attempt)
                 withTimeout(30_000) {
                     while (androidx.work.WorkManager.getInstance(context).getWorkInfosForUniqueWork("download-$id").get().any { !it.state.isFinished }) delay(50)
                 }

@@ -104,7 +104,9 @@ jobs:
         if: always()
         run: python3 tools/report-tests.py app/build/outputs/androidTest-results/connected
       - name: Cold process restart and adb UI evidence
-        run: bash tools/process-restart-smoke.sh "$RUNNER_TEMP/m4-device-evidence"
+        run: |
+          gradle --no-daemon :app:installDebug :app:installDebugAndroidTest
+          bash tools/process-restart-smoke.sh "$RUNNER_TEMP/m4-device-evidence"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -70,7 +70,7 @@ class AppGraph(val context: Context) {
         }
     }
 
-    suspend fun schedule(id: String) {
+    suspend fun schedule(id: String, replace: Boolean = false) {
         val task = repository.get(id)
         val local = task.state in setOf(TransferState.VERIFYING, TransferState.PUBLISHING) || task.outputUri != null && task.digest != null
         val request = OneTimeWorkRequestBuilder<DownloadWorker>()
@@ -78,7 +78,8 @@ class AppGraph(val context: Context) {
             .setConstraints(Constraints.Builder().setRequiredNetworkType(if (local) NetworkType.NOT_REQUIRED else NetworkType.CONNECTED).build())
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
             .build()
-        WorkManager.getInstance(context).enqueueUniqueWork("download-$id", ExistingWorkPolicy.KEEP, request)
+        WorkManager.getInstance(context).enqueueUniqueWork("download-$id",
+            if (replace) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP, request).result.get()
     }
 
     suspend fun cancel(id: String) {
@@ -93,8 +94,8 @@ class AppGraph(val context: Context) {
         if (repository.requestPause(id)) WorkManager.getInstance(context).cancelUniqueWork("download-$id").result.get()
     }
 
-    suspend fun resume(id: String) { repository.resume(id); schedule(id) }
-    suspend fun retry(id: String) { repository.retry(id); schedule(id) }
+    suspend fun resume(id: String) { repository.resume(id); schedule(id, replace = true) }
+    suspend fun retry(id: String) { repository.retry(id); schedule(id, replace = true) }
 
     suspend fun recover() {
         repository.all().forEach { task ->
