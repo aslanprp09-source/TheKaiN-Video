@@ -6,7 +6,7 @@ Issue: [#4](https://github.com/aslanprp09-source/TheKaiN-Video/issues/4). Base: 
 
 `domain/Transfer.kt` owns URL validation, states, progress and typed errors. `data/Downloads.kt` persists each UUID/attempt and publication intent in Room (exported schema v1). `transfer/DirectTransfer.kt` owns HTTPS streaming; `DownloadEngine.kt` coordinates transfer → verification → publication. `storage/` owns native verification and scoped storage. `AppGraph` owns the application scope and recovery; a unique WorkManager job contains only the task ID. The Activity observes persisted tasks and submits commands. No DownloadManager pause emulation remains.
 
-Android concurrency is one pipeline. Sources must be direct HTTPS MP4/WebM/MOV/MP3/M4A URLs; no page extractor, cookies or account access. System TLS trust and hostname validation remain enabled. Only tests inject trust for their generated local CA. Signed source URLs stay in the private Room database, with backups disabled; diagnostics and WorkManager inputs exclude them.
+Android concurrency is one pipeline. Sources must be direct HTTPS MP4/WebM/MOV/MP3/M4A URLs; no page extractor, cookies or account access. System TLS trust and hostname validation remain enabled. Only tests inject trust for their generated local CA. Signed source URLs stay in the private Room database, with cloud/device-transfer exclusions and backups disabled; diagnostics and WorkManager inputs exclude them.
 
 Unknown total stays unknown. Download progress is capped at 99 until verified output is published. Media verification checks nonempty/expected length, container signature, expected track type, all native extractor samples, a decodable first video frame and SHA-256. Publication verifies the destination media and digest again. This is **not** a full decode of every video/audio frame. Unsupported/encrypted media fails verification; no DRM bypass. The verifier currently bounds video dimensions to 4096 and samples to an 8 MiB buffer.
 
@@ -24,11 +24,11 @@ JDK 17, SDK 35, Gradle 8.11.1:
 
 ```sh
 cd rewrite/android
-gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest
+gradle --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest
 python3 tools/report-tests.py app/build/test-results/testDebugUnitTest
 ```
 
-Local results: 14 JVM tests passed; debug app and instrumentation APK compiled. No local Android target is available in this cloud environment. Native execution evidence is recorded separately after CI actually runs.
+Local results: 14 JVM tests passed, Android Lint passed with no errors, and debug app/instrumentation APK compiled. No local Android target is available in this cloud environment. Native execution evidence is recorded separately after CI actually runs.
 
 On a disposable API 35 emulator, install both APKs, grant notifications, then:
 
@@ -40,7 +40,7 @@ gradle --no-daemon :app:connectedDebugAndroidTest \
 ANDROID_SERIAL=emulator-5554 bash tools/process-restart-smoke.sh /tmp/m4-evidence
 ```
 
-The instrumentation suite covers actual HTTPS and native MediaStore/Room/verifier behavior: owned MP4, chunked unknown length, corrupt full transfer, 403/404, 429/503, deterministic disk exhaustion at transfer/publication, distinct duplicate names, queued/active cancel, real pause/206 resume, reopened Room partial recovery, URI reuse after publication interruption, API 28 publisher branch, Activity recreation and foreground WorkManager completion. The host script additionally revokes notifications **before** starting a separate test, then tests a real force-stop/relaunch with different PIDs, preserved completed URI/hash, and an interrupted partial. Each host phase must report exactly one successful test. No device-wide data reset or deletion of unrelated outputs is used.
+The instrumentation suite covers actual HTTPS and native MediaStore/Room/verifier behavior: owned MP4, chunked unknown length, corrupt full transfer, 403/404, 429/503, deterministic disk exhaustion at transfer/publication, distinct duplicate names, queued/active cancel, real pause/206 resume, reopened Room partial recovery, URI reuse after publication interruption, API 28 publisher branch, Activity recreation, foreground WorkManager completion and immediate retry of a failed Worker. Explicit resume/retry replaces the finishing WorkManager request so KEEP cannot discard the command. The host script additionally revokes notifications **before** starting a separate test, then tests a real force-stop/relaunch with different PIDs, preserved completed URI/hash, and an interrupted partial. Each host phase must report exactly one successful test. No device-wide data reset or deletion of unrelated outputs is used.
 
 The fixture `app/src/androidTest/assets/owned-sample.mp4` was generated locally with FFmpeg: 160×90 solid-color video at 10 fps for one second, H.264 baseline/yuv420p, silent AAC at 8 kHz, MP4 faststart. No third-party media or credentials. ENOSPC uses deterministic injected free-space/publication failures rather than filling a runner disk.
 

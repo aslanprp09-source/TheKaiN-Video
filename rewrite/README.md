@@ -27,7 +27,7 @@ Native Kotlin direct HTTPS MP4/WebM/MP3/M4A/MOV downloader with Room persistence
 Open `rewrite/android` in Android Studio (JDK 17, SDK 35), or use Gradle 8.11.1:
 
     cd rewrite/android
-    gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest
+    gradle --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest
 
 See [M4 architecture, test commands and limitations](docs/M4_ANDROID.md) and [dependency versions/licenses](docs/M4_DEPENDENCIES.md). The rebuild workflow builds a debug APK and runs native Android integration checks on an API 35 emulator. Physical-device and signed-distribution validation remain release requirements.
 

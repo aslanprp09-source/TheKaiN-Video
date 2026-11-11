@@ -30,7 +30,7 @@ class MediaPublisher(private val context: Context, private val verifier: MediaVe
     override suspend fun reserve(task: DownloadTask): String {
         task.outputUri?.let { return it }
         val name = DirectLinks.publishedName(task.name, task.id)
-        if (api >= 29) {
+        if (api >= 29 && Build.VERSION.SDK_INT >= 29) {
             // Recover an orphan reservation from a crash before its URI was saved.
             resolver.query(MediaStore.Downloads.EXTERNAL_CONTENT_URI,
                 arrayOf(MediaStore.MediaColumns._ID),
@@ -61,7 +61,7 @@ class MediaPublisher(private val context: Context, private val verifier: MediaVe
         try { verifier.verifyUri(target, task.mime, media); correct = true } catch (_: TransferFailure) { }
         catch (_: java.io.FileNotFoundException) { }
         if (!correct) {
-            if (api < 29) {
+            if (api < 29 || Build.VERSION.SDK_INT < 29) {
                 val directory = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
                     ?: throw TransferFailure(TransferError.PERMISSION_DENIED)
                 val targetFile = File(directory, DirectLinks.publishedName(task.name, task.id))
@@ -84,7 +84,7 @@ class MediaPublisher(private val context: Context, private val verifier: MediaVe
                 verifier.verifyUri(target, task.mime, media)
                 return
             }
-            if (api >= 29 && !pending(target)) throw TransferFailure(TransferError.VERIFY_FAILED)
+            if (api >= 29 && Build.VERSION.SDK_INT >= 29 && !pending(target)) throw TransferFailure(TransferError.VERIFY_FAILED)
             val descriptor = resolver.openFileDescriptor(target, "rwt")
                 ?: throw TransferFailure(TransferError.PERMISSION_DENIED)
             ParcelFileDescriptor.AutoCloseOutputStream(descriptor).use { output ->
@@ -101,7 +101,7 @@ class MediaPublisher(private val context: Context, private val verifier: MediaVe
             }
             verifier.verifyUri(target, task.mime, media)
         }
-        if (api >= 29) {
+        if (api >= 29 && Build.VERSION.SDK_INT >= 29) {
             if (resolver.update(target, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null) != 1 || pending(target))
                 throw TransferFailure(TransferError.VERIFY_FAILED)
         }
@@ -112,7 +112,7 @@ class MediaPublisher(private val context: Context, private val verifier: MediaVe
     } ?: false
 
     override suspend fun discardPending(task: DownloadTask) {
-        if (api >= 29) task.outputUri?.let { value ->
+        if (api >= 29 && Build.VERSION.SDK_INT >= 29) task.outputUri?.let { value ->
             val uri = Uri.parse(value)
             if (pending(uri)) resolver.delete(uri, null, null)
         }

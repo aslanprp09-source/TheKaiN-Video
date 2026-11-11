@@ -35,10 +35,14 @@ class MainActivity : Activity() {
         notificationAsked = savedInstanceState?.getBoolean("notification_asked") ?: false
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(16), dp(16), dp(16)) }
         root.setOnApplyWindowInsetsListener { view, insets ->
-            val bar = if (Build.VERSION.SDK_INT >= 30) insets.getInsets(WindowInsets.Type.systemBars()) else null
-            @Suppress("DEPRECATION")
-            view.setPadding(dp(16) + (bar?.left ?: insets.systemWindowInsetLeft), dp(16) + (bar?.top ?: insets.systemWindowInsetTop),
-                dp(16) + (bar?.right ?: insets.systemWindowInsetRight), dp(16) + (bar?.bottom ?: insets.systemWindowInsetBottom))
+            if (Build.VERSION.SDK_INT >= 30) {
+                val bar = insets.getInsets(WindowInsets.Type.systemBars())
+                view.setPadding(dp(16) + bar.left, dp(16) + bar.top, dp(16) + bar.right, dp(16) + bar.bottom)
+            } else {
+                @Suppress("DEPRECATION")
+                view.setPadding(dp(16) + insets.systemWindowInsetLeft, dp(16) + insets.systemWindowInsetTop,
+                    dp(16) + insets.systemWindowInsetRight, dp(16) + insets.systemWindowInsetBottom)
+            }
             insets
         }
         root.addView(TextView(this).apply { setText(R.string.app_name); textSize = 25f })
