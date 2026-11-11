@@ -1,0 +1,6 @@
+<resources>
+    <item name="source_input" type="id"/>
+    <item name="download_button" type="id"/>
+    <item name="status_text" type="id"/>
+    <item name="task_list" type="id"/>
+</resources>

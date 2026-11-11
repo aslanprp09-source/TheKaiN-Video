@@ -20,8 +20,15 @@ On headless Linux, set `QT_QPA_PLATFORM=offscreen` for Qt tests. The rebuild CI 
 
 See [M2 validation, recovery and limitations](docs/M2_QUEUE.md) and [M1 analysis contracts](docs/M1_EXTRACTOR.md). Default state storage is `%LOCALAPPDATA%/TheKaiNVideo` on Windows or `$XDG_DATA_HOME/thekain-video` on Linux. Set `THEKAIN_DATA_DIR` to a writable private directory to override it (for example `/workspace/thekain-data` in this cloud environment). Do not put queue databases in a shared folder: job URLs may contain expiring access tokens.
 
-## Android prototype 0.1
+## Android M4 development build
 
-Native Kotlin/Android DownloadManager app handling direct HTTPS MP4/WebM/MP3/M4A/MOV links only; this does NOT download video-page links from YouTube or social media. Open rewrite/android in Android Studio (JDK 17, SDK 35), or build with Gradle 8.11.1. A CI workflow builds a debug APK.
+Native Kotlin direct HTTPS MP4/WebM/MP3/M4A/MOV downloader with Room persistence, WorkManager foreground execution, defensive Range/ETag continuation, private staging, native media verification and scoped publication. Only verified published output reaches 100%. Android 10+ uses MediaStore Downloads; Android 8–9 uses app-specific Downloads with FileProvider and no broad storage permission. Page extraction and the Compose interface remain M5 work.
+
+Open `rewrite/android` in Android Studio (JDK 17, SDK 35), or use Gradle 8.11.1:
+
+    cd rewrite/android
+    gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest
+
+See [M4 architecture, test commands and limitations](docs/M4_ANDROID.md) and [dependency versions/licenses](docs/M4_DEPENDENCIES.md). The rebuild workflow builds a debug APK and runs native Android integration checks on an API 35 emulator. Physical-device and signed-distribution validation remain release requirements.
 
 Review research and milestones under docs/. This is a development foundation, not a verified production release.
