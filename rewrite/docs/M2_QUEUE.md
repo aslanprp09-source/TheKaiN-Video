@@ -36,7 +36,7 @@ From the repository root, Python 3.11+, with FFmpeg/FFprobe on PATH:
 python -m unittest discover -s rewrite/windows -p "test_*.py" -v
 ```
 
-The suite uses authored PCM WAV bytes and an ephemeral `127.0.0.1` HTTP server; no third-party media/site connection is needed. It covers success with real probe/decode, corrupt/truncated outputs, 429/5xx retries, 403/404, retry limits/Retry-After, unavailable Range, changed ETag, missing tools, simulated ENOSPC, cancellation, two-worker concurrency/max-three validation, migration/reopen, duplicate targets, cross-volume copy and restart windows (partial, verification, publication). It also retains M1 tests and checks honest Tk controls without a display. Loopback access must be permitted by the local execution sandbox; no public egress is required.
+The suite uses authored PCM WAV bytes and an ephemeral `127.0.0.1` HTTP server; no third-party media/site connection is needed. It covers success with real probe/decode, corrupt/truncated outputs, 429/5xx retries, 403/404, retry limits/Retry-After, unavailable Range, changed ETag, missing tools, simulated ENOSPC, cancellation, two-worker concurrency/max-three validation, migration/reopen, duplicate targets, cross-volume copy and restart windows (partial, verification, publication). It also retains M1 tests and checks honest Tk controls without a display. Loopback access must be permitted by the local execution sandbox; no public egress is required during tests. The existing rebuild CI installs the `ffmpeg` package (including FFprobe) from Ubuntu's signed package repositories before testing; this is a required setup dependency, not a live-site test. Missing verification tools fail explicitly and are reported in GitHub annotations.
 
 Optional full integration with the actual installed yt-dlp:
 
@@ -59,7 +59,7 @@ Manual check: launch `python rewrite/windows/app.py`, analyze an authorized link
 
 ## Recorded evidence and limits
 
-Local validation on 2026-11-11: 62 tests passed on both Python 3.12.14 and 3.13.5; real yt-dlp 2026.10.26 + FFmpeg/FFprobe 7.1.5 merge/verification smoke passed; real Tk 8.6/Xvfb queue smoke passed. Android regression: `cd rewrite/android && gradle --no-daemon :app:assembleDebug`, Gradle 8.11.1, Temurin JDK 17.0.17+10, SDK 35 — passed (valid existing outputs reused). Remote CI evidence will be linked in the M2 PR for its exact commit.
+Local validation on 2026-11-11: 62 tests passed on Python 3.11.17, 3.12.14 and 3.13.5; real yt-dlp 2026.10.26 + FFmpeg/FFprobe 7.1.5 merge/verification smoke passed; real Tk 8.6/Xvfb queue smoke passed. Android regression: `cd rewrite/android && gradle --no-daemon :app:assembleDebug`, Gradle 8.11.1, Temurin JDK 17.0.17+10, SDK 35 — passed (valid existing outputs reused). Initial GitHub test jobs correctly failed because their runner lacked FFmpeg/FFprobe; the required dependency setup was added to `.github/workflows/rewrite-ci.yml`. Remote CI evidence will be linked in the M2 PR for its exact commit.
 
 No new third-party Python dependency or bundled binary is added. Existing yt-dlp core source is Unlicense; this task uses the environment's FFmpeg/FFprobe tools, whose licensing depends on build configuration (the tested Debian build includes GPL components). No binary packaging/distribution is performed; M6 must inventory the actual shipped builds and notices.
 
