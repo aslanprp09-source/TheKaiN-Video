@@ -27,3 +27,14 @@ Official setup help: https://help.openai.com/en/articles/20001545-using-codex-cl
 Codex and ChatGPT Work/Project are separate experiences: https://help.openai.com/en/articles/20001275-chatgpt-work-and-codex
 
 Working principle: one GitHub issue → one Codex task → one PR → tested review → merge on approval. Never autonomously merge into main or publish a new public release.
+
+
+## Scoped GitHub implementation backlog (created 2026-11-11)
+- #1 [M1 Windows extraction / actual formats]: https://github.com/aslanprp09-source/TheKaiN-Video/issues/1
+- #2 [M2 Windows persistent queue / verification]: https://github.com/aslanprp09-source/TheKaiN-Video/issues/2
+- #3 [M3 Windows PySide6 UI]: https://github.com/aslanprp09-source/TheKaiN-Video/issues/3
+- #4 [M4 Android direct transfer / MediaStore]: https://github.com/aslanprp09-source/TheKaiN-Video/issues/4
+- #5 [M5 Android Compose UI / extractor feasibility]: https://github.com/aslanprp09-source/TheKaiN-Video/issues/5
+- #6 [M6 packaging / device QA]: https://github.com/aslanprp09-source/TheKaiN-Video/issues/6
+
+Start from issue #1. The existence of these tickets does NOT mean a Codex session was launched or assigned.
