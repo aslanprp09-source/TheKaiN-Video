@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
+trap 'echo "::error title=M4 adb smoke::Failed command on line $LINENO: $BASH_COMMAND"' ERR
 serial="${ANDROID_SERIAL:-emulator-5554}"
 artifacts="${1:?Pass artifact output directory}"
 mkdir -p "$artifacts"
@@ -29,9 +30,13 @@ run_phase seed seedFixture
 adb -s "$serial" shell am force-stop "$package"
 component="$(adb -s "$serial" shell cmd package resolve-activity --brief "$package" | tail -1 | tr -d '\r')"
 adb -s "$serial" shell am start -n "$component"
+dump_ui() {
+    adb -s "$serial" shell uiautomator dump /data/local/tmp/thekain-m4-ui.xml > "$artifacts/uiautomator-status.txt"
+    adb -s "$serial" exec-out cat /data/local/tmp/thekain-m4-ui.xml > "$1"
+}
 # Wait for the Room-backed task UI after a new process, not a screen-only reset.
 for attempt in $(seq 1 30); do
-    adb -s "$serial" exec-out uiautomator dump /dev/tty > "$artifacts/ui-restart-top.xml"
+    dump_ui "$artifacts/ui-restart-top.xml"
     if python3 - "$artifacts/ui-restart-top.xml" <<'PY'
 import pathlib,sys
 s=pathlib.Path(sys.argv[1]).read_text()
@@ -46,14 +51,19 @@ coordinates="$(python3 - "$artifacts/ui-restart-top.xml" <<'PY'
 import pathlib,sys,xml.etree.ElementTree as ET,re
 s=pathlib.Path(sys.argv[1]).read_text(); a=s.find('<?xml'); b=s.find('</hierarchy>')+len('</hierarchy>')
 r=ET.fromstring(s[a:b])
-node=next(n for n in r.iter('node') if n.get('scrollable')=='true')
+assert 'process-partial.mp4' in s, 'Recovered task is missing from the actual Activity UI'
+node=next((n for n in r.iter('node') if n.get('scrollable')=='true'), None)
+if node is None: sys.exit(0) # Both rows can already fit; no gesture is needed.
 x1,y1,x2,y2=map(int,re.findall(r'\d+',node.get('bounds')))
 print((x1+x2)//2, y1+int((y2-y1)*.8), (x1+x2)//2, y1+int((y2-y1)*.25))
 PY
 )"
-read -r x1 y1 x2 y2 <<< "$coordinates"
-adb -s "$serial" shell input swipe "$x1" "$y1" "$x2" "$y2" 400
-adb -s "$serial" exec-out uiautomator dump /dev/tty > "$artifacts/ui-restart-jobs.xml"
+if [ -n "$coordinates" ]; then
+    read -r x1 y1 x2 y2 <<< "$coordinates"
+    adb -s "$serial" shell input swipe "$x1" "$y1" "$x2" "$y2" 400
+fi
+dump_ui "$artifacts/ui-restart-jobs.xml"
 adb -s "$serial" exec-out screencap -p > "$artifacts/android-restart-jobs.png"
 run_phase verify verifyColdProcess
+adb -s "$serial" shell rm -f /data/local/tmp/thekain-m4-ui.xml
 adb -s "$serial" logcat -b crash -d > "$artifacts/crash-buffer.txt"
