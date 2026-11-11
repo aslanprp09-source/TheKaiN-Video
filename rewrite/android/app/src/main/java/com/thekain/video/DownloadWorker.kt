@@ -25,6 +25,7 @@ class DownloadWorker(context: Context, parameters: WorkerParameters) : Coroutine
     override suspend fun doWork(): Result {
         val id = inputData.getString("job_id") ?: return Result.failure()
         try {
+            graph.recoveryReady.await()
             val initial = graph.repository.get(id)
             if (initial.state in setOf(TransferState.COMPLETED, TransferState.CANCELED, TransferState.FAILED, TransferState.PAUSED)) return Result.success()
             setForeground(foreground(initial))
@@ -46,7 +47,8 @@ class DownloadWorker(context: Context, parameters: WorkerParameters) : Coroutine
         } catch (_: Exception) {
             withContext(NonCancellable + Dispatchers.IO) {
                 val task = graph.repository.get(id)
-                if (task.state !in setOf(TransferState.COMPLETED, TransferState.CANCELED, TransferState.PUBLISHING))
+                if (task.state in setOf(TransferState.QUEUED, TransferState.DOWNLOADING, TransferState.PAUSING,
+                        TransferState.VERIFYING, TransferState.PUBLISHING, TransferState.RETRY_WAIT))
                     graph.repository.change(id) { it.copy(state = TransferState.FAILED, error = TransferError.BACKGROUND_RESTRICTED) }
             }
             return Result.failure()
