@@ -5,7 +5,7 @@ from PySide6.QtCore import Qt, QSettings, QUrl, QSize, Signal, QTimer
 from PySide6.QtGui import QIcon, QKeySequence, QShortcut, QDesktopServices, QPixmap, QGuiApplication
 from PySide6.QtWidgets import (QMainWindow, QWidget, QFrame, QVBoxLayout, QHBoxLayout,
     QStackedWidget, QScrollArea, QLineEdit, QComboBox, QTabBar, QButtonGroup, QFileDialog,
-    QCheckBox, QDialog, QDialogButtonBox, QApplication)
+    QCheckBox, QDialog, QDialogButtonBox, QMessageBox, QApplication)
 from domain import DownloadError, ErrorCode
 from engine import Options
 from extractor import validate_url
@@ -28,6 +28,9 @@ class MainWindow(QMainWindow):
         self.speeds, self.meter = {}, SpeedMeter()
         self.media, self.analyzing, self.generation = None, False, 0
         self.backend_ready, self.tools = False, {}
+        self.enqueue_pending, self.pending_key = False, None
+        self.accepted_selections = set()
+        self.repeat_dialog = None
         self.hidden = set(self.settings.value('hidden_jobs', [], list))
         self.theme_mode = str(self.settings.value('theme', 'system'))
         self.reduced = self.settings.value('reduced_motion', False, bool)
@@ -123,11 +126,13 @@ class MainWindow(QMainWindow):
         self.controller.error.connect(self.show_error)
         self.controller.open_path.connect(lambda path: QDesktopServices.openUrl(QUrl.fromLocalFile(str(path))))
         self.controller.queued.connect(self.on_queued)
+        self.controller.enqueue_failed.connect(self.on_enqueue_failed)
         self.controller.closed.connect(self.on_closed)
         self.shortcuts = []
         for key, callback in (('Ctrl+L', self.focus_url), ('Ctrl+Return', self.download), ('Ctrl+Enter', self.download), ('Esc', self.escape)):
             shortcut = QShortcut(QKeySequence(key), self)
             shortcut.activated.connect(callback)
+            shortcut.setAutoRepeat(False)
             self.shortcuts.append(shortcut)
         QGuiApplication.styleHints().colorSchemeChanged.connect(self.on_system_theme)
         self.controller.start()
@@ -447,22 +452,73 @@ class MainWindow(QMainWindow):
     def update_download(self, *_):
         variant = self.format_combo.currentData()
         tools = all(self.tools.get(key) for key in ('ffmpeg', 'ffprobe', 'yt-dlp'))
-        enabled = self.backend_ready and self.media is not None and variant is not None and tools
+        enabled = self.backend_ready and self.media is not None and variant is not None and tools and not self.enqueue_pending
         self.download_button.setEnabled(enabled)
-        reason = '' if enabled else (tr('download.analyze_first') if not self.media else
+        reason = '' if enabled else (tr('download.pending') if self.enqueue_pending else
+                    tr('download.analyze_first') if not self.media else
                     tr('download.no_variant') if variant is None else
                     tr('download.tools_missing'))
         self.download_button.setToolTip(reason or tr('download.shortcut'))
         self.download_button.setAccessibleDescription(reason)
+        self.download_button.setText(tr('download.pending') if self.enqueue_pending else
+            tr('download.repeat') if self.selection_key() in self.accepted_selections else tr('download.start'))
         self.merge_hint.setText((tr('download.merge') if variant and variant.requires_merge else tr('download.original')) if tools else reason)
 
     def download(self):
-        if not self.download_button.isEnabled() or not self.media:
+        if self.closing or self.enqueue_pending or not self.download_button.isEnabled() or not self.media:
             return
-        self.controller.command('enqueue', Options(self.url_edit.text(), Path(self.destination), self.format_combo.currentData()), self.media.display_title)
+        key = self.selection_key()
+        if key in self.accepted_selections:
+            if self.repeat_dialog is not None:
+                return
+            dialog = QMessageBox(QMessageBox.Icon.Question, tr('download.repeat'), tr('download.repeat_question'),
+                                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel, self)
+            dialog.setTextFormat(Qt.TextFormat.PlainText)
+            dialog.button(QMessageBox.StandardButton.Yes).setText(tr('download.repeat_confirm'))
+            dialog.button(QMessageBox.StandardButton.Cancel).setText(tr('download.repeat_cancel'))
+            dialog.setDefaultButton(QMessageBox.StandardButton.Cancel)
+            dialog.setEscapeButton(QMessageBox.StandardButton.Cancel)
+            dialog.setWindowModality(Qt.WindowModality.WindowModal)
+            dialog.finished.connect(lambda result: self.repeat_finished(result, key))
+            self.repeat_dialog = dialog
+            dialog.open()
+        else:
+            self.submit_download()
+
+    def selection_key(self):
+        variant = self.format_combo.currentData()
+        return (self.url_edit.text().strip(), variant.selector, self.destination) if self.media and variant else None
+
+    def repeat_finished(self, result, key):
+        dialog, self.repeat_dialog = self.repeat_dialog, None
+        if dialog:
+            dialog.deleteLater()
+        if result == QMessageBox.StandardButton.Yes.value and key == self.selection_key() and not self.closing:
+            self.submit_download()
+
+    def submit_download(self):
+        if self.enqueue_pending or not self.media or not self.download_button.isEnabled():
+            return
+        self.enqueue_pending, self.pending_key = True, self.selection_key()
+        self.notice.hide()
+        self.update_download()
+        self.show_analysis(tr('download.pending'))
+        try:
+            self.controller.command('enqueue', Options(self.url_edit.text(), Path(self.destination), self.format_combo.currentData()), self.media.display_title)
+        except Exception:
+            self.on_enqueue_failed(tr('error.command'))
 
     def on_queued(self, job_id):
+        if self.pending_key is not None:
+            self.accepted_selections.add(self.pending_key)
+        self.enqueue_pending, self.pending_key = False, None
+        self.update_download()
         self.show_analysis(tr('download.queued'))
+
+    def on_enqueue_failed(self, message):
+        self.enqueue_pending, self.pending_key = False, None
+        self.update_download()
+        self.show_error(message)
 
     def choose_folder(self):
         directory = QFileDialog.getExistingDirectory(self, tr('folder.label'), self.destination)
@@ -471,6 +527,7 @@ class MainWindow(QMainWindow):
             self.folder_edit.setText(directory)
             self.settings_folder.set_full_text(directory)
             self.settings.setValue('destination', directory)
+            self.update_download()
 
     def on_ready(self, tools):
         self.backend_ready, self.tools = True, tools

@@ -36,6 +36,7 @@ class FixtureController(QObject):
     ready = Signal(object)
     error = Signal(str)
     queued = Signal(str)
+    enqueue_failed = Signal(str)
     open_path = Signal(object)
     closed = Signal()
 
@@ -170,6 +171,44 @@ class DesktopTest(unittest.TestCase):
         self.assertFalse(self.window.download_button.isEnabled())
         self.assertIn('FFmpeg', self.window.download_button.toolTip())
 
+    def test_fast_clicks_and_shortcuts_enqueue_once_then_require_explicit_repeat(self):
+        from PySide6.QtWidgets import QMessageBox
+        self.ready()
+        control = self.window.download_button
+        QTest.mouseClick(control, Qt.MouseButton.LeftButton)
+        QTest.mouseClick(control, Qt.MouseButton.LeftButton)
+        QTest.keyClick(self.window, Qt.Key.Key_Return, Qt.KeyboardModifier.ControlModifier)
+        self.assertEqual(len([c for c in self.controller.calls if c[0] == 'enqueue']), 1)
+        self.assertFalse(control.isEnabled())
+        self.controller.queued.emit('accepted')
+        QTest.mouseClick(control, Qt.MouseButton.LeftButton)
+        self.assertEqual(len([c for c in self.controller.calls if c[0] == 'enqueue']), 1)
+        self.assertIsNotNone(self.window.repeat_dialog)
+        dialog = self.window.repeat_dialog
+        QTest.mouseClick(dialog.button(QMessageBox.StandardButton.Cancel), Qt.MouseButton.LeftButton)
+        APP.processEvents()
+        self.assertIsNone(self.window.repeat_dialog)
+        QTest.mouseClick(control, Qt.MouseButton.LeftButton)
+        dialog = self.window.repeat_dialog
+        QTest.mouseClick(dialog.button(QMessageBox.StandardButton.Yes), Qt.MouseButton.LeftButton)
+        APP.processEvents()
+        self.assertEqual(len([c for c in self.controller.calls if c[0] == 'enqueue']), 2)
+        self.assertTrue(self.window.enqueue_pending)
+
+    def test_enqueue_error_reenables_button_and_selection_cannot_bypass_pending(self):
+        self.ready()
+        self.window.download()
+        self.window.format_combo.setCurrentIndex(1)
+        self.assertFalse(self.window.download_button.isEnabled())
+        self.controller.error.emit('Ошибка другого действия')
+        self.assertTrue(self.window.enqueue_pending)
+        self.assertFalse(self.window.download_button.isEnabled())
+        self.controller.enqueue_failed.emit('Не удалось добавить задачу')
+        self.assertFalse(self.window.enqueue_pending)
+        self.assertTrue(self.window.download_button.isEnabled())
+        self.window.download()
+        self.assertEqual(len([c for c in self.controller.calls if c[0] == 'enqueue']), 2)
+
     def test_progress_is_truthful_and_pause_only_when_supported(self):
         job = self.job()
         self.window.on_job(job)
@@ -261,6 +300,33 @@ class DesktopTest(unittest.TestCase):
 
 
 class AsyncBridgeTest(unittest.TestCase):
+    def test_actual_enqueue_failure_signal_releases_pending_guard(self):
+        from unittest.mock import patch
+        class OwnedAnalyzer:
+            def analyze(self, url, cancel):
+                return parse_metadata(json.loads((FIXTURES / 'one.json').read_text()), url)
+        with tempfile.TemporaryDirectory() as directory:
+            controller = Controller(directory, analyzer=OwnedAnalyzer())
+            window = MainWindow(directory, controller=controller)
+            window.show()
+            try:
+                wait_until(lambda: window.backend_ready)
+                window.url_edit.setText('https://example.invalid/owned')
+                window.analyze()
+                wait_until(lambda: window.media is not None)
+                with patch.object(controller.queue, 'enqueue', side_effect=OSError('owned failure')) as enqueue:
+                    window.download()
+                    self.assertTrue(window.enqueue_pending)
+                    wait_until(lambda: not window.enqueue_pending)
+                    enqueue.assert_called_once()
+                self.assertTrue(window.download_button.isEnabled())
+                self.assertFalse(window.notice.isHidden())
+            finally:
+                window.close()
+                wait_until(lambda: window.allow_close)
+                window.deleteLater()
+                APP.processEvents()
+
     def test_actual_bounded_thumbnail_worker_and_stale_image_rejection(self):
         import threading
         from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer

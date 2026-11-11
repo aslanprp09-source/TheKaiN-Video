@@ -23,6 +23,7 @@ class Controller(QObject):
     ready = Signal(object)
     error = Signal(str)
     queued = Signal(str)
+    enqueue_failed = Signal(str)
     open_path = Signal(object)
     closed = Signal()
 
@@ -136,7 +137,10 @@ class Controller(QObject):
             else:
                 getattr(self.queue, name)(*args)
         except Exception:
-            self.error.emit(tr('error.command'))
+            if name == 'enqueue':
+                self.enqueue_failed.emit(tr('error.command'))
+            else:
+                self.error.emit(tr('error.command'))
 
     def shutdown(self):
         if self.stopping:

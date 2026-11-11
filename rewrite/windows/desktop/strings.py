@@ -1,5 +1,10 @@
 """Russian-first catalog with stable English localization keys; no language switch is advertised yet."""
 TEXT = {
+    'download.pending': 'Добавляем в очередь…',
+    'download.repeat': 'Скачать ещё раз',
+    'download.repeat_question': 'Этот вариант уже добавлен в очередь в этой сессии. Создать ещё одну задачу для отдельной копии?',
+    'download.repeat_confirm': 'Добавить ещё одну копию',
+    'download.repeat_cancel': 'Отмена',
     'progress.eta': 'Осталось ≈ {seconds} с',
     'unit.gib': 'ГиБ', 'unit.mib': 'МиБ', 'unit.kib': 'КиБ', 'unit.byte': 'Б',
     'format.video': 'Видео', 'format.audio': 'Аудио',
