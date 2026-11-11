@@ -2,7 +2,7 @@
 
 Separate new implementation, started on 2026-11-11. Legacy code and releases are preserved. The code under this directory is written from scratch.
 
-## Windows prototype 0.1
+## Windows desktop — PySide6 development build
 
 Python 3.11+, yt-dlp, FFmpeg and FFprobe (on PATH for merging and mandatory output verification). Run:
 
@@ -10,9 +10,13 @@ Python 3.11+, yt-dlp, FFmpeg and FFprobe (on PATH for merging and mandatory outp
     python -m pip install -r requirements.txt
     python app.py
 
-Includes pasted URL, cancelable bounded metadata analysis, actual format selection and a persistent SQLite queue (two concurrent jobs by default, maximum three). Downloads use private per-job staging, FFprobe plus a full FFmpeg decode, then collision-safe publication before completion. The table shows persisted task state, byte counts, cancel and explicit retry. Pause is disabled for yt-dlp because remote continuation cannot be established from a partial file alone. The direct HTTP service API supports pause/resume only after a real 206 response with strong ETag, with revalidation on continuation. Unknown sizes stay unknown; audio retains its offered container, without synthetic MP3/resolution options. Playlists, thumbnail rendering, the PySide6 redesign and production installers remain later work. Requires authorized downloads. Run offline tests with FFmpeg/FFprobe installed:
+The PySide6 UI follows the approved TheKaiN design: Home, Downloads, Library and Settings; System/Dark/Light themes; deliberate paste/clear; asynchronous source analysis and thumbnails; actual video/audio variants and destination selection. Downloads have search/state filters, measured rate/ETA only when defensible, accessible actions and verified-file opening. English localization keys back the Russian-first copy. See [M3 UI validation and screenshots](docs/M3_UI.md).
+
+The accepted M2 mechanism remains unchanged: persistent SQLite queue (two concurrent jobs by default, maximum three), private staging, mandatory FFprobe/full FFmpeg decode and no-clobber publication before completion. yt-dlp Pause is unavailable until remote continuation can be proven. The direct HTTP service API supports pause/resume only after real 206/strong ETag checks. Unknown sizes remain unknown; no artificial qualities, MP3 conversions, subtitles or playlist controls are offered. Production installers and native Windows release verification remain later work. Requires authorized downloads. Run offline tests with FFmpeg/FFprobe and the Python requirements installed:
 
     python -m unittest discover -s rewrite/windows -p "test_*.py" -v
+
+On headless Linux, set `QT_QPA_PLATFORM=offscreen` for Qt tests. The rebuild CI installs the required Qt runtime libraries and dependencies before running the same command.
 
 See [M2 validation, recovery and limitations](docs/M2_QUEUE.md) and [M1 analysis contracts](docs/M1_EXTRACTOR.md). Default state storage is `%LOCALAPPDATA%/TheKaiNVideo` on Windows or `$XDG_DATA_HOME/thekain-video` on Linux. Set `THEKAIN_DATA_DIR` to a writable private directory to override it (for example `/workspace/thekain-data` in this cloud environment). Do not put queue databases in a shared folder: job URLs may contain expiring access tokens.
 

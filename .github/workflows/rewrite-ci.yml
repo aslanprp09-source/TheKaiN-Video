@@ -11,11 +11,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install media verification tools
+      - name: Install media verification and Qt runtime tools
         run: |
           sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends ffmpeg
-      - run: python -m unittest discover -s rewrite/windows -p "test_*.py" -v
+          sudo apt-get install --yes --no-install-recommends ffmpeg libegl1 libopengl0 libxkbcommon0 fonts-dejavu-core
+      - name: Install desktop dependencies
+        run: python -m pip install -r rewrite/windows/requirements.txt
+      - name: Run engine and headless Qt tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m unittest discover -s rewrite/windows -p "test_*.py" -v
   android-debug:
     runs-on: ubuntu-latest
     defaults:

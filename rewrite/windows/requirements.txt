@@ -1,1 +1,2 @@
 yt-dlp>=2025.10.14
+PySide6-Essentials==6.12.0

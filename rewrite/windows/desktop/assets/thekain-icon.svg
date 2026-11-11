@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="dark" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#252730"/><stop offset="1" stop-color="#101116"/></linearGradient>
+    <linearGradient id="metal" x1="0" x2=".9" y1="0" y2="1"><stop stop-color="#ffffff"/><stop offset=".58" stop-color="#f3f4f7"/><stop offset="1" stop-color="#b8bbc7"/></linearGradient>
+    <linearGradient id="red" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#ff363b"/><stop offset="1" stop-color="#e90024"/></linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="#fff"/>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#dark)"/>
+  <path d="M112 124 Q112 112 126 112 H173 Q184 112 184 124 V226 L278 124 Q288 112 299 112 H357 Q371 112 359 126 L271 235 L369 381 Q377 394 365 394 H301 Q294 394 286 384 L184 267 V382 Q184 396 171 396 H127 Q112 396 112 382 Z" fill="url(#metal)"/>
+  <path d="M214 205 Q214 193 228 201 L303 242 Q317 250 303 258 L228 300 Q214 308 214 294 Z" fill="url(#red)"/>
+  <path d="M245 227 Q242 225 242 233 V269 Q242 277 249 273 L280 255 Q285 252 280 248 Z" fill="#fff"/>
+  <circle cx="400" cy="101" r="48" fill="url(#red)"/>
+  <path d="M400 72 V113 M384 99 L400 116 416 99 M374 124 V131 Q374 135 379 135 H421 Q426 135 426 130 V124" fill="none" stroke="#fff" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
