@@ -12,6 +12,10 @@ else:
     App = None
 from domain import AnalyzeResult, DownloadError, ErrorCode
 from extractor import parse_metadata
+from dataclasses import replace
+from pathlib import Path
+from jobs import DownloadJob, JobStatus as S, ResumeCapability as R
+from domain import FormatVariant
 
 
 @unittest.skipIf(App is None, "Tkinter not installed; core/extractor tests still run")
@@ -58,3 +62,17 @@ class AnalysisControllerTest(unittest.TestCase):
         self.assertEqual((event, generation), ('analysis', 2))
         self.assertEqual(result.error.code, ErrorCode.UNKNOWN)
         self.assertNotIn('secret', str(result))
+
+    def test_queue_rendering_never_offers_fake_pause_or_early_100(self):
+        c = SimpleNamespace(progressbar=Mock(), progress=Mock(), task_status=Mock(),
+                            pause_btn=Mock(), resume_btn=Mock(), retry_btn=Mock(), cancel_btn=Mock())
+        job = DownloadJob('fixture', 'https://example.invalid/v', 'fixture',
+                          FormatVariant('f', 'mp4', 'mp4'), Path('/out'), Path('/stage'),
+                          state=S.DOWNLOADING, progress_bytes=100, total_bytes=100, resume=R.NO)
+        App.render_job(c, job)
+        c.progress.set.assert_called_with(99)
+        c.pause_btn.config.assert_called_with(state='disabled')
+        App.render_job(c, replace(job, state=S.VERIFYING))
+        c.progressbar.config.assert_called_with(mode='indeterminate')
+        App.render_job(c, replace(job, state=S.COMPLETED))
+        c.progress.set.assert_called_with(100)

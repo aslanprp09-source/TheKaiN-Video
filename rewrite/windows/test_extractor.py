@@ -156,7 +156,7 @@ class ProcessTest(unittest.TestCase):
         self.assertEqual(self.analyzer('one').analyze(URL).media.source_id, 'fixture-one')
 
     def test_command_safe_no_download(self):
-        with patch('extractor.subprocess.Popen', wraps=subprocess.Popen) as launch:
+        with patch('process_runner.subprocess.Popen', wraps=subprocess.Popen) as launch:
             self.analyzer('one').analyze(URL)
         args, kwargs = launch.call_args
         self.assertIsInstance(args[0], list)
@@ -172,8 +172,12 @@ class ProcessTest(unittest.TestCase):
     def test_missing_tool(self):
         self.assertEqual(SourceAnalyzer([str(FIXTURES / 'absent')]).analyze(URL).error.code, ErrorCode.TOOL_MISSING)
 
+    def test_oversized_metadata_fails_with_bounded_capture(self):
+        analyzer = SourceAnalyzer([sys.executable, '-c', 'print("x" * 3000000)'])
+        self.assertEqual(analyzer.analyze(URL).error.code, ErrorCode.UNKNOWN)
+
     def test_invalid_url_never_launches(self):
-        with patch('extractor.subprocess.Popen') as launch:
+        with patch('process_runner.subprocess.Popen') as launch:
             self.assertEqual(self.analyzer('one').analyze('file:///etc/passwd').error.code, ErrorCode.INVALID_URL)
         launch.assert_not_called()
 
@@ -185,7 +189,7 @@ class ProcessTest(unittest.TestCase):
             p = real_popen(*args, **kwargs)
             processes.append(p)
             return p
-        with patch('extractor.subprocess.Popen', side_effect=record):
+        with patch('process_runner.subprocess.Popen', side_effect=record):
             result = self.analyzer('wait').analyze(URL, timeout=0.15)
         self.assertEqual(result.error.code, ErrorCode.TIMEOUT)
         self.assertLess(time.monotonic() - start, 3)
@@ -194,7 +198,7 @@ class ProcessTest(unittest.TestCase):
     def test_cancel_before_launch(self):
         cancel = threading.Event()
         cancel.set()
-        with patch('extractor.subprocess.Popen') as launch:
+        with patch('process_runner.subprocess.Popen') as launch:
             self.assertEqual(self.analyzer('wait').analyze(URL, cancel).error.code, ErrorCode.CANCELED)
         launch.assert_not_called()
 

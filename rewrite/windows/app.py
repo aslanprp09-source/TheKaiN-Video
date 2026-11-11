@@ -1,22 +1,26 @@
 """Tkinter proof of concept; install yt-dlp first."""
 import queue
-import shutil
 import threading
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
-from engine import Engine, Options, command_for
+from engine import Options, command_for
+from download_queue import DownloadQueue, default_data_root
+from jobs import JobStatus as S, ResumeCapability as R, STATUS_RU
 from extractor import SourceAnalyzer
 from domain import AnalyzeResult, DownloadError, ErrorCode
 
 
 class App(tk.Tk):
-    def __init__(self):
+    def __init__(self, download_queue=None):
         super().__init__()
         self.title("TheKaiN Video — Rebuild 0.1")
-        self.geometry("650x330")
-        self.engine = Engine()
+        self.geometry("800x540")
         self.events = queue.Queue()
+        self.downloads = download_queue or DownloadQueue(default_data_root())
+        self.downloads.callback = lambda job: self.events.put(('job', job))
+        self.jobs = {}
+        self.selected_job = None
         self.busy = False
         self.analyzer = SourceAnalyzer()
         self.analysis_cancel = threading.Event()
@@ -27,6 +31,7 @@ class App(tk.Tk):
         self.folder = tk.StringVar(value=str(Path.home() / "Downloads"))
         self.quality = tk.StringVar()
         self.status = tk.StringVar(value="Вставьте ссылку и определите доступные форматы.")
+        self.task_status = tk.StringVar(value="Очередь готова: до двух одновременных задач.")
         self.progress = tk.DoubleVar()
         frm = ttk.Frame(self, padding=22)
         frm.pack(fill="both", expand=True)
@@ -49,17 +54,30 @@ class App(tk.Tk):
         controls.pack(anchor="w", pady=10)
         self.analyze_btn = ttk.Button(controls, text="Определить видео", command=self.analyze)
         self.analyze_btn.pack(side="left", padx=(0, 7))
-        self.start_btn = ttk.Button(controls, text="Скачать / продолжить", command=self.start, state="disabled")
+        self.start_btn = ttk.Button(controls, text="Добавить в очередь", command=self.start, state="disabled")
         self.start_btn.pack(side="left")
-        self.pause_btn = ttk.Button(controls, text="Пауза", command=lambda: self.stop("paused"), state="disabled")
+        self.pause_btn = ttk.Button(controls, text="Пауза", command=self.pause, state="disabled")
         self.pause_btn.pack(side="left", padx=7)
-        self.cancel_btn = ttk.Button(controls, text="Стоп", command=lambda: self.stop("canceled"), state="disabled")
+        self.resume_btn = ttk.Button(controls, text="Продолжить", command=self.resume, state="disabled")
+        self.resume_btn.pack(side="left", padx=(0, 7))
+        self.retry_btn = ttk.Button(controls, text="Повторить", command=self.retry, state="disabled")
+        self.retry_btn.pack(side="left", padx=(0, 7))
+        self.cancel_btn = ttk.Button(controls, text="Отменить", command=self.cancel, state="disabled")
         self.cancel_btn.pack(side="left")
-        ttk.Progressbar(frm, variable=self.progress, maximum=100).pack(fill="x", pady=7)
-        ttk.Label(frm, textvariable=self.status, wraplength=580).pack(anchor="w")
+        self.progressbar = ttk.Progressbar(frm, variable=self.progress, maximum=100)
+        self.progressbar.pack(fill="x", pady=7)
+        ttk.Label(frm, textvariable=self.status, wraplength=740).pack(anchor="w")
+        ttk.Label(frm, textvariable=self.task_status, wraplength=740).pack(anchor="w", pady=(4, 0))
+        self.tasks = ttk.Treeview(frm, columns=('title', 'state', 'bytes'), show='headings', height=8, selectmode='browse')
+        for key, text, width in (('title', 'Задача', 260), ('state', 'Состояние', 240), ('bytes', 'Получено, байт', 130)):
+            self.tasks.heading(key, text=text)
+            self.tasks.column(key, width=width)
+        self.tasks.pack(fill='both', expand=True, pady=(10, 0))
+        self.tasks.bind('<<TreeviewSelect>>', self.select_job)
         self.after(100, self.pump)
         self.url.trace_add("write", self.url_changed)
         self.protocol("WM_DELETE_WINDOW", self.close)
+        self.downloads.start()
 
     def paste(self):
         try:
@@ -81,31 +99,63 @@ class App(tk.Tk):
         job = Options(self.url.get(), Path(self.folder.get()), self.media.formats[index])
         try:
             command_for(job)
-            if job.quality.requires_merge and not shutil.which("ffmpeg"):
-                raise ValueError("Для объединения выбранных дорожек требуется FFmpeg в PATH")
+            queued = self.downloads.enqueue(job, title=self.media.display_title)
         except (ValueError, OSError) as exc:
             messagebox.showerror("Ошибка", str(exc))
             return
-        self.busy = True
+        self.selected_job = queued.id
         self.progress.set(0)
-        self.status.set("Скачивание началось…")
-        self.start_btn.config(state="disabled")
-        self.analyze_btn.config(state="disabled")
-        self.pause_btn.config(state="normal")
-        self.cancel_btn.config(state="normal")
-        threading.Thread(target=self.worker, args=(job,), daemon=True).start()
+        self.status.set("Добавлено в очередь. Можно определить следующую ссылку.")
 
-    def worker(self, job):
-        try:
-            outcome = self.engine.run(job, lambda key, val: self.events.put((key, val)))
-        except Exception:
-            self.events.put(("log", DownloadError(ErrorCode.UNKNOWN).message))
-            outcome = "failed"
-        self.events.put(("done", outcome))
+    def pause(self):
+        if self.selected_job:
+            self.downloads.pause(self.selected_job)
 
-    def stop(self, reason):
-        if self.engine.stop(reason):
-            self.status.set("Останавливаем…")
+    def resume(self):
+        if self.selected_job:
+            self.downloads.resume(self.selected_job)
+
+    def retry(self):
+        if self.selected_job:
+            self.downloads.retry(self.selected_job)
+
+    def cancel(self):
+        if self.selected_job:
+            self.downloads.cancel(self.selected_job)
+
+    def select_job(self, *_):
+        selected = self.tasks.selection()
+        if selected:
+            self.selected_job = selected[0]
+            self.render_job(self.jobs[self.selected_job])
+
+    def render_job(self, job):
+        self.progressbar.stop()
+        self.progressbar.config(mode='determinate')
+        self.progress.set(job.percent or 0)
+        if job.state in (S.VERIFYING, S.POSTPROCESSING, S.PUBLISHING) or job.state == S.DOWNLOADING and job.percent is None:
+            self.progressbar.config(mode='indeterminate')
+            self.progressbar.start(30)
+        self.task_status.set(job.error.message if job.error else STATUS_RU[job.state])
+        self.pause_btn.config(state='normal' if job.state == S.DOWNLOADING and job.resume == R.YES else 'disabled')
+        self.resume_btn.config(state='normal' if job.state == S.PAUSED else 'disabled')
+        self.retry_btn.config(state='normal' if job.state == S.FAILED else 'disabled')
+        self.cancel_btn.config(state='disabled' if job.state in (S.COMPLETED, S.CANCELED, S.FAILED, S.PUBLISHING) else 'normal')
+
+    def apply_job(self, job):
+        self.jobs[job.id] = job
+        values = (job.title, STATUS_RU[job.state], str(job.progress_bytes))
+        if self.tasks.exists(job.id):
+            self.tasks.item(job.id, values=values)
+        else:
+            self.tasks.insert('', 'end', iid=job.id, values=values)
+        if self.selected_job is None:
+            self.selected_job = job.id
+            self.tasks.selection_set(job.id)
+        if job.id == self.selected_job:
+            if self.tasks.selection() != (job.id,):
+                self.tasks.selection_set(job.id)
+            self.render_job(job)
 
     def url_changed(self, *_):
         self.analysis_cancel.set()
@@ -165,29 +215,15 @@ class App(tk.Tk):
                 event, value = self.events.get_nowait()
                 if event == "analysis":
                     self.apply_analysis(*value)
-                elif event == "progress":
-                    self.progress.set(value)
-                elif event in ("log", "result"):
-                    self.status.set(str(value))
-                elif event == "done":
-                    self.busy = False
-                    self.start_btn.config(state="normal" if self.media else "disabled")
-                    self.analyze_btn.config(state="normal")
-                    self.pause_btn.config(state="disabled")
-                    self.cancel_btn.config(state="disabled")
-                    if value == "completed":
-                        self.progress.set(100)
-                    elif value == "paused":
-                        self.status.set("Пауза. Нажмите «Скачать / продолжить».")
-                    elif value == "canceled":
-                        self.status.set("Остановлено. Частичные файлы сохранены.")
+                elif event == 'job':
+                    self.apply_job(value)
         except queue.Empty:
             pass
         self.after(100, self.pump)
 
     def close(self):
         self.analysis_cancel.set()
-        self.engine.stop("paused")
+        threading.Thread(target=self.downloads.close, daemon=False).start()
         self.destroy()
 
 

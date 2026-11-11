@@ -2,13 +2,12 @@
 import json
 import math
 import re
-import subprocess
 import sys
-import time
 from threading import Event
 from urllib.parse import urlsplit
 
 from domain import AnalyzeResult, DownloadError, ErrorCode, FormatVariant, SourceMedia
+from process_runner import Control, TaskFailure, TaskStopped, run_process
 
 
 def validate_url(value: str) -> str:
@@ -37,6 +36,7 @@ def classify_error(stderr: str) -> DownloadError:
         (ErrorCode.AUTH_REQUIRED, ("private video", "sign in", "login required", "authentication required", "members-only", "premium-only")),
         (ErrorCode.REMOTE_MISSING, ("404", "410", "video has been removed", "video unavailable")),
         (ErrorCode.REMOTE_FORBIDDEN, ("403", "forbidden")),
+        (ErrorCode.REMOTE_SERVER, ("http error 500", "http error 502", "http error 503", "http error 504")),
         (ErrorCode.TIMEOUT, ("timed out", "timeout")),
         (ErrorCode.NETWORK_LOST, ("connection", "unable to download", "name resolution", "network is unreachable")),
         (ErrorCode.UNSUPPORTED_SOURCE, ("unsupported url", "no suitable extractor")),
@@ -44,7 +44,7 @@ def classify_error(stderr: str) -> DownloadError:
     )
     for code, fragments in groups:
         if any(fragment in text for fragment in fragments):
-            return DownloadError(code, code in {ErrorCode.RATE_LIMITED, ErrorCode.TIMEOUT, ErrorCode.NETWORK_LOST})
+            return DownloadError(code, code in {ErrorCode.RATE_LIMITED, ErrorCode.TIMEOUT, ErrorCode.NETWORK_LOST, ErrorCode.REMOTE_SERVER})
     return DownloadError(ErrorCode.UNKNOWN)
 
 
@@ -135,37 +135,16 @@ class SourceAnalyzer:
         if cancel.is_set():
             return AnalyzeResult(error=DownloadError(ErrorCode.CANCELED))
         cmd = self.command + ["--ignore-config", "--dump-single-json", "--skip-download", "--no-playlist", "--no-warnings", "--", url]
+        control = Control()
+        control.event = cancel
         try:
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                    text=True, encoding="utf-8", errors="replace", shell=False)
-        except FileNotFoundError:
-            return AnalyzeResult(error=DownloadError(ErrorCode.TOOL_MISSING))
-        except OSError:
+            result = run_process(cmd, control, timeout=timeout)
+            if result.returncode:
+                return AnalyzeResult(error=classify_error(result.stderr))
+            return parse_metadata(json.loads(result.stdout), url)
+        except TaskStopped:
+            return AnalyzeResult(error=DownloadError(ErrorCode.CANCELED))
+        except TaskFailure as exc:
+            return AnalyzeResult(error=exc.error)
+        except (OSError, ValueError, TypeError):
             return AnalyzeResult(error=DownloadError(ErrorCode.UNKNOWN))
-        deadline = time.monotonic() + timeout
-        try:
-            while True:
-                if cancel.is_set() or time.monotonic() >= deadline:
-                    code = ErrorCode.CANCELED if cancel.is_set() else ErrorCode.TIMEOUT
-                    return AnalyzeResult(error=DownloadError(code, code == ErrorCode.TIMEOUT))
-                try:
-                    stdout, stderr = proc.communicate(timeout=min(0.1, max(0.001, deadline - time.monotonic())))
-                    break
-                except subprocess.TimeoutExpired:
-                    continue
-            if cancel.is_set():
-                return AnalyzeResult(error=DownloadError(ErrorCode.CANCELED))
-            if proc.returncode:
-                return AnalyzeResult(error=classify_error(stderr))
-            try:
-                return parse_metadata(json.loads(stdout), url)
-            except (ValueError, TypeError):
-                return AnalyzeResult(error=DownloadError(ErrorCode.UNKNOWN))
-        finally:
-            if proc.poll() is None:
-                proc.terminate()
-                try:
-                    proc.communicate(timeout=1)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-                    proc.communicate()
