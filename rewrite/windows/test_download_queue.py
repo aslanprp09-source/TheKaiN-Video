@@ -6,6 +6,7 @@ import io
 import json
 import os
 import sqlite3
+import shutil
 import tempfile
 import threading
 import time
@@ -104,6 +105,12 @@ class FakeVerifier:
 class QueueTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        missing = [name for name in ('ffmpeg', 'ffprobe') if shutil.which(name) is None]
+        if missing:
+            message = 'Missing verification tools on PATH: ' + ', '.join(missing)
+            if os.environ.get('GITHUB_ACTIONS') == 'true':
+                print('::error title=M2 integration prerequisites::' + message, flush=True)
+            raise RuntimeError(message)
         cls.server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), FixtureHandler)
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
         cls.thread.start()
@@ -123,6 +130,12 @@ class QueueTest(unittest.TestCase):
         self.changed = threading.Condition()
         FixtureHandler.counts.clear()
         FixtureHandler.ranges.clear()
+
+    def fail(self, msg=None):
+        if os.environ.get('GITHUB_ACTIONS') == 'true':
+            message = str(msg).replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+            print('::error title=M2 queue assertion::' + message, flush=True)
+        super().fail(msg)
 
     def tearDown(self):
         for q in reversed(self.queues):
