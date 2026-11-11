@@ -34,7 +34,7 @@ def command_for(job):
         raise ValueError("В ссылке есть недопустимые символы или учётные данные")
     if job.quality not in FORMAT_IDS:
         raise ValueError("Неизвестный формат")
-    cmd = [sys.executable, "-m", "yt_dlp", "--newline", "--continue", "--no-playlist",
+    cmd = [sys.executable, "-m", "yt_dlp", "--newline", "--progress", "--no-quiet", "--no-simulate", "--continue", "--no-playlist",
            "--no-mtime", "-P", str(job.folder), "-o", "%(title).150B [%(id)s].%(ext)s",
            "--print", "after_move:THEKAIN_FILE:%(filepath)s", "-f", FORMAT_IDS[job.quality]]
     if job.quality == "MP3":
