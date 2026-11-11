@@ -34,9 +34,9 @@ def stylesheet(mode, reduced_motion=False):
     QLabel[tone="error"] {{ color: {c['accent']}; }}
     QLabel[tone="warning"] {{ color: {c['warning']}; }}
     QLabel#thumbnail {{ background: {c['raised']}; border-radius: 12px; color: {c['muted']}; }}
-    QLineEdit, QComboBox, QSpinBox {{ background: {c['surface']}; border: 1px solid {c['border']};
+    QLineEdit, QComboBox {{ background: {c['surface']}; border: 1px solid {c['border']};
         border-radius: 10px; padding: 0px 12px; min-height: 44px; }}
-    QLineEdit:focus, QComboBox:focus, QSpinBox:focus {{ border: 2px solid {c['accent']}; }}
+    QLineEdit:focus, QComboBox:focus {{ border: 2px solid {c['accent']}; }}
     QLineEdit:disabled, QComboBox:disabled {{ color: {c['muted']}; background: {c['raised']}; }}
     QComboBox {{ padding-right: 30px; }}
     QComboBox::drop-down {{ border: none; width: 28px; }}

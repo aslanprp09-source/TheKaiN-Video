@@ -5,7 +5,7 @@ from PySide6.QtCore import Qt, QSettings, QUrl, QSize, Signal, QTimer
 from PySide6.QtGui import QIcon, QKeySequence, QShortcut, QDesktopServices, QPixmap, QGuiApplication
 from PySide6.QtWidgets import (QMainWindow, QWidget, QFrame, QVBoxLayout, QHBoxLayout,
     QStackedWidget, QScrollArea, QLineEdit, QComboBox, QTabBar, QButtonGroup, QFileDialog,
-    QCheckBox, QSpinBox, QAbstractSpinBox, QDialog, QDialogButtonBox, QApplication)
+    QCheckBox, QDialog, QDialogButtonBox, QApplication)
 from domain import DownloadError, ErrorCode
 from engine import Options
 from extractor import validate_url
@@ -311,26 +311,14 @@ class MainWindow(QMainWindow):
         box.addWidget(control, alignment=Qt.AlignmentFlag.AlignLeft)
         row = QHBoxLayout()
         row.addWidget(label(tr('queue.concurrency')), 1)
-        self.concurrency_spin = QSpinBox()
-        self.concurrency_spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
-        self.concurrency_spin.setFixedWidth(60)
-        self.concurrency_spin.setRange(1, 3)
-        self.concurrency_spin.setValue(int(self.settings.value('concurrency', 2)))
-        self.concurrency_spin.setAccessibleName(tr('queue.concurrency_label'))
-        self.concurrency_spin.valueChanged.connect(self.change_concurrency)
-        self.less_tasks = button('−', name=tr('queue.decrease'))
-        self.more_tasks = button('+', name=tr('queue.increase'))
-        for control in (self.less_tasks, self.more_tasks):
-            control.setFixedWidth(44)
-        self.less_tasks.clicked.connect(self.concurrency_spin.stepDown)
-        self.more_tasks.clicked.connect(self.concurrency_spin.stepUp)
-        self.less_tasks.setEnabled(self.concurrency_spin.value() > 1)
-        self.more_tasks.setEnabled(self.concurrency_spin.value() < 3)
-        self.less_tasks.setToolTip(tr('queue.decrease') if self.concurrency_spin.value() > 1 else tr('queue.minimum'))
-        self.more_tasks.setToolTip(tr('queue.increase') if self.concurrency_spin.value() < 3 else tr('queue.maximum'))
-        row.addWidget(self.less_tasks)
-        row.addWidget(self.concurrency_spin)
-        row.addWidget(self.more_tasks)
+        self.concurrency_combo = QComboBox()
+        for count in (1, 2, 3):
+            self.concurrency_combo.addItem(str(count), count)
+        self.concurrency_combo.setCurrentIndex(max(0, min(2, int(self.settings.value('concurrency', 2)) - 1)))
+        self.concurrency_combo.setAccessibleName(tr('queue.concurrency_label'))
+        self.concurrency_combo.setFixedWidth(100)
+        self.concurrency_combo.currentIndexChanged.connect(lambda _: self.change_concurrency(self.concurrency_combo.currentData()))
+        row.addWidget(self.concurrency_combo)
         box.addLayout(row)
         box.addWidget(label(tr('storage.limits'), 'muted', True))
         settings.addWidget(general)
@@ -627,10 +615,6 @@ class MainWindow(QMainWindow):
 
     def change_concurrency(self, value):
         self.settings.setValue('concurrency', value)
-        self.less_tasks.setEnabled(value > 1)
-        self.more_tasks.setEnabled(value < 3)
-        self.less_tasks.setToolTip(tr('queue.decrease') if value > 1 else tr('queue.minimum'))
-        self.more_tasks.setToolTip(tr('queue.increase') if value < 3 else tr('queue.maximum'))
         self.controller.command('concurrency', value)
 
     def escape(self):

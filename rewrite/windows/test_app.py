@@ -234,14 +234,19 @@ class DesktopTest(unittest.TestCase):
 
     def test_settings_persist_theme_motion_and_concurrency(self):
         self.window.navigate(3)
+        APP.processEvents()
+        selector = self.window.concurrency_combo
+        self.assertEqual(selector.currentText(), '2')
+        self.assertGreater(selector.width(), selector.fontMetrics().horizontalAdvance(selector.currentText()) + 40)
         self.window.theme_combo.setCurrentIndex(self.window.theme_combo.findData('dark'))
         self.assertEqual(self.window.resolved_theme, 'dark')
         self.window.theme_combo.setCurrentIndex(self.window.theme_combo.findData('light'))
         self.assertEqual(self.window.resolved_theme, 'light')
-        QTest.mouseClick(self.window.more_tasks, Qt.MouseButton.LeftButton)
+        selector.setFocus()
+        QTest.keyClick(selector, Qt.Key.Key_Down)
         self.assertIn(('concurrency', 3), self.controller.calls)
-        self.assertFalse(self.window.more_tasks.isEnabled())
-        self.assertIn('три', self.window.more_tasks.toolTip())
+        self.assertEqual(selector.currentData(), 3)
+        self.assertEqual(selector.count(), 3)
         self.window.motion_box.setChecked(True)
         self.window.settings.sync()
         stored = QSettings(str(self.root / 'preferences.ini'), QSettings.Format.IniFormat)
