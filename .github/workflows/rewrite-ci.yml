@@ -63,6 +63,9 @@ jobs:
           gradle-version: "8.11.1"
       - name: Prepare official Android 35 emulator
         run: |
+          set -Eeuo pipefail
+          trap 'echo "::error title=M4 emulator setup::Failed command on line $LINENO: $BASH_COMMAND"' ERR
+          echo "::notice title=M4 emulator host::$(uname -m); ANDROID_HOME=$ANDROID_HOME; KVM=$(ls -l /dev/kvm 2>&1)"
           test -e /dev/kvm
           sudo chmod a+rw /dev/kvm
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-35' 'build-tools;35.0.0' 'emulator' 'system-images;android-35;google_apis;x86_64'
