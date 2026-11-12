@@ -2,6 +2,8 @@ name: Clean rebuild — Windows tests and Android APK
 on:
   push:
     branches: [rebuild-2026-11-11]
+  pull_request:
+    branches: [rebuild-2026-11-11]
   workflow_dispatch:
     inputs:
       build_packages:
