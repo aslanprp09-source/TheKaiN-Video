@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "version": "0.1.0-m6",
+  "production_ready": false,
+  "automatic_publication": false,
+  "gates": [
+    {"id": "windows11-clean", "status": "BLOCKED", "reason": "A hosted Windows Server runner is not a clean Windows 11 VM", "evidence": null},
+    {"id": "windows-authenticode", "status": "BLOCKED", "reason": "No user-controlled Windows signing setup", "evidence": null},
+    {"id": "android-signing", "status": "BLOCKED", "reason": "Protected keystore secrets and expected public certificate not configured for this task", "evidence": null},
+    {"id": "android-physical-10plus", "status": "BLOCKED", "reason": "No recorded physical-device matrix", "evidence": null},
+    {"id": "android-16k-runtime", "status": "BLOCKED", "reason": "ELF/ZIP checks are prerequisites, not a 16 KiB runtime test", "evidence": null},
+    {"id": "oem-background-accessibility", "status": "BLOCKED", "reason": "OEM restrictions, TalkBack and hardware input need recorded device QA", "evidence": null},
+    {"id": "staging-retention", "status": "BLOCKED", "reason": "Automatic Android staging cleanup and retention policy remain unimplemented", "evidence": null},
+    {"id": "distribution-license-source", "status": "BLOCKED", "reason": "Final actual-binary/vendor/source correspondence and application distribution-license decision require review", "evidence": null},
+    {"id": "android-commercial-sites", "status": "NOT_APPLICABLE", "reason": "Not advertised; no native yt-dlp/Python/JS bundle", "evidence": "rewrite/docs/M5_SOURCE_RESEARCH.md"}
+  ]
+}

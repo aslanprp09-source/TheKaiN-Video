@@ -1,0 +1,18 @@
+TheKaiN Video — clean rebuild 0.1.0-m6
+
+Экспериментальная неподписанная сборка для проверки. Это не готовый релиз.
+Windows: требуется Windows 11 x64 и FFmpeg/FFprobe в PATH. Python отдельно не нужен.
+FFmpeg/FFprobe не включены в установщик. Проверка файлов без них недоступна.
+Установка: отдельный каталог TheKaiNVideo-Rebuild, без изменения старых версий.
+Удаление приложения сохраняет пользовательские файлы и базу очереди.
+Физические Android-устройства и чистая Windows 11 ещё не подтверждены.
+Android APK без подписи установить нельзя; debug APK — отдельная тестовая сборка.
+Поддержка видеосервисов Android не заявлена: в APK нет yt-dlp/Python/JS.
+Загружайте только материалы, которые вам разрешено сохранять.
+
+See M6_RELEASE_QA.md in the source tree for signing, test evidence and release gates.
+Third-party materials and license/source references are under _internal/notices.
+Qt libraries remain dynamically loaded and replaceable. Reverse engineering for
+debugging modifications of LGPL-covered libraries is not prohibited by this build.
+This notice does not assign a new license to project or archival source/assets.
+No application or dependency auto-updater and no automatic release publication.

@@ -85,7 +85,7 @@ class DesktopTest(unittest.TestCase):
 
     def ready(self, title=None):
         self.window.url_edit.setText('https://example.invalid/owned-fixture')
-        data = json.loads((FIXTURES / 'three.json').read_text())
+        data = json.loads((FIXTURES / 'three.json').read_text(encoding='utf-8'))
         if title:
             data['title'] = title
         result = parse_metadata(data, self.window.url_edit.text())
@@ -116,7 +116,7 @@ class DesktopTest(unittest.TestCase):
         self.window.url_edit.setText('https://example.invalid/old')
         QTest.keyClick(self.window.url_edit, Qt.Key.Key_Return)
         old = self.window.generation
-        result = parse_metadata(json.loads((FIXTURES / 'one.json').read_text()), self.window.url_edit.text())
+        result = parse_metadata(json.loads((FIXTURES / 'one.json').read_text(encoding='utf-8')), self.window.url_edit.text())
         self.window.url_edit.setText('https://example.invalid/new')
         self.controller.analysis.emit(old, result)
         self.assertIsNone(self.window.media)
@@ -304,7 +304,7 @@ class AsyncBridgeTest(unittest.TestCase):
         from unittest.mock import patch
         class OwnedAnalyzer:
             def analyze(self, url, cancel):
-                return parse_metadata(json.loads((FIXTURES / 'one.json').read_text()), url)
+                return parse_metadata(json.loads((FIXTURES / 'one.json').read_text(encoding='utf-8')), url)
         with tempfile.TemporaryDirectory() as directory:
             controller = Controller(directory, analyzer=OwnedAnalyzer())
             window = MainWindow(directory, controller=controller)
@@ -353,7 +353,7 @@ class AsyncBridgeTest(unittest.TestCase):
         thread.start()
         class OwnedAnalyzer:
             def analyze(self, url, cancel):
-                fixture = json.loads((FIXTURES / 'one.json').read_text())
+                fixture = json.loads((FIXTURES / 'one.json').read_text(encoding='utf-8'))
                 fixture['thumbnail'] = f'http://127.0.0.1:{server.server_port}/owned.png'
                 return parse_metadata(fixture, url)
         try:
@@ -383,7 +383,7 @@ class AsyncBridgeTest(unittest.TestCase):
         class OwnedAnalyzer:
             def analyze(self, url, cancel):
                 cancel.wait(.06)
-                return parse_metadata(json.loads((FIXTURES / 'one.json').read_text()), url)
+                return parse_metadata(json.loads((FIXTURES / 'one.json').read_text(encoding='utf-8')), url)
         with tempfile.TemporaryDirectory() as directory:
             controller = Controller(directory, analyzer=OwnedAnalyzer())
             window = MainWindow(directory, controller=controller)

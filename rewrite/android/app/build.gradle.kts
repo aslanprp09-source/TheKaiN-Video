@@ -1,3 +1,7 @@
+import groovy.json.JsonOutput
+import java.security.MessageDigest
+import java.util.zip.ZipFile
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -11,8 +15,8 @@ android {
         applicationId = "com.thekain.video.rebuild"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.1.0-m6"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     compileOptions {
@@ -22,6 +26,77 @@ android {
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true }
     bundle { language { enableSplit = false } }
+    val signingValues = listOf("THEKAIN_KEYSTORE", "THEKAIN_STORE_PASSWORD", "THEKAIN_KEY_ALIAS", "THEKAIN_KEY_PASSWORD")
+        .map { System.getenv(it)?.takeIf(String::isNotBlank) }
+    require(signingValues.all { it == null } || signingValues.all { it != null }) {
+        "Release signing requires all four THEKAIN signing environment variables; no debug-key fallback"
+    }
+    val controlledSigning = if (signingValues.all { it != null }) signingConfigs.create("controlledRelease") {
+        storeFile = file(signingValues[0]!!)
+        storePassword = signingValues[1]
+        keyAlias = signingValues[2]
+        keyPassword = signingValues[3]
+    } else null
+    buildTypes.getByName("release") {
+        isDebuggable = false
+        isMinifyEnabled = false
+        signingConfig = controlledSigning // Absence deliberately produces unsigned output.
+    }
+}
+
+dependencyLocking { lockAllConfigurations() }
+
+abstract class ReleaseNoticesTask : DefaultTask() {
+    @get:OutputDirectory abstract val outputDirectory: DirectoryProperty
+}
+val releaseNotices = tasks.register<ReleaseNoticesTask>("releaseNotices") {
+    val runtime = provider { configurations.getByName("releaseRuntimeClasspath") }
+    inputs.files(runtime)
+    inputs.dir("../../release/legal")
+    outputDirectory.set(layout.buildDirectory.dir("generated/releaseLegal"))
+    doLast {
+        val root = outputDirectory.get().asFile.resolve("third_party").apply { deleteRecursively(); mkdirs() }
+        file("../../release/legal").copyRecursively(root, overwrite = true)
+        val artifacts = runtime.get().resolvedConfiguration.resolvedArtifacts.sortedBy { it.moduleVersion.id.toString() }
+        val components = artifacts.map { artifact ->
+            val id = artifact.moduleVersion.id
+            val license = when {
+                id.group.startsWith("androidx.") || id.group.startsWith("org.jetbrains") || id.group in setOf("com.google.guava", "org.jspecify") -> "Apache-2.0"
+                id.group == "org.jsoup" -> "MIT"
+                else -> error("Review the release license/source policy for ${id.group}:${id.name}:${id.version}")
+            }
+            val notices = mutableListOf<String>()
+            ZipFile(artifact.file).use { archive ->
+                archive.entries().asSequence().filter { !it.isDirectory &&
+                    Regex("(^|/)(LICENSE[^/]*|NOTICE[^/]*|COPYING[^/]*)", RegexOption.IGNORE_CASE).containsMatchIn(it.name)
+                }.forEach { entry ->
+                    val name = "${id.group}.${id.name}-${id.version}/" + entry.name.replace('/', '_').replace('\\', '_')
+                    root.resolve(name).apply { parentFile.mkdirs(); writeBytes(archive.getInputStream(entry).use { it.readBytes() }) }
+                    notices += name
+                }
+            }
+            mapOf("component" to id.toString(), "artifact" to artifact.file.name,
+                "sha256" to MessageDigest.getInstance("SHA-256").digest(artifact.file.readBytes()).joinToString("") { "%02x".format(it) },
+                "license" to license, "license_evidence" to "M6 reviewed upstream family policy and packaged notices",
+                "source" to when {
+                    id.group.startsWith("androidx.") -> "https://android.googlesource.com/platform/frameworks/support/"
+                    id.group.startsWith("org.jetbrains.kotlinx") -> "https://github.com/Kotlin/kotlinx.coroutines"
+                    id.group.startsWith("org.jetbrains.kotlin") -> "https://github.com/JetBrains/kotlin"
+                    id.group.startsWith("org.jetbrains") -> "https://github.com/JetBrains/java-annotations"
+                    id.group == "com.google.guava" -> "https://github.com/google/guava"
+                    id.group == "org.jspecify" -> "https://github.com/jspecify/jspecify/tree/${id.version}"
+                    else -> "https://github.com/jhy/jsoup/tree/jsoup-${id.version}"
+                }, "embedded_notices" to notices)
+        }
+        root.resolve("inventory.json").writeText(JsonOutput.prettyPrint(JsonOutput.toJson(mapOf(
+            "schema" to 1, "configuration" to "releaseRuntimeClasspath", "components" to components,
+            "native_yt_dlp_python_js_ffmpeg" to false, "production_legal_signoff" to "BLOCKED: final distribution review required"
+        ))))
+        println("Release inventory: ${components.size} artifacts; no unknown license families")
+    }
+}
+androidComponents.onVariants(androidComponents.selector().withBuildType("release")) { variant ->
+    variant.sources.assets?.addGeneratedSourceDirectory(releaseNotices, ReleaseNoticesTask::outputDirectory)
 }
 
 kapt { arguments { arg("room.schemaLocation", "$projectDir/schemas") } }

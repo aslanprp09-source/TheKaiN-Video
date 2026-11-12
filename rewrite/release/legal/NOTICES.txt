@@ -1,0 +1,19 @@
+TheKaiN Video Android experimental rebuild — third-party notices
+
+The generated inventory.json lists each actual releaseRuntimeClasspath binary,
+version, SHA-256 and upstream source. This is a resolved artifact inventory,
+not a claim of a complete SPDX/CycloneDX audit or production legal sign-off.
+
+AndroidX: Copyright The Android Open Source Project, Apache License 2.0.
+Kotlin / kotlinx.coroutines / annotations: Copyright JetBrains s.r.o. and contributors,
+Apache License 2.0. Guava: Copyright Google Inc., Apache License 2.0.
+JSpecify: Copyright the JSpecify authors, Apache License 2.0 (1.0.0 POM inspected).
+jsoup: Copyright Jonathan Hedley, MIT license (full text included separately).
+Copies of notices present at the artifact archive root are retained separately.
+No native yt-dlp, Python, JS engine, FFmpeg, GPL Android wrapper or NewPipe is bundled.
+Android framework components and SDK tools are not redistributed in the APK.
+
+New dependencies without a reviewed license/source family fail releaseNotices.
+Final distribution review must inspect nested/vendor notices and corresponding
+source requirements against the actual output; do not infer legal sign-off from CI.
+This notice does not relicense application code, approved assets or archived releases.
