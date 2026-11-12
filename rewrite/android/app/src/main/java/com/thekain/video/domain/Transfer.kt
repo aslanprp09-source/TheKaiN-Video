@@ -44,8 +44,17 @@ object DirectLinks {
         }
     }
 
-    fun safeName(value: String): String = value.replace(Regex("[\\x00-\\x1f\\x7f<>:\"/\\\\|?*]"), "_")
-        .trim(' ', '.').take(96).ifBlank { "media.mp4" }
+    fun safeName(value: String): String {
+        val cleaned = value.replace(Regex("[\\x00-\\x1f\\x7f<>:\"/\\\\|?*]"), "_").trim(' ', '.')
+        val extension = cleaned.substringAfterLast('.', "").lowercase(Locale.ROOT)
+        if (extension in types) {
+            // Reserve space for the supported suffix before truncating the stem.
+            val stem = cleaned.substringBeforeLast('.').take(96 - extension.length - 1)
+                .trimEnd(' ', '.').ifBlank { "media" }
+            return "$stem.$extension"
+        }
+        return cleaned.take(96).ifBlank { "media.mp4" }
+    }
 
     fun publishedName(name: String, id: String): String {
         val safe = safeName(name)
