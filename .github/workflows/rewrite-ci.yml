@@ -35,8 +35,84 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.11.1"
-      - run: gradle --no-daemon :app:assembleDebug
+      - run: gradle --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest
+      - name: Verify executed JVM tests
+        if: always()
+        run: python3 tools/report-tests.py app/build/test-results/testDebugUnitTest
       - uses: actions/upload-artifact@v4
         with:
           name: TheKaiN-rebuild-Android-0.1-debug
           path: rewrite/android/app/build/outputs/apk/debug/app-debug.apk
+  android-device-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      ANDROID_SERIAL: emulator-5554
+      ANDROID_AVD_HOME: /tmp/thekain-m4-avd
+    defaults:
+      run:
+        working-directory: rewrite/android
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+      - name: Prepare official Android 35 emulator
+        run: |
+          set -Eeuo pipefail
+          trap 'echo "::error title=M4 emulator setup::Failed command on line $LINENO: $BASH_COMMAND"' ERR
+          echo "::notice title=M4 emulator host::$(uname -m); ANDROID_HOME=$ANDROID_HOME; KVM=$(ls -l /dev/kvm 2>&1)"
+          test -e /dev/kvm
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends libpulse0 libglu1-mesa libxkbcommon-x11-0 libxcb-cursor0 libnss3
+          export PATH="$ANDROID_HOME/platform-tools:$PATH"
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+          sudo chmod a+rw /dev/kvm
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platform-tools' 'platforms;android-35' 'build-tools;35.0.0' 'emulator' 'system-images;android-35;google_apis;x86_64'
+          mkdir -p "$ANDROID_AVD_HOME"
+          echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd -n M4 -k 'system-images;android-35;google_apis;x86_64' --device pixel_2
+          "$ANDROID_HOME/emulator/emulator" -avd M4 -no-snapshot -no-window -no-audio -no-boot-anim -gpu swiftshader -memory 2048 -cores 2 -port 5554 > "$RUNNER_TEMP/m4-emulator.log" 2>&1 &
+          timeout 180 adb -s "$ANDROID_SERIAL" wait-for-device
+          for i in $(seq 1 180); do
+            if [ "$(adb -s "$ANDROID_SERIAL" shell getprop sys.boot_completed | tr -d '\r')" = 1 ]; then break; fi
+            sleep 2
+          done
+          test "$(adb -s "$ANDROID_SERIAL" shell getprop sys.boot_completed | tr -d '\r')" = 1
+          adb -s "$ANDROID_SERIAL" shell input keyevent 82
+          adb -s "$ANDROID_SERIAL" shell settings put global window_animation_scale 0
+          adb -s "$ANDROID_SERIAL" shell settings put global transition_animation_scale 0
+          adb -s "$ANDROID_SERIAL" shell settings put global animator_duration_scale 0
+      - name: Expose emulator startup diagnostics
+        if: failure()
+        run: |
+          python3 - <<'PYLOG'
+          import pathlib, os
+          path = pathlib.Path(os.environ['RUNNER_TEMP']) / 'm4-emulator.log'
+          content = path.read_text(errors='replace')[-6500:] if path.exists() else 'No emulator log was created.'
+          print('::error title=M4 emulator log::' + content.replace('%','%25').replace('\r','%0D').replace('\n','%0A'))
+          PYLOG
+      - name: Run actual device integration tests
+        run: |
+          gradle --no-daemon :app:installDebug :app:installDebugAndroidTest
+          adb -s "$ANDROID_SERIAL" shell pm grant com.thekain.video.rebuild android.permission.POST_NOTIFICATIONS
+          gradle --no-daemon :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.notClass=com.thekain.video.ProcessRestartTest,com.thekain.video.NotificationDeniedTest
+      - name: Verify instrumentation results
+        if: always()
+        run: python3 tools/report-tests.py app/build/outputs/androidTest-results/connected
+      - name: Cold process restart and adb UI evidence
+        run: |
+          gradle --no-daemon :app:installDebug :app:installDebugAndroidTest
+          bash tools/process-restart-smoke.sh "$RUNNER_TEMP/m4-device-evidence"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: M4-Android-device-validation
+          path: |
+            rewrite/android/app/build/outputs/androidTest-results/
+            rewrite/android/app/build/reports/androidTests/
+            ${{ runner.temp }}/m4-device-evidence/
+            ${{ runner.temp }}/m4-emulator.log

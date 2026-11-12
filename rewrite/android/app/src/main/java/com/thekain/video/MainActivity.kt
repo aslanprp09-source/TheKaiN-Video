@@ -1,114 +1,149 @@
 package com.thekain.video
 
+import android.Manifest
 import android.app.Activity
-import android.app.DownloadManager
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
-import android.os.Environment
-import android.os.Handler
-import android.os.Looper
-import android.widget.Button
-import android.widget.EditText
-import android.widget.LinearLayout
-import android.widget.ProgressBar
-import android.widget.TextView
-import java.util.Locale
+import android.text.Editable
+import android.text.TextWatcher
+import android.view.WindowInsets
+import android.widget.*
+import com.thekain.video.data.DownloadTask
+import com.thekain.video.domain.*
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.collectLatest
 
-/** Basic direct HTTPS file downloader. No webpage scraping and no DRM. */
+/** Minimal M4 view. WorkManager/Room own all tasks; Compose/page extraction is M5. */
 class MainActivity : Activity() {
-    private val handler = Handler(Looper.getMainLooper())
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val graph get() = (application as TheKaiNApp).graph
+    private lateinit var input: EditText
+    private lateinit var submit: Button
     private lateinit var info: TextView
-    private lateinit var progress: ProgressBar
-    private lateinit var download: Button
-    private var active: Long? = null
+    private lateinit var tasks: LinearLayout
+    private var handledSubmission: String? = null
+    private var notificationAsked = false
+    private var busy = false
+    private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(34, 54, 34, 24)
+        handledSubmission = savedInstanceState?.getString("handled_submission")
+        notificationAsked = savedInstanceState?.getBoolean("notification_asked") ?: false
+        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(16), dp(16), dp(16)) }
+        root.setOnApplyWindowInsetsListener { view, insets ->
+            if (Build.VERSION.SDK_INT >= 30) {
+                val bar = insets.getInsets(WindowInsets.Type.systemBars())
+                view.setPadding(dp(16) + bar.left, dp(16) + bar.top, dp(16) + bar.right, dp(16) + bar.bottom)
+            } else {
+                @Suppress("DEPRECATION")
+                view.setPadding(dp(16) + insets.systemWindowInsetLeft, dp(16) + insets.systemWindowInsetTop,
+                    dp(16) + insets.systemWindowInsetRight, dp(16) + insets.systemWindowInsetBottom)
+            }
+            insets
         }
-        root.addView(TextView(this).apply { text = "TheKaiN Video"; textSize = 25f })
-        root.addView(TextView(this).apply {
-            text = "Версия 0.1: прямые HTTPS-ссылки на видео и аудио."
-        })
-        val input = EditText(this).apply {
-            hint = "https://example.com/video.mp4"
+        root.addView(TextView(this).apply { setText(R.string.app_name); textSize = 25f })
+        root.addView(TextView(this).apply { setText(R.string.direct_only) })
+        input = EditText(this).apply {
+            id = R.id.source_input
+            setHint(R.string.direct_hint)
             setSingleLine(true)
-            inputType = android.text.InputType.TYPE_TEXT_VARIATION_URI
+            minHeight = dp(48)
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
+            setText(savedInstanceState?.getString("draft").orEmpty())
         }
         root.addView(input)
-        download = Button(this).apply { text = "Скачать файл" }
-        root.addView(download)
-        progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply { max = 100 }
-        root.addView(progress)
-        info = TextView(this).apply { text = "Ожидание ссылки" }
+        val clear = Button(this).apply { setText(R.string.clear); minHeight = dp(48); setOnClickListener { input.text.clear() } }
+        root.addView(clear)
+        submit = Button(this).apply { id = R.id.download_button; setText(R.string.download); minHeight = dp(48); isEnabled = input.text.isNotBlank() }
+        root.addView(submit)
+        info = TextView(this).apply { id = R.id.status_text; setText(R.string.idle) }
         root.addView(info)
-        setContentView(root)
-        val manager = getSystemService(DOWNLOAD_SERVICE) as DownloadManager
-        download.setOnClickListener {
-            val uri = Uri.parse(input.text.toString().trim())
-            val ext = uri.path.orEmpty().substringAfterLast('.', "").lowercase(Locale.ROOT)
-            if (uri.scheme != "https" || uri.host.isNullOrEmpty() || ext !in setOf("mp4", "webm", "mp3", "m4a", "mov")) {
-                info.text = "Требуется прямая HTTPS-ссылка на mp4, webm, mp3, m4a или mov"
-                return@setOnClickListener
+        root.addView(TextView(this).apply { setText(R.string.storage_hint) })
+        tasks = LinearLayout(this).apply { id = R.id.task_list; orientation = LinearLayout.VERTICAL }
+        root.addView(tasks)
+        setContentView(ScrollView(this).apply { isFillViewport = true; addView(root) })
+        input.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { submit.isEnabled = !busy && !s.isNullOrBlank() }
+            override fun afterTextChanged(s: Editable?) = Unit
+        })
+        submit.setOnClickListener {
+            if (busy) return@setOnClickListener
+            val request = try { DirectLinks.parse(input.text.toString()) } catch (error: TransferFailure) {
+                info.setText(error.code.label()); return@setOnClickListener
             }
-            val safeName = uri.lastPathSegment.orEmpty()
-                .replace(Regex("[^A-Za-z0-9._-]"), "_").take(96)
-                .ifBlank { "media." + ext }
-            try {
-                val request = DownloadManager.Request(uri)
-                    .setTitle(safeName)
-                    .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                    .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, safeName)
-                active = manager.enqueue(request)
-                progress.progress = 0
-                info.text = "Загрузка запущена"
-                download.isEnabled = false
-                handler.postDelayed({ poll(manager) }, 500)
-            } catch (ex: Exception) {
-                info.text = "Ошибка запуска: " + ex.message
+            busy = true
+            submit.isEnabled = false
+            graph.submit(request) // App-owned action survives Activity recreation.
+            if (Build.VERSION.SDK_INT >= 33 && !notificationAsked && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                notificationAsked = true
+                requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 10)
             }
         }
-    }
-
-    private fun poll(manager: DownloadManager) {
-        val id = active ?: return
-        manager.query(DownloadManager.Query().setFilterById(id)).use { cursor ->
-            if (!cursor.moveToFirst()) {
-                info.text = "Задача не найдена"
-                done()
-                return
-            }
-            val state = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
-            val size = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES))
-            val bytes = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR))
-            when (state) {
-                DownloadManager.STATUS_SUCCESSFUL -> {
-                    progress.progress = 100
-                    info.text = "Система подтвердила загрузку в папку Downloads"
-                    done()
-                }
-                DownloadManager.STATUS_FAILED -> {
-                    info.text = "Загрузка не удалась. Проверьте ссылку и подключение."
-                    done()
-                }
-                else -> {
-                    if (size > 0) progress.progress = (bytes * 100 / size).toInt().coerceIn(0, 99)
-                    info.text = "Передано " + (bytes / 1024) + " КБ"
-                    handler.postDelayed({ poll(manager) }, 750)
+        scope.launch {
+            graph.submission.collectLatest { state ->
+                busy = state.busy
+                input.isEnabled = !busy
+                clear.isEnabled = !busy
+                submit.isEnabled = !busy && input.text.isNotBlank()
+                submit.setText(if (busy) R.string.submitting else R.string.download)
+                if (state.busy) info.setText(R.string.submitting)
+                if (state.operation.isNotEmpty() && state.operation != handledSubmission && !state.busy) {
+                    handledSubmission = state.operation
+                    if (state.accepted != null) { input.text.clear(); info.setText(R.string.accepted) }
+                    state.error?.let { info.setText(it.label()) }
                 }
             }
         }
+        scope.launch { graph.repository.changes.collectLatest { render(it) } }
     }
 
-    private fun done() {
-        active = null
-        download.isEnabled = true
+    private fun render(rows: List<DownloadTask>) {
+        tasks.removeAllViews()
+        rows.forEach { task ->
+            val item = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; tag = task.id; setPadding(0, dp(20), 0, dp(12)) }
+            item.addView(TextView(this).apply { text = task.name; textSize = 18f })
+            item.addView(TextView(this).apply { setText(task.error?.label() ?: task.state.label()) })
+            item.addView(ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+                max = 100
+                isIndeterminate = task.state in setOf(TransferState.VERIFYING, TransferState.PUBLISHING) || task.percent == null
+                progress = task.percent ?: 0
+                contentDescription = getString(task.state.label())
+                visibility = if (task.state in setOf(TransferState.FAILED, TransferState.CANCELED)) android.view.View.GONE else android.view.View.VISIBLE
+            })
+            item.addView(TextView(this).apply { text = getString(R.string.progress_bytes, task.bytes, task.total?.toString() ?: getString(R.string.unknown_size)) })
+            fun action(label: Int, kind: String) { item.addView(Button(this).apply {
+                setText(label); minHeight = dp(48); setOnClickListener { graph.action(task.id, kind) }
+            }) }
+            if (task.state == TransferState.DOWNLOADING && task.resumable && task.bytes > 0) action(R.string.pause, "pause")
+            if (task.state == TransferState.PAUSED) action(R.string.resume, "resume")
+            if (task.state == TransferState.FAILED) action(R.string.retry, "retry")
+            if (task.state !in setOf(TransferState.COMPLETED, TransferState.CANCELED, TransferState.FAILED, TransferState.PUBLISHING, TransferState.CANCEL_REQUESTED)) action(R.string.cancel, "cancel")
+            if (task.state == TransferState.COMPLETED) item.addView(Button(this).apply {
+                setText(R.string.open); minHeight = dp(48)
+                setOnClickListener {
+                    try { startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(task.outputUri), task.mime).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)) }
+                    catch (_: Exception) { info.setText(R.string.open_failed) }
+                }
+            })
+            tasks.addView(item)
+        }
     }
 
-    override fun onDestroy() {
-        handler.removeCallbacksAndMessages(null)
-        super.onDestroy()
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 10 && grantResults.firstOrNull() != PackageManager.PERMISSION_GRANTED) info.setText(R.string.notification_denied)
     }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putString("draft", if (busy) "" else input.text.toString())
+        outState.putString("handled_submission", handledSubmission)
+        outState.putBoolean("notification_asked", notificationAsked)
+        super.onSaveInstanceState(outState)
+    }
+    override fun onDestroy() { scope.cancel(); super.onDestroy() }
 }
