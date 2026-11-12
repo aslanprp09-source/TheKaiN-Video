@@ -31,6 +31,39 @@ class TransferRulesTest {
         assertFalse(DirectLinks.safeName("bad\u0000name.mp4").contains('\u0000'))
     }
 
+    @Test fun longDirectNamesKeepExtensionAndCorrectMimeWhenPublished() {
+        val supported = mapOf(
+            "mp4" to "video/mp4",
+            "webm" to "video/webm",
+            "mov" to "video/quicktime",
+            "mp3" to "audio/mpeg",
+            "m4a" to "audio/mp4"
+        )
+        for ((extension, mime) in supported) {
+            // Multiple dots in the stem must not be confused with the media suffix.
+            val stem = "series.s01.e02." + "very-long-episode-".repeat(12)
+            val request = DirectLinks.parse("https://example.invalid/$stem.$extension?token=owned")
+            assertEquals(extension, mime, request.mime)
+            assertTrue("Name exceeds 96 characters: ${request.name}", request.name.length <= 96)
+            assertTrue(request.name.startsWith("series.s01.e02."))
+            assertTrue("Lost .$extension suffix", request.name.endsWith(".$extension"))
+            val output = DirectLinks.publishedName(request.name, "fixture-id")
+            assertTrue("Published name has wrong extension: $output", output.endsWith("-fixture-id.$extension"))
+            assertEquals(extension, output.substringAfterLast('.'))
+        }
+    }
+
+    @Test fun uppercaseAndBoundaryLengthNamesKeepCanonicalExtension() {
+        val nearLimit = "a".repeat(92) + ".mp3"
+        val atLimit = DirectLinks.parse("https://example.invalid/$nearLimit")
+        assertEquals(96, atLimit.name.length)
+        assertEquals(nearLimit, atLimit.name)
+        val overLimit = DirectLinks.parse("https://example.invalid/${"a".repeat(200)}.MP3")
+        assertEquals(96, overLimit.name.length)
+        assertTrue(overLimit.name.endsWith(".mp3"))
+        assertTrue(DirectLinks.publishedName(overLimit.name, "fixture").endsWith(".mp3"))
+    }
+
     @Test fun fullTransferIsNotCompletionAndUnknownSizeStaysUnknown() {
         listOf(TransferState.DOWNLOADING, TransferState.VERIFYING, TransferState.PUBLISHING, TransferState.FAILED).forEach {
             assertEquals(99, TransferRules.percent(it, 100, 100))
