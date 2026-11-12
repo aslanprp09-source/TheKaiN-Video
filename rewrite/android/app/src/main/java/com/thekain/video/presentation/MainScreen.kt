@@ -188,8 +188,8 @@ data class UiActions(
                 } else Button(onClick = { keyboard?.hide(); focus.clearFocus(); if (ready) actions.download() else actions.analyze() },
                     enabled = home.draft.isNotBlank() && !home.enqueuePending,
                     modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag(if (ready) "download_button" else "analyze_button"),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC52A38), contentColor = Color.White), shape = RoundedCornerShape(14.dp)) {
-                    if (home.enqueuePending) CircularProgressIndicator(Modifier.size(20.dp), color = Color.White, strokeWidth = 2.dp)
+                    colors = ButtonDefaults.buttonColors(), shape = RoundedCornerShape(14.dp)) {
+                    if (home.enqueuePending) CircularProgressIndicator(Modifier.size(20.dp), color = MaterialTheme.colorScheme.onPrimary, strokeWidth = 2.dp)
                     else Icon(if (ready) painterResource(R.drawable.ic_downloads) else painterResource(R.drawable.ic_link), null, Modifier.size(20.dp))
                     Spacer(Modifier.width(10.dp))
                     Text(stringResource(if (home.enqueuePending) R.string.submitting else if (ready && home.accepted) R.string.download_again else if (ready) R.string.download else R.string.analyze), fontWeight = FontWeight.SemiBold)

@@ -35,7 +35,10 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.11.1"
-      - run: gradle --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest
+      - name: Compile APKs and run JVM tests
+        run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest
+      - name: Run Lint after generated test sources are stable
+        run: gradle --no-daemon :app:lintDebug
       - name: Verify executed JVM tests
         if: always()
         run: python3 tools/report-tests.py app/build/test-results/testDebugUnitTest

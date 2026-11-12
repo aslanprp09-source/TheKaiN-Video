@@ -9,7 +9,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 
 private val Dark = darkColorScheme(
-    primary = Color(0xFFE5484D), onPrimary = Color.White,
+    primary = Color(0xFFE5484D), onPrimary = Color(0xFF0D1016),
     background = Color(0xFF0D1016), onBackground = Color(0xFFF5F6F8),
     surface = Color(0xFF171C25), onSurface = Color(0xFFF5F6F8),
     surfaceVariant = Color(0xFF222936), onSurfaceVariant = Color(0xFFAEB7C5),

@@ -18,7 +18,13 @@ Keyboard: Ctrl+L returns Home and focuses the link, Enter/IME Go analyzes, Ctrl+
 
 `SourceAnalyzer` is a typed, GUI-independent boundary. `HttpsSourceAnalyzer` currently supports direct HTTPS MP4/WebM/MOV/MP3/M4A and static UTF-8 HTML5 pages exposing `video[src]`, `audio[src]` or their `source[src]` children. It resolves relative URLs, accepts at most eight actual supported file candidates, checks their headers and maps HTTP/network errors. HEAD 405/501 falls back to a GET byte probe; a 206 probe uses Content-Range total rather than the one-byte response length.
 
-Analysis uses system HTTPS trust/hostname checks, no cookies or credentials, at most six redirect requests, 8 s connection/5 s read timeouts, a 512 KiB HTML limit and 1 MiB poster limit. Each redirect is revalidated. Posters are restricted to the page origin even across redirects; other cross-origin scripts/images are not fetched. Preview decoding is bounded to 2048×2048. Cancellation invalidates UI state immediately; an in-flight blocking socket read may take up to its timeout to unwind. Source URLs may have expiring query tokens; typed errors and custom model diagnostics omit them.
+Analysis uses one **30-second wall-clock budget** across dispatch, page/redirect requests, parsing, all candidate probes and the optional poster. A coroutine deadline closes the currently registered connection, including during response headers/body reads; monotonic checks also reject late results. Each connection/read timeout is capped by the remaining budget (at most 8 s/5 s). A trickle of bytes cannot restart the budget. Overall expiry is typed `TIMEOUT`, clears readiness and allows a fresh analysis; explicit cancellation stays cancellation. The bounded blocking worker cannot publish a result after cancellation. HTML is limited to 512 KiB and posters to 1 MiB; preview decoding is bounded to 2048×2048. Source URLs may have expiring query tokens; typed errors and custom model diagnostics omit them.
+
+Every URL/redirect requires HTTPS, system certificate/hostname verification and no URL credentials. Each request allows at most six redirect hops. A safe HTTPS HTML `<base href>` resolves relative candidates; an unsafe base is rejected. Cross-origin media and redirects are allowed, including CDN hosts, with fresh requests and no cookies, authorization or referrer headers. HEAD 405/501 permits only the bounded GET byte probe described above. Posters must retain the actual page origin through redirects, so a cross-origin base cannot cause a third-party poster request. Scripts and unrelated images are never fetched.
+
+**Address policy:** this development adapter does not filter resolved public/private/LAN/loopback addresses. Explicit user analysis and HTML-declared media can therefore contact HTTPS LAN hosts; owned loopback TLS fixtures depend on this. HTTPS and no credentials do not by themselves prevent unwanted LAN probing. No broader website support should be enabled before choosing an address policy and testing private IPv4/IPv6, DNS rebinding, every redirect/probe, and explicit local-source exceptions. Preserve legitimate cross-origin CDNs rather than imposing a blanket same-origin ban. Existing safe tests cover HTTPS base/CDN resolution without credentials, insecure redirects/base rejection, same-origin posters and HEAD fallback; they do not claim a DNS/address firewall.
+
+The main CTA uses Material theme `primary`/`onPrimary`, including its busy indicator. Dark `#E5484D` with `#0D1016` text has 4.87:1 contrast; light `#C52A38` with white has 5.58:1.
 
 HTML declarations/header sizes are candidates, not proof that a file is valid media. M4 still downloads to staging and verifies before success. JavaScript players, blob/data/HTTP URLs, HLS/DASH, playlists, encrypted media and access-controlled content are unsupported. No commercial video service compatibility is advertised. Only owned local HTTPS fixture pages have been tested. See [the adapter investigation](M5_SOURCE_RESEARCH.md) for why a native yt-dlp/Python/JS bundle is not included.
 
@@ -28,11 +34,12 @@ JDK 17, SDK 35, Gradle 8.11.1:
 
 ```sh
 cd rewrite/android
-gradle --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest
+gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest
+gradle --no-daemon :app:lintDebug
 python3 tools/report-tests.py app/build/test-results/testDebugUnitTest
 ```
 
-Local validation so far: 29 JVM tests passed, Lint has no errors, and app/instrumentation APKs compile. Native execution evidence is recorded in the PR after the CI run completes; compilation is not a device test.
+Local validation: 36 JVM tests passed, Lint has no errors, and app/instrumentation APKs compile. Lint runs after generated test sources are stable. Deterministic tests cover a one-byte trickle, cumulative candidate requests, optional-poster expiry, scheduled closure of a blocked read, cancellation, safe base resolution and retry after TIMEOUT. Native execution evidence is recorded in the PR after CI completes; compilation is not a device test. Additional real Android TLS tests check trickle-body expiry and cancellation during delayed response headers without blocking the main thread; Compose checks the actionable timeout state.
 
 The main API 35 instrumentation run retains all M4 engine tests and adds an owned HTTPS HTML page with MP4/WebM/M4A choices, a real selected-WebM download verified through M4/MediaStore, and Compose interaction tests. M4 Activity tests now exercise actual Analyze → Download before checking the same queue/output after recreation. The force-stop host script uses the Compose navigation tag's real UI-tree bounds and still requires a different PID plus unchanged output URI/hash.
 

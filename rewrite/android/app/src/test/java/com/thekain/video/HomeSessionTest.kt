@@ -90,4 +90,21 @@ class HomeSessionTest {
         assertEquals(AnalysisError.UNSUPPORTED_SOURCE, home.state.value.analysisError)
         assertNull(home.state.value.variant)
     }
+
+    @Test fun timeoutCannotBecomeReadyAndAUserCanRetryAnalysis() = runTest {
+        var analyses = 0
+        var queued = 0
+        val home = HomeSession(this, SourceAnalyzer {
+            if (++analyses == 1) throw AnalysisFailure(AnalysisError.TIMEOUT)
+            source()
+        }, { queued++; "op" })
+        home.edit("https://example.invalid/owned.mp4"); home.analyze(); runCurrent()
+        assertEquals(AnalysisPhase.ERROR, home.state.value.phase)
+        assertEquals(AnalysisError.TIMEOUT, home.state.value.analysisError)
+        assertNull(home.state.value.variant)
+        home.download(); assertEquals(0, queued)
+        home.analyze(); runCurrent()
+        assertEquals(AnalysisPhase.READY, home.state.value.phase)
+        home.download(); assertEquals(1, queued)
+    }
 }

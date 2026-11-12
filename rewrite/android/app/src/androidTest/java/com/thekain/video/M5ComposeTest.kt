@@ -163,4 +163,13 @@ class M5ComposeTest {
         compose.onNodeWithTag("download_button").assertIsDisplayed()
         compose.onNodeWithText("TheKaiN Video").assertIsDisplayed()
     }
+
+    @Test fun analysisTimeoutShowsActionableErrorAndOnlyAllowsReanalysis() {
+        start(ScreenState(home = HomeState(draft = "https://owned.example/page", phase = AnalysisPhase.ERROR,
+            analysisError = com.thekain.video.source.AnalysisError.TIMEOUT)))
+        val text = compose.activity.localized("ru").getString(R.string.error_timeout)
+        compose.onNodeWithText(text).assertIsDisplayed()
+        compose.onNodeWithTag("download_button").assertDoesNotExist()
+        compose.onNodeWithTag("analyze_button").assertIsEnabled()
+    }
 }
