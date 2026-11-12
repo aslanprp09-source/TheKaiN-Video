@@ -1,0 +1,152 @@
+name: Rebuild experimental packages — no publication
+on:
+  workflow_call:
+    inputs:
+      sign_android:
+        type: boolean
+        default: false
+  workflow_dispatch:
+    inputs:
+      sign_android:
+        type: boolean
+        default: false
+        description: Build signed INTERNAL QA output using the protected release-signing environment
+permissions:
+  contents: read
+jobs:
+  windows-installer:
+    runs-on: windows-2025
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11.18'
+          architecture: x64
+      - name: Install exact reviewed wheels
+        run: |
+          python -m pip install --only-binary=:all: --require-hashes --no-deps -r rewrite/release/windows/requirements-build.lock
+      - name: Prepare hash-verified official build tools
+        shell: pwsh
+        run: |
+          ./rewrite/release/windows/prepare-tools.ps1 -Destination "$env:RUNNER_TEMP/thekain-tools" *>&1 | Tee-Object "$env:RUNNER_TEMP/m6-tools.log"
+          $paths = Get-Content "$env:RUNNER_TEMP/thekain-tools/paths.json" -Raw | ConvertFrom-Json
+          $paths.ffmpegBin >> $env:GITHUB_PATH
+          "THEKAIN_ISCC=$($paths.iscc)" >> $env:GITHUB_ENV
+      - name: Native Windows engine and Qt tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          python rewrite/release/run-windows-tests.py
+          python -m unittest discover -s rewrite/release -p "test_*.py" -v
+      - name: Freeze GUI and worker, collect notices, compile installer and hashes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: ./rewrite/release/windows/build.ps1 -Iscc $env:THEKAIN_ISCC -Commit $env:GITHUB_SHA *>&1 | Tee-Object "$env:RUNNER_TEMP/m6-build.log"
+      - name: Install, exercise packaged pipeline and Qt, uninstall on disposable host
+        shell: pwsh
+        run: |
+          $installers = @(Get-ChildItem rewrite/release/out/windows-artifacts/*-setup.exe)
+          if ($installers.Count -ne 1) { throw 'Expected exactly one installer' }
+          ./rewrite/release/windows/smoke-installed.ps1 -Installer ($installers[0].FullName) -Evidence "$env:RUNNER_TEMP/thekain-installed-qa" *>&1 | Tee-Object "$env:RUNNER_TEMP/m6-installed.log"
+      - name: Expose bounded packaging failure diagnostics
+        if: failure()
+        shell: python
+        run: |
+          import os, pathlib
+          for path in pathlib.Path(os.environ['RUNNER_TEMP']).glob('m6-*.log'):
+              value = path.read_text(errors='replace')[-5000:]
+              print('::error title=' + path.name + '::' + value.replace('%','%25').replace('\r','%0D').replace('\n','%0A'))
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: M6-Windows-unsigned-experimental
+          if-no-files-found: error
+          path: |
+            rewrite/release/out/windows-artifacts/
+            ${{ runner.temp }}/thekain-installed-qa/installed-run/
+            ${{ runner.temp }}/thekain-installed-qa/host.json
+            ${{ runner.temp }}/thekain-installed-qa/*install.log
+            ${{ runner.temp }}/m6-*.log
+  android-unsigned:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: rewrite/android
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Test and build actual unsigned release variants
+        run: gradle --no-daemon :app:testReleaseUnitTest :app:assembleRelease :app:bundleRelease
+      - name: Run release Lint separately
+        run: gradle --no-daemon :app:lintRelease
+      - name: Verify release tests, identity, notices and absence of signatures
+        run: |
+          python3 tools/report-tests.py app/build/test-results/testReleaseUnitTest
+          python3 ../release/inspect-android.py --apk app/build/outputs/apk/release/app-release-unsigned.apk --aab app/build/outputs/bundle/release/app-release.aab --tools "$ANDROID_HOME/build-tools/35.0.0" --output ../release/out/android-unsigned
+          python3 ../release/manifest.py ../release/out/android-unsigned --commit "$GITHUB_SHA" --platform android --channel unsigned-experimental
+          echo '::notice title=M6 signing::BLOCKED: default build is unsigned; configure protected signing access and request internal QA signing explicitly.'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: M6-Android-unsigned-experimental
+          if-no-files-found: error
+          path: |
+            rewrite/release/out/android-unsigned/
+            rewrite/android/app/build/generated/releaseLegal/
+            rewrite/android/app/build/reports/lint-results-release.*
+            rewrite/android/app/build/test-results/testReleaseUnitTest/
+  android-signed-internal-qa:
+    if: inputs.sign_android
+    needs: [android-unsigned, windows-installer]
+    environment: release-signing
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: rewrite/android
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Build and verify internal QA signatures with temporary key material
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          THEKAIN_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          THEKAIN_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          THEKAIN_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_SIGNING_CERT_SHA256: ${{ vars.ANDROID_SIGNING_CERT_SHA256 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          export THEKAIN_KEYSTORE="$RUNNER_TEMP/thekain-controlled-signing.jks"
+          trap 'rm -f "$THEKAIN_KEYSTORE"' EXIT
+          python3 - <<'PYKEY'
+          import os, base64
+          names = ['ANDROID_KEYSTORE_BASE64', 'THEKAIN_STORE_PASSWORD', 'THEKAIN_KEY_ALIAS', 'THEKAIN_KEY_PASSWORD', 'ANDROID_SIGNING_CERT_SHA256']
+          if not all(os.environ.get(n) for n in names):
+              raise SystemExit('Signing BLOCKED: configure all protected signing secrets and the public certificate digest; no key is generated automatically.')
+          with open(os.environ['THEKAIN_KEYSTORE'], 'wb') as f:
+              f.write(base64.b64decode(os.environ['ANDROID_KEYSTORE_BASE64'], validate=True))
+          PYKEY
+          gradle --no-daemon --no-configuration-cache :app:assembleRelease :app:bundleRelease
+          python3 ../release/inspect-android.py --signed --apk app/build/outputs/apk/release/app-release.apk --aab app/build/outputs/bundle/release/app-release.aab --tools "$ANDROID_HOME/build-tools/35.0.0" --output ../release/out/android-signed
+          python3 ../release/manifest.py ../release/out/android-signed --commit "$GITHUB_SHA" --platform android --channel signed-internal-qa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: M6-Android-signed-INTERNAL-QA
+          path: rewrite/release/out/android-signed/
+          if-no-files-found: error

@@ -12,7 +12,7 @@ Python 3.11+, yt-dlp, FFmpeg and FFprobe (on PATH for merging and mandatory outp
 
 The PySide6 UI follows the approved TheKaiN design: Home, Downloads, Library and Settings; System/Dark/Light themes; deliberate paste/clear; asynchronous source analysis and thumbnails; actual video/audio variants and destination selection. Downloads have search/state filters, measured rate/ETA only when defensible, accessible actions and verified-file opening. English localization keys back the Russian-first copy. See [M3 UI validation and screenshots](docs/M3_UI.md).
 
-The accepted M2 mechanism remains unchanged: persistent SQLite queue (two concurrent jobs by default, maximum three), private staging, mandatory FFprobe/full FFmpeg decode and no-clobber publication before completion. yt-dlp Pause is unavailable until remote continuation can be proven. The direct HTTP service API supports pause/resume only after real 206/strong ETag checks. Unknown sizes remain unknown; no artificial qualities, MP3 conversions, subtitles or playlist controls are offered. Production installers and native Windows release verification remain later work. Requires authorized downloads. Run offline tests with FFmpeg/FFprobe and the Python requirements installed:
+The accepted M2 mechanism retains its persistent SQLite queue (two concurrent jobs by default, maximum three), private staging, mandatory FFprobe/full FFmpeg decode and no-clobber publication before completion. yt-dlp Pause is unavailable until remote continuation can be proven. The direct HTTP service API supports pause/resume only after real 206/strong ETag checks. Unknown sizes remain unknown; no artificial qualities, MP3 conversions, subtitles or playlist controls are offered. [M6 experimental installer/build commands and release gates](docs/M6_RELEASE_QA.md) distinguish unsigned packages from a production release. FFmpeg/FFprobe remain external prerequisites. Requires authorized downloads. Run offline tests with FFmpeg/FFprobe and the Python requirements installed:
 
     python -m unittest discover -s rewrite/windows -p "test_*.py" -v
 
@@ -27,8 +27,11 @@ Native Kotlin direct HTTPS MP4/WebM/MP3/M4A/MOV downloader with Room persistence
 Open `rewrite/android` in Android Studio (JDK 17, SDK 35), or use Gradle 8.11.1:
 
     cd rewrite/android
-    gradle --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest
+    gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest
+    gradle --no-daemon :app:lintDebug
 
 See [M4 architecture, test commands and limitations](docs/M4_ANDROID.md) and [dependency versions/licenses](docs/M4_DEPENDENCIES.md). The rebuild workflow builds a debug APK and runs native Android integration checks on an API 35 emulator. Physical-device and signed-distribution validation remain release requirements.
+
+M6 adds unsigned Android release APK/AAB with inventories/hashes and protected opt-in internal signing configuration. No key is generated or committed; missing signing access, physical-device/clean Windows 11 QA and distribution review remain BLOCKED. See [M6 QA](docs/M6_RELEASE_QA.md) and [dependency record](docs/M6_DEPENDENCIES.md).
 
 Review research and milestones under docs/. This is a development foundation, not a verified production release.

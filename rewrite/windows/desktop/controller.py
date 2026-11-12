@@ -1,5 +1,4 @@
 """Async application adapter: all engine/database/thumbnail work stays off Qt's UI thread."""
-import importlib.util
 import shutil
 import threading
 import time
@@ -12,6 +11,7 @@ from desktop.strings import tr
 from domain import AnalyzeResult, DownloadError, ErrorCode
 from download_queue import DownloadQueue
 from extractor import SourceAnalyzer, validate_url
+from extractor_runtime import extractor_available
 from jobs import JobStatus as S
 from transports import SafeRedirect
 
@@ -54,7 +54,7 @@ class Controller(QObject):
     @staticmethod
     def tools():
         return {'ffmpeg': bool(shutil.which('ffmpeg')), 'ffprobe': bool(shutil.which('ffprobe')),
-                'yt-dlp': importlib.util.find_spec('yt_dlp') is not None}
+                'yt-dlp': extractor_available()}
 
     def invalidate(self):
         self.cancel.set()

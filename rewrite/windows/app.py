@@ -1,11 +1,14 @@
 """TheKaiN Video desktop entry point. The download engine stays Qt-independent."""
 import sys
-from PySide6.QtWidgets import QApplication
-from download_queue import default_data_root
-from desktop.window import MainWindow
 
 
 def main():
+    if len(sys.argv) == 3 and sys.argv[1] == '--packaging-smoke':
+        from release_smoke import main as smoke
+        return smoke(sys.argv[2])
+    from PySide6.QtWidgets import QApplication
+    from download_queue import default_data_root
+    from desktop.window import MainWindow
     application = QApplication(sys.argv)
     application.setApplicationName('TheKaiN Video')
     application.setOrganizationName('TheKaiN')

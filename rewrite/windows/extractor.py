@@ -2,12 +2,12 @@
 import json
 import math
 import re
-import sys
 from threading import Event
 from urllib.parse import urlsplit
 
 from domain import AnalyzeResult, DownloadError, ErrorCode, FormatVariant, SourceMedia
 from process_runner import Control, TaskFailure, TaskStopped, run_process
+from extractor_runtime import extractor_command
 
 
 def validate_url(value: str) -> str:
@@ -124,7 +124,7 @@ def parse_metadata(data: dict, url: str) -> AnalyzeResult:
 
 class SourceAnalyzer:
     def __init__(self, command=None):
-        self.command = list(command) if command is not None else [sys.executable, "-m", "yt_dlp"]
+        self.command = list(command) if command is not None else extractor_command()
 
     def analyze(self, url: str, cancel: Event | None = None, timeout: float = 30) -> AnalyzeResult:
         try:

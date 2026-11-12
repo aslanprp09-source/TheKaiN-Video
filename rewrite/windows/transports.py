@@ -10,6 +10,7 @@ from pathlib import Path
 from domain import DownloadError, ErrorCode
 from engine import Options, command_for
 from extractor import classify_error, validate_url
+from extractor_runtime import extractor_command
 from jobs import ResumeCapability as R
 from process_runner import TaskFailure, run_process
 
@@ -25,9 +26,10 @@ class YtDlpTransport:
         output_index = cmd.index('-o') + 1
         cmd[output_index] = 'media.%(ext)s'
         cmd.remove('--continue')
+        offset = len(extractor_command())
         if self.fixture_info is not None:
-            cmd[3:3] = ['--load-info-json', str(self.fixture_info)]
-        cmd[3:3] = ['--no-continue', '--retries', '0', '--fragment-retries', '0',
+            cmd[offset:offset] = ['--load-info-json', str(self.fixture_info)]
+        cmd[offset:offset] = ['--no-continue', '--retries', '0', '--fragment-retries', '0',
                     '--extractor-retries', '0', '--progress-delta', '1', '--progress-template',
                     'download:THEKAIN_PROGRESS:%(info.format_id)s:%(progress.downloaded_bytes)s:%(progress.total_bytes)s',
                     '--print', 'post_process:THEKAIN_POSTPROCESS']

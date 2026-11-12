@@ -1,10 +1,10 @@
 """Stage command construction only; DownloadQueue owns execution and success."""
 import re
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from domain import FormatVariant
 from extractor import validate_url
+from extractor_runtime import extractor_command
 
 
 @dataclass(frozen=True)
@@ -24,7 +24,7 @@ def command_for(job):
             raise ValueError("Недопустимый идентификатор формата")
     if not re.fullmatch(r"[A-Za-z0-9]+", variant.final_extension):
         raise ValueError("Недопустимое расширение")
-    cmd = [sys.executable, "-m", "yt_dlp", "--ignore-config", "--newline", "--progress", "--no-quiet", "--no-simulate", "--continue", "--no-playlist",
+    cmd = extractor_command() + ["--ignore-config", "--newline", "--progress", "--no-quiet", "--no-simulate", "--continue", "--no-playlist",
            "--no-mtime", "-P", str(job.folder), "-o", "%(title).150B [%(id)s].%(ext)s",
            "--print", "after_move:THEKAIN_FILE:%(filepath)s", "-f", variant.selector]
     if variant.requires_merge:
