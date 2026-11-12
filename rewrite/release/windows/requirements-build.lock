@@ -1,4 +1,4 @@
-# Windows x64 / CPython 3.11.18. Exact PyPI wheel hashes; regenerate after review.
+# Windows x64 / CPython 3.14.10. Exact PyPI wheel hashes; regenerate after review.
 yt-dlp==2026.10.26 --hash=sha256:a05c5b5d8562f7e8a62f5334348b406af4930d56d3a65f8021d14af0e22339ae
 PySide6-Essentials==6.12.0 --hash=sha256:c9a95102aa23c1f86516a30d5a9be37552d324eee7e567eb7508973f1218cb42
 shiboken6==6.12.0 --hash=sha256:a1906cb8116869178c64b6bab52623bbc8b4ceed7b30bfc3c9aa0f6e67f6438e

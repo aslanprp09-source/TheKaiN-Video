@@ -4,7 +4,7 @@ Reviewed 12 November 2026. Experimental packaging only. No new application/archi
 
 | Component | Pin / use | License / provenance |
 |---|---|---|
-| CPython | 3.11.18, Windows x64 setup-python build | PSF license and bundled third-party terms, LICENSE.txt copied from actual interpreter |
+| CPython | 3.14.10, Windows x64 setup-python build | PSF license and bundled third-party terms, LICENSE.txt copied from actual interpreter |
 | yt-dlp wheel | 2026.10.26, source wheel, separate frozen worker | Unlicense. No upstream standalone EXE/GPL bundle or extras downloaded |
 | PySide6-Essentials / shiboken6 | 6.12.0, QtCore/Gui/Widgets/Svg, dynamic DLLs | Declared LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only. Proposed LGPL path preserves replaceable libraries and modification debugging; full GPL/LGPL texts included. Actual vendor/native notices and source correspondence still need final review |
 | PyInstaller | 6.22.3, build only / bootloader in outputs | GPL-2.0-or-later with bootloader exception; installed texts retained |

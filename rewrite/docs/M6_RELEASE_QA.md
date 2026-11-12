@@ -18,7 +18,7 @@ The inputs/commands are reproducible; **byte-for-byte determinism is not establi
 
 ## Exact commands
 
-Windows x64, PowerShell 7, CPython **3.11.18**, a clean committed checkout. Use the pinned wheel lock for packaging, not an existing global Python installation:
+Windows x64, PowerShell 7, CPython **3.14.10**, a clean committed checkout. Use the pinned wheel lock for packaging, not an existing global Python installation:
 
 ```powershell
 python -m venv rewrite/release/.venv
