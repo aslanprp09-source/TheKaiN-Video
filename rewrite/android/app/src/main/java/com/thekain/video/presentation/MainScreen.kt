@@ -208,7 +208,7 @@ data class UiActions(
                 Column(Modifier.weight(1f)) { SourceDetails(source, home, actions) }
             } else Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Preview(source.poster, Modifier.fillMaxWidth())
-                SourceDetails(source, home, actions)
+                Column { SourceDetails(source, home, actions) }
             }
         }
     }
