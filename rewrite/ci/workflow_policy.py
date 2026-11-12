@@ -87,6 +87,8 @@ def check(documents, lock):
     package = documents['.github/workflows/rewrite-packaging.yml']
     gate = package['jobs'].get('signing-policy', {})
     require('environment' not in gate and gate.get('outputs', {}).get('authorized') == '${{ steps.policy.outputs.authorized }}', 'Unprivileged policy gate required')
+    require(any(s.get('id') == 'workflow-check' and 'python rewrite/ci/workflow_policy.py' in s.get('run', '')
+                for s in gate.get('steps', [])), 'Direct packaging dispatch must enforce the same workflow policy')
     sign = package['jobs'].get('android-signed-internal-qa', {})
     require(sign.get('if') == SIGN_CONDITION and set(sign.get('needs', [])) == {'signing-policy', 'android-unsigned', 'windows-installer', 'signing-rehearsal'}, 'Signing approval/ref/build dependencies weakened')
     require(sign.get('environment') == 'release-signing' and sign.get('runs-on') == 'ubuntu-24.04', 'Signing must use the protected environment and a fresh hosted runner')

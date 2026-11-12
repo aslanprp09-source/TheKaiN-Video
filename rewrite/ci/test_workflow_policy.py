@@ -50,3 +50,8 @@ class WorkflowPolicyTest(unittest.TestCase):
     def test_duplicate_keys_cannot_hide_a_workflow_override(self):
         with self.assertRaises(ValueError):
             yaml.load('permissions: {contents: read}\npermissions: {contents: write}\n', Loader=UniqueLoader)
+
+    def test_direct_packaging_dispatch_cannot_skip_workflow_policy(self):
+        gate = self.docs['.github/workflows/rewrite-packaging.yml']['jobs']['signing-policy']
+        gate['steps'] = [s for s in gate['steps'] if s.get('id') != 'workflow-check']
+        self.assertTrue(check(self.docs, self.lock))
