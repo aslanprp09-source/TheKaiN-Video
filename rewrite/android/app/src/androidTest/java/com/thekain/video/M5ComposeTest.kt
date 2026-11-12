@@ -3,6 +3,7 @@
 package com.thekain.video
 
 import android.content.Context
+import android.os.Build
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.*
@@ -16,6 +17,10 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.espresso.Espresso
+import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.uiautomator.UiDevice
+import androidx.test.uiautomator.By
+import androidx.test.uiautomator.Until
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.thekain.video.domain.TransferState
 import com.thekain.video.presentation.*
@@ -122,19 +127,23 @@ class M5ComposeTest {
     }
 
     @Test fun keyboardDoesNotCoverPrimaryActionAndCtrlEnterSubmitsOnce() {
-        compose.activity.window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        InstrumentationRegistry.getInstrumentation().runOnMainSync {
+            compose.activity.window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        }
         start(ScreenState(home = UiFixtures.ready))
         compose.onNodeWithTag("source_input").performClick()
         compose.waitUntil(10_000) {
             (ViewCompat.getRootWindowInsets(compose.activity.window.decorView)?.getInsets(WindowInsetsCompat.Type.ime())?.bottom ?: 0) > 0
         }
         compose.onNodeWithTag("download_button").assertIsDisplayed()
-        val cta = compose.onNodeWithTag("download_button").fetchSemanticsNode().boundsInRoot
+        val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+        val cta = device.wait(Until.findObject(By.res("download_button")), 5000)!!.visibleBounds
         compose.runOnIdle {
             val view = compose.activity.window.decorView
             val ime = ViewCompat.getRootWindowInsets(view)!!.getInsets(WindowInsetsCompat.Type.ime()).bottom
+            val fullBottom = if (Build.VERSION.SDK_INT >= 30) compose.activity.getSystemService(WindowManager::class.java).currentWindowMetrics.bounds.bottom else device.displayHeight
             assertTrue("Keyboard was not displayed", ime > 0)
-            assertTrue("CTA overlapped the keyboard", cta.bottom <= view.height - ime + 1)
+            assertTrue("CTA overlapped the keyboard", cta.bottom <= fullBottom - ime + 1)
         }
         compose.onRoot().performKeyInput { keyDown(Key.CtrlLeft); pressKey(Key.Enter); keyUp(Key.CtrlLeft) }
         compose.runOnIdle { assertEquals(1, submitted) }

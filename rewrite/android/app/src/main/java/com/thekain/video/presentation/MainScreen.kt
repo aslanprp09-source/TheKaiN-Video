@@ -92,11 +92,11 @@ data class UiActions(
                     Text(stringResource(R.string.app_name), fontWeight = FontWeight.Bold, fontSize = 22.sp)
                 } else Text(stringResource(state.page.title()), fontWeight = FontWeight.SemiBold)
             }, navigationIcon = {
-                if (state.page == Page.SETTINGS) IconButton(onClick = actions.back, modifier = Modifier.testTag("back_button")) {
+                if (state.page == Page.SETTINGS) IconButton(onClick = actions.back, modifier = Modifier.size(48.dp).testTag("back_button")) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back))
                 }
             }, actions = {
-                if (state.page != Page.SETTINGS) IconButton(onClick = { actions.navigate(Page.SETTINGS) }, modifier = Modifier.testTag("settings_button")) {
+                if (state.page != Page.SETTINGS) IconButton(onClick = { actions.navigate(Page.SETTINGS) }, modifier = Modifier.size(48.dp).testTag("settings_button")) {
                     Icon(Icons.Default.Settings, stringResource(R.string.settings))
                 }
             }, colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background))
@@ -149,7 +149,7 @@ data class UiActions(
                     label = { Text(stringResource(R.string.source_label)) }, placeholder = { Text("https://…") }, maxLines = 3,
                     shape = RoundedCornerShape(14.dp), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Go),
                     keyboardActions = KeyboardActions(onGo = { keyboard?.hide(); actions.analyze() }),
-                    trailingIcon = { if (home.draft.isNotEmpty()) IconButton(onClick = { actions.edit("") }, enabled = !home.enqueuePending, modifier = Modifier.testTag("clear_button")) {
+                    trailingIcon = { if (home.draft.isNotEmpty()) IconButton(onClick = { actions.edit("") }, enabled = !home.enqueuePending, modifier = Modifier.size(48.dp).testTag("clear_button")) {
                         Icon(Icons.Default.Close, stringResource(R.string.clear))
                     } })
                 TextButton(onClick = actions.paste, enabled = !home.enqueuePending, modifier = Modifier.heightIn(min = 48.dp).testTag("paste_button")) {
