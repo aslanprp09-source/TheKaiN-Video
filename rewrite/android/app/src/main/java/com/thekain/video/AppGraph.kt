@@ -14,6 +14,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import java.io.File
 import java.util.concurrent.TimeUnit
 import java.util.UUID
+import com.thekain.video.source.HttpsSourceAnalyzer
+import com.thekain.video.source.SourceAnalyzer
 
 data class Submission(val operation: String = "", val busy: Boolean = false,
                       val accepted: String? = null, val error: TransferError? = null)
@@ -40,6 +42,7 @@ class AppGraph(val context: Context) {
     val publisher = MediaPublisher(context, verifier)
     // Dependency boundary for owned TLS fixtures; production always uses system trust.
     @Volatile var connections: Connections = systemConnections
+    val sourceAnalyzer = SourceAnalyzer { input -> HttpsSourceAnalyzer(connections).analyze(input) }
     val engine by lazy { DownloadEngine(repository, File(context.filesDir, "transfers"),
         object : TransferAdapter {
             override suspend fun fetch(task: DownloadTask, stage: File, identity: suspend (Long?, String?, Boolean) -> Unit,
@@ -47,8 +50,8 @@ class AppGraph(val context: Context) {
                 DirectTransfer(connections).fetch(task, stage, identity, progress)
         }, verifier, publisher) }
 
-    @Synchronized fun submit(request: DirectRequest) {
-        if (mutableSubmission.value.busy) return
+    @Synchronized fun submit(request: DirectRequest): String? {
+        if (mutableSubmission.value.busy) return null
         val operation = UUID.randomUUID().toString()
         mutableSubmission.value = Submission(operation, busy = true)
         actions.launch {
@@ -60,6 +63,7 @@ class AppGraph(val context: Context) {
                 mutableSubmission.value = Submission(operation, error = DownloadEngine.classify(error).code)
             }
         }
+        return operation
     }
 
     fun action(id: String, kind: String) {

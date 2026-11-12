@@ -99,7 +99,7 @@ jobs:
         run: |
           gradle --no-daemon :app:installDebug :app:installDebugAndroidTest
           adb -s "$ANDROID_SERIAL" shell pm grant com.thekain.video.rebuild android.permission.POST_NOTIFICATIONS
-          gradle --no-daemon :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.notClass=com.thekain.video.ProcessRestartTest,com.thekain.video.NotificationDeniedTest
+          gradle --no-daemon :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.notClass=com.thekain.video.ProcessRestartTest,com.thekain.video.NotificationDeniedTest,com.thekain.video.M5VisualTest
       - name: Verify instrumentation results
         if: always()
         run: python3 tools/report-tests.py app/build/outputs/androidTest-results/connected
@@ -107,12 +107,18 @@ jobs:
         run: |
           gradle --no-daemon :app:installDebug :app:installDebugAndroidTest
           bash tools/process-restart-smoke.sh "$RUNNER_TEMP/m4-device-evidence"
+      - name: Compose layouts at 360, 412 and 600 dp in both themes
+        run: |
+          bash tools/compose-visual-smoke.sh "$RUNNER_TEMP/m5-visual-evidence"
+          python3 -m pip install pillow==11.3.0
+          python3 tools/visual-report.py "$RUNNER_TEMP/m5-visual-evidence"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: M4-Android-device-validation
+          name: M5-Android-device-validation
           path: |
             rewrite/android/app/build/outputs/androidTest-results/
             rewrite/android/app/build/reports/androidTests/
             ${{ runner.temp }}/m4-device-evidence/
+            ${{ runner.temp }}/m5-visual-evidence/
             ${{ runner.temp }}/m4-emulator.log

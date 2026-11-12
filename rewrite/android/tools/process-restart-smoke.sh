@@ -34,6 +34,26 @@ dump_ui() {
     adb -s "$serial" shell uiautomator dump /data/local/tmp/thekain-m4-ui.xml > "$artifacts/uiautomator-status.txt"
     adb -s "$serial" exec-out cat /data/local/tmp/thekain-m4-ui.xml > "$1"
 }
+# Compose starts on Home. Navigate using the actual accessibility tree bounds.
+for attempt in $(seq 1 30); do
+    dump_ui "$artifacts/ui-restart-home.xml"
+    navigation="$(python3 - "$artifacts/ui-restart-home.xml" <<'PYNAV'
+import pathlib,sys,xml.etree.ElementTree as ET,re
+s=pathlib.Path(sys.argv[1]).read_text(); a=s.find('<?xml'); b=s.find('</hierarchy>')+len('</hierarchy>')
+if a < 0: sys.exit(0)
+r=ET.fromstring(s[a:b])
+n=next((n for n in r.iter('node') if n.get('resource-id')=='nav_downloads'), None)
+if n is not None:
+    x1,y1,x2,y2=map(int,re.findall(r'\d+',n.get('bounds')))
+    print((x1+x2)//2,(y1+y2)//2)
+PYNAV
+)"
+    if [ -n "$navigation" ]; then break; fi
+    sleep 1
+done
+test -n "$navigation"
+read -r nav_x nav_y <<< "$navigation"
+adb -s "$serial" shell input tap "$nav_x" "$nav_y"
 # Wait for the Room-backed task UI after a new process, not a screen-only reset.
 for attempt in $(seq 1 30); do
     dump_ui "$artifacts/ui-restart-top.xml"

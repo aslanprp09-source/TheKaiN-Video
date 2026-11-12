@@ -1,0 +1,46 @@
+# M5 — Android video-site adapter investigation
+
+Checked 12 November 2026. This is a technical/distribution assessment, not legal advice or a claim that a commercial site's downloads are authorized. No upstream binary was executed or bundled during this investigation.
+
+## Evidence and candidates
+
+| Candidate | Observed upstream evidence | Tradeoff |
+|---|---|---|
+| [yt-dlp](https://github.com/yt-dlp/yt-dlp) | Latest stable API release `2026.10.26`; master inspected at `412e7f0a4b0588fe884a02b344ac66a06538475b`. README requires Python 3.11+. Full YouTube support recommends/requires the EJS package plus a supported JS engine (Deno/Node/Bun/QuickJS). | Broad extraction, frequently changing dependencies; not an Android runtime by itself. A format may require headers, separate audio/video, fragments or URL refresh. |
+| [yausername/youtubedl-android](https://github.com/yausername/youtubedl-android) | Inspected master `d725d5c9a18c3a99a13ee0308bf78275dc310760` (16 Nov 2025). Maven Central metadata lists `io.github.junkfood02.youtubedl-android:library:0.18.1`; GitHub marks its 0.18.1 release a prerelease, so `/releases/latest` returns 404. | GPL-3.0 wrapper, native packaging and update behavior require separate validation. README's Python 3.8 and build guide's Python 3.7.2/3.8 examples do not establish compatibility with current yt-dlp. They are documentation evidence, not an inspection of a working current runtime. |
+| [JunkFood02 fork](https://github.com/JunkFood02/youtubedl-android) | Repository API reports last push 2 Dec 2024; README still references 0.16.0. | Older documentation, unsuitable as sole proof of current maintenance. |
+| [Maintained-fork search result](https://github.com/adt-open-score/youtubedl-android-maintained) | Recent API push 24 Oct 2026, GPL-3.0, README claims maintenance/JitPack and still says Python 3.8. | Recent activity or a “maintained” label is insufficient provenance, compatibility or binary-integrity evidence. Not selected/bundled. |
+| [YTDLnis](https://github.com/deniscerri/ytdlnis) | Active Android client (API push 12 Nov 2026), GPL-3.0. Inspected `app/build.gradle` declares separate `io.github.deniscerri:ytdlnis_packages.python:3.14.8` and `ffmpeg:9.0.2` for github/foss flavors, while izzy uses the older wrapper. These are observed artifact coordinates, not a runtime/binary verification. | Confirms that modern integration is possible and flavor-specific; requires investigation of its separately maintained runtime packages rather than assuming all forks share the legacy README runtime. |
+| [NewPipeExtractor](https://github.com/TeamNewPipe/NewPipeExtractor) | API reports activity 11 Nov 2026, GPL-3.0. Current README lists specific services, JitPack release coordinates, Rhino keep rules and `desugar_jdk_libs_nio` for Android below 33. | Maintained Java-based alternative that avoids a Python executable, with GPL, desugaring, supported-service/update and stream-contract work. Its service list is an upstream claim, not TheKaiN test evidence. |
+
+Additional inspected source: [YTDLnis flavor-specific dependencies](https://github.com/deniscerri/ytdlnis/blob/main/app/build.gradle). Its account/cookie features were not used or copied.
+
+Primary inspected files: yt-dlp [README dependencies and release licensing](https://github.com/yt-dlp/yt-dlp/blob/412e7f0a4b0588fe884a02b344ac66a06538475b/README.md); wrapper [README](https://github.com/yausername/youtubedl-android/blob/d725d5c9a18c3a99a13ee0308bf78275dc310760/README.md), [BUILD_PYTHON.md](https://github.com/yausername/youtubedl-android/blob/d725d5c9a18c3a99a13ee0308bf78275dc310760/BUILD_PYTHON.md), [YoutubeDL.kt](https://github.com/yausername/youtubedl-android/blob/d725d5c9a18c3a99a13ee0308bf78275dc310760/library/src/main/java/com/yausername/youtubedl_android/YoutubeDL.kt), [YoutubeDLUpdater.kt](https://github.com/yausername/youtubedl-android/blob/d725d5c9a18c3a99a13ee0308bf78275dc310760/library/src/main/java/com/yausername/youtubedl_android/YoutubeDLUpdater.kt); [Maven metadata](https://repo.maven.apache.org/maven2/io/github/junkfood02/youtubedl-android/library/maven-metadata.xml).
+
+## License and redistribution
+
+yt-dlp's source/wheel uses Unlicense; its README distinguishes release bundles containing third-party code and some GPL builds. The Android wrapper and NewPipeExtractor are GPL-3.0, independently of yt-dlp's own license. Wrapper FFmpeg/aria2 modules bring further native components and licenses. Python, OpenSSL, certificates, JS engines and EJS dependencies also need their own notices/source obligations as applicable. A dependency's headline license is not a complete APK inventory.
+
+A future bundle needs an explicit distribution/license decision for the new Android application, pinned artifacts/source revisions, resolved transitive/native inventory, notices and corresponding-source delivery where applicable. Do not relabel or relicense archival main/releases as part of that work. None of these GPL/native runtimes was added in M5; current additional parser jsoup is MIT and only parses bounded HTML strings.
+
+## ABI, OS and update constraints
+
+The inspected wrapper packages `libpython.so` and `libpython.zip.so` under x86/x86_64/armeabi-v7a/arm64-v8a and launches the interpreter from `applicationInfo.nativeLibraryDir`. Its documented `extractNativeLibs=true`, ABI filters/splits and Python library environment explain why a desktop yt-dlp executable cannot simply be copied into app-writable storage and assumed executable on modern Android. The README's legacy external-storage sample must not be copied: M4 must keep scoped storage/private staging/MediaStore and no all-files permissions.
+
+An integration must validate every shipped ABI, current Android execution restrictions, native-library/API compatibility and 16 KiB page-size support on suitable devices/emulators. Current M5 API 35 x86_64 checks cannot certify those platforms. The Python version, complete TLS trust chain and JS runtime need inspection from the **actual pinned artifacts**, not stale README prose. FFmpeg is optional for extraction-only inspection, but separate streams and conversions cannot be exposed as downloadable M4 choices until a verified postprocessing path exists.
+
+The inspected wrapper updater follows GitHub release channels and uses `FileUtils.copyURLToFile`; that file does not implement an independent digest/signature verification step. The cancellation helper constructs a shell command using its process identifier. A future adapter must never forward URL/user text as that identifier, config or shell input. Generate validated internal identifiers, use argument vectors, ignore external config/plugins, disable account/cookie acquisition, redact diagnostics, and bound subprocess output/time/termination.
+
+For reproducible distribution, prefer explicit reviewed runtime/adapter updates delivered with the signed app. If remote interpreted-code updates are later allowed, define integrity verification, rollback/recovery, compatibility tests and applicable distribution-store policy first. No automatic remote executable/adapter updater was introduced here. Store-policy conformance and native-binary signing were not tested.
+
+## Decision and implemented boundary
+
+Native yt-dlp integration is technically possible in the Android ecosystem, but this investigation does **not** establish a pinned, license-reviewed, current-Python/JS, ABI/16-KiB-compatible bundle for TheKaiN. Therefore M5 ships no native wrapper and makes no YouTube/Vimeo/other service claim. This is a scoped implementation decision for M5, not a claim that those services can never be supported.
+
+The implemented `SourceAnalyzer` boundary returns typed `SourceMedia`/`MediaVariant` objects. Its bounded HTTPS adapter discovers direct files and static HTML5 `<video>/<audio>/<source>` declarations using jsoup. The same owned TLS fixture page provides actual MP4, WebM and M4A files; a selected WebM is passed to the unchanged M4 verifier/publisher. Headers supply a known size only when present. No video resolution/duration or conversion variant is invented. Scripted players, manifests, DRM/private sources and playlists remain unsupported with an explicit reason.
+
+A future site adapter must additionally model required safe headers, expiring URLs/reanalysis, separate streams, manifests and unsupported-reason metadata. It must filter non-downloadable variants before presenting them, maintain stale-result cancellation, and pass each resulting download through M4 verification/publication. A successful metadata call alone cannot mark a task complete.
+
+## Required follow-up evidence before enabling a video service
+
+Pin a maintained adapter and its sources; inspect actual runtime/native dependency licenses and provenance; run current-Python/JS/ABI/OS/page-size checks; test authorized fixture-site and explicitly licensed live pages; verify selected formats, expiry, 403/404/429, process termination/restart, storage and playback. Record site, date, adapter/runtime version, tested devices and unsupported cases. Do not use credentials, browser cookies, DRM/access-control workarounds or third-party user videos as default test material. Full physical-device/release work remains M6.

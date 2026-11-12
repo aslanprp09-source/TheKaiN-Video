@@ -12,6 +12,7 @@ import androidx.core.content.ContextCompat
 import androidx.work.*
 import com.thekain.video.data.DownloadTask
 import com.thekain.video.domain.*
+import com.thekain.video.presentation.localized
 import com.thekain.video.transfer.EngineResult
 import kotlinx.coroutines.*
 
@@ -57,7 +58,7 @@ class DownloadWorker(context: Context, parameters: WorkerParameters) : Coroutine
 
     private fun foreground(task: DownloadTask): ForegroundInfo {
         val manager = applicationContext.getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(NotificationChannel("downloads", applicationContext.getString(R.string.downloads), NotificationManager.IMPORTANCE_LOW))
+        manager.createNotificationChannel(NotificationChannel("downloads", applicationContext.localized().getString(R.string.downloads), NotificationManager.IMPORTANCE_LOW))
         val open = PendingIntent.getActivity(applicationContext, 0, Intent(applicationContext, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val cancel = PendingIntent.getBroadcast(applicationContext, task.id.hashCode(),
             Intent(applicationContext, JobActionReceiver::class.java).setAction("cancel").putExtra("job_id", task.id),
@@ -65,10 +66,10 @@ class DownloadWorker(context: Context, parameters: WorkerParameters) : Coroutine
         val busy = task.state in setOf(TransferState.VERIFYING, TransferState.PUBLISHING) || task.percent == null
         val notification = NotificationCompat.Builder(applicationContext, "downloads")
             .setSmallIcon(android.R.drawable.stat_sys_download).setContentTitle(task.name)
-            .setContentText(applicationContext.getString(task.state.label()))
+            .setContentText(applicationContext.localized().getString(task.state.label()))
             .setContentIntent(open).setOngoing(true).setOnlyAlertOnce(true)
             .setProgress(100, task.percent ?: 0, busy)
-            .apply { if (task.state != TransferState.PUBLISHING) addAction(0, applicationContext.getString(R.string.cancel), cancel) }
+            .apply { if (task.state != TransferState.PUBLISHING) addAction(0, applicationContext.localized().getString(R.string.cancel), cancel) }
             .build()
         val notificationId = (task.id.hashCode() and 0x0fffffff).coerceAtLeast(1)
         return if (Build.VERSION.SDK_INT >= 29) ForegroundInfo(notificationId, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
@@ -84,7 +85,7 @@ class DownloadWorker(context: Context, parameters: WorkerParameters) : Coroutine
         val pending = PendingIntent.getActivity(applicationContext, task.id.hashCode(), intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val notification = NotificationCompat.Builder(applicationContext, "downloads")
             .setSmallIcon(if (task.state == TransferState.COMPLETED) android.R.drawable.stat_sys_download_done else android.R.drawable.stat_notify_error)
-            .setContentTitle(task.name).setContentText(applicationContext.getString(task.error?.label() ?: task.state.label()))
+            .setContentTitle(task.name).setContentText(applicationContext.localized().getString(task.error?.label() ?: task.state.label()))
             .setContentIntent(pending).setAutoCancel(true).build()
         applicationContext.getSystemService(NotificationManager::class.java).notify((task.id.hashCode() and 0x0fffffff) or 0x10000000, notification)
     }

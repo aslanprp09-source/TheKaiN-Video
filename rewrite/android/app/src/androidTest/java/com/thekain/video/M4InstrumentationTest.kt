@@ -8,6 +8,9 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.uiautomator.By
+import androidx.test.uiautomator.Until
+import androidx.test.uiautomator.UiDevice
 import com.thekain.video.data.*
 import com.thekain.video.domain.*
 import com.thekain.video.storage.*
@@ -308,16 +311,19 @@ class M4InstrumentationTest {
             assertEquals(if (grant) android.content.pm.PackageManager.PERMISSION_GRANTED else android.content.pm.PackageManager.PERMISSION_DENIED,
                 context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS))
         }
+        server.enqueue(MockResponse().setHeader("Content-Type", "video/mp4").setHeader("Content-Length", body.size)) // M5 HEAD analysis.
         if (retryFailure) server.enqueue(MockResponse().setResponseCode(403))
         server.enqueue(response())
         val source = server.url("/activity.mp4").toString()
         var id: String? = null
         try {
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-                scenario.onActivity { activity ->
-                    activity.findViewById<android.widget.EditText>(R.id.source_input).setText(source)
-                    activity.findViewById<android.widget.Button>(R.id.download_button).performClick()
-                }
+                val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+                val input = device.wait(Until.findObject(By.res("source_input")), 10_000) ?: error("Source input is absent")
+                input.text = source
+                device.wait(Until.findObject(By.res("analyze_button")), 10_000)!!.click()
+                device.wait(Until.findObject(By.res("download_button")), 15_000)!!.click()
+
                 if (retryFailure) {
                     withTimeout(90_000) {
                         while (true) {
@@ -337,14 +343,11 @@ class M4InstrumentationTest {
                 }
                 val output = graph.repository.get(id!!).outputUri
                 scenario.recreate()
-                delay(300)
                 assertEquals(1, graph.repository.all().count { it.id == id })
                 assertEquals(output, graph.repository.get(id!!).outputUri)
-                scenario.onActivity { activity ->
-                    val list = activity.findViewById<android.widget.LinearLayout>(R.id.task_list)
-                    assertEquals(1, (0 until list.childCount).count { list.getChildAt(it).tag == id })
-                }
-                assertEquals(if (retryFailure) 2 else 1, server.requestCount)
+                device.wait(Until.findObject(By.res("nav_downloads")), 10_000)!!.click()
+                assertTrue(device.wait(Until.hasObject(By.res("task_$id")), 10_000))
+                assertEquals(if (retryFailure) 3 else 2, server.requestCount) // HEAD + actual transfer(s).
                 assertEquals(if (retryFailure) 2 else 1, graph.repository.get(id!!).attempt)
                 withTimeout(30_000) {
                     while (androidx.work.WorkManager.getInstance(context).getWorkInfosForUniqueWork("download-$id").get().any { !it.state.isFinished }) delay(50)

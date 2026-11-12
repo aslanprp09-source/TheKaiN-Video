@@ -44,4 +44,78 @@
     <string name="error_unknown">Не удалось завершить задачу. Проверьте источник и повторите попытку.</string>
     <string name="progress_bytes">%1$d байт / %2$s</string>
     <string name="unknown_size">—</string>
+    <string name="home">Главная</string>
+    <string name="library">Библиотека</string>
+    <string name="settings">Настройки</string>
+    <string name="back">Назад</string>
+    <string name="close">Закрыть</string>
+    <string name="home_title">Сохранить видео</string>
+    <string name="home_description">Ссылка → доступный формат → проверенный файл. Всё остаётся на вашем устройстве.</string>
+    <string name="source_label">Ссылка на видео</string>
+    <string name="paste">Вставить ссылку</string>
+    <string name="authorized_hint">Загружайте только материалы, которые вам разрешено сохранять.</string>
+    <string name="analyze">Определить видео</string>
+    <string name="analyzing">Определяем доступные форматы…</string>
+    <string name="cancel_analysis">Отменить анализ</string>
+    <string name="home_empty_title">Здесь появятся ваши видео</string>
+    <string name="home_empty_text">Вставьте прямую HTTPS-ссылку или ссылку на открытую HTML5-страницу с медиафайлом.</string>
+    <string name="recent">Последние загрузки</string>
+    <string name="format">Формат</string>
+    <string name="video">Видео</string>
+    <string name="audio_only">Только аудио</string>
+    <string name="single_format_reason">Источник предоставляет один файл. Качество не преобразуется.</string>
+    <string name="actual_formats_hint">Только файлы, найденные на этой странице. Разрешение и длительность не определены.</string>
+    <string name="destination_public">Downloads / TheKaiN Video</string>
+    <string name="destination_private">Папка приложения / Downloads</string>
+    <string name="source_poster">Предпросмотр источника</string>
+    <string name="no_preview">Предпросмотр недоступен</string>
+    <string name="search">Поиск по названию</string>
+    <string name="filter_all">Все</string>
+    <string name="filter_active">Активные</string>
+    <string name="filter_completed">Завершённые</string>
+    <string name="filter_failed">Ошибки</string>
+    <string name="downloads_empty_title">Очередь пока пуста</string>
+    <string name="downloads_empty_text">Новые задачи появятся здесь после выбора формата на главной.</string>
+    <string name="no_results">Ничего не найдено</string>
+    <string name="library_description">Только проверенные и сохранённые файлы. Открываются в приложении устройства.</string>
+    <string name="library_empty_title">В библиотеке пока пусто</string>
+    <string name="library_empty_text">Здесь появятся успешно сохранённые файлы.</string>
+    <string name="pause_unavailable">Источник не подтвердил безопасную паузу и продолжение.</string>
+    <string name="appearance">Оформление</string>
+    <string name="theme_system">Система</string>
+    <string name="theme_dark">Тёмная</string>
+    <string name="theme_light">Светлая</string>
+    <string name="language">Язык</string>
+    <string name="storage">Сохранение</string>
+    <string name="folder_fixed">Папка выбирается автоматически без доступа ко всем файлам. Выбор другой папки пока недоступен.</string>
+    <string name="concurrency_fixed">Одновременно загружается один файл.</string>
+    <string name="background">Фоновая работа</string>
+    <string name="notifications_enabled">Уведомления включены</string>
+    <string name="background_hint">Android может приостановить загрузку при ограничении фоновой работы. После принудительной остановки откройте приложение для восстановления.</string>
+    <string name="notification_settings">Настроить уведомления</string>
+    <string name="about">О приложении</string>
+    <string name="privacy_hint">Без телеметрии и аккаунтов. Буфер обмена читается только при нажатии «Вставить».</string>
+    <string name="supported_links">Какие ссылки поддерживаются</string>
+    <string name="supported_links_body">Прямые HTTPS-файлы MP4, WebM, MOV, MP3 и M4A. Также доступны статические HTML5-страницы с открытыми video/audio/source.
+
+JavaScript-плееры, HLS/DASH, закрытые материалы и DRM не поддерживаются. Совместимость отдельных видеосервисов не заявлена.</string>
+    <string name="licenses">Лицензии</string>
+    <string name="licenses_body">AndroidX, Jetpack Compose, Room, WorkManager — Apache 2.0.
+Kotlin, coroutines — Apache 2.0.
+jsoup — MIT.
+
+Приложение использует медиакомпоненты Android. yt-dlp, Python и FFmpeg в этот APK не включены.</string>
+    <string name="clipboard_empty">В буфере обмена нет текста.</string>
+    <string name="download_again">Скачать ещё раз</string>
+    <string name="repeat_title">Создать ещё одну копию?</string>
+    <string name="repeat_question">Этот файл уже добавлен в очередь в этой сессии. Новая задача сохранит отдельную копию.</string>
+    <string name="repeat_confirm">Добавить копию</string>
+    <string name="analysis_invalid">Нужна корректная HTTPS-ссылка без учётных данных и фрагмента.</string>
+    <string name="analysis_unsupported">Открытый медиафайл не найден. Поддерживаются прямые HTTPS-ссылки и статические HTML5 video/audio; скриптовые плееры и DRM недоступны.</string>
+    <string name="analysis_no_formats">Источник не подтвердил поддерживаемый медиаформат.</string>
+    <string name="analysis_too_large">Страница слишком большая для безопасного анализа. Используйте прямую ссылку на файл.</string>
+    <string name="bytes_short">%1$d Б</string>
+    <string name="kib">КиБ</string>
+    <string name="mib">МиБ</string>
+    <string name="gib">ГиБ</string>
 </resources>
