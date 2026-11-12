@@ -20,9 +20,9 @@ On headless Linux, set `QT_QPA_PLATFORM=offscreen` for Qt tests. The rebuild CI 
 
 See [M2 validation, recovery and limitations](docs/M2_QUEUE.md) and [M1 analysis contracts](docs/M1_EXTRACTOR.md). Default state storage is `%LOCALAPPDATA%/TheKaiNVideo` on Windows or `$XDG_DATA_HOME/thekain-video` on Linux. Set `THEKAIN_DATA_DIR` to a writable private directory to override it (for example `/workspace/thekain-data` in this cloud environment). Do not put queue databases in a shared folder: job URLs may contain expiring access tokens.
 
-## Android M4 development build
+## Android M5 Compose development build
 
-Native Kotlin direct HTTPS MP4/WebM/MP3/M4A/MOV downloader with Room persistence, WorkManager foreground execution, defensive Range/ETag continuation, private staging, native media verification and scoped publication. Only verified published output reaches 100%. Android 10+ uses MediaStore Downloads; Android 8–9 uses app-specific Downloads with FileProvider and no broad storage permission. Page extraction and the Compose interface remain M5 work.
+Native Kotlin direct HTTPS MP4/WebM/MP3/M4A/MOV downloader with Room persistence, WorkManager foreground execution, defensive Range/ETag continuation, private staging, native media verification and scoped publication. Only verified published output reaches 100%. Android 10+ uses MediaStore Downloads; Android 8–9 uses app-specific Downloads with FileProvider and no broad storage permission. The Compose interface provides Home, Downloads, Library and Settings with dark/light themes and Russian/English copy. Explicit analysis also discovers direct files on bounded static HTML5 video/audio pages; JavaScript players, manifests, protected content and commercial video-service compatibility remain unsupported. See [M5 interface and QA](docs/M5_ANDROID_UI.md), [adapter investigation](docs/M5_SOURCE_RESEARCH.md) and [M5 dependencies](docs/M5_DEPENDENCIES.md).
 
 Open `rewrite/android` in Android Studio (JDK 17, SDK 35), or use Gradle 8.11.1:
 

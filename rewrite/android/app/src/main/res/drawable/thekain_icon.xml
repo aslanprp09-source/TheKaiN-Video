@@ -1,0 +1,18 @@
+<!-- Vector transcription of rewrite/windows/desktop/assets/thekain-icon.svg; approved geometry retained. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" xmlns:aapt="http://schemas.android.com/aapt" android:width="48dp" android:height="48dp" android:viewportWidth="512" android:viewportHeight="512">
+    <path android:fillColor="#FFFFFF" android:pathData="M0,0H512V512H0Z"/>
+    <path android:pathData="M128,16H384Q496,16 496,128V384Q496,496 384,496H128Q16,496 16,384V128Q16,16 128,16Z">
+        <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="16" android:startY="16" android:endX="496" android:endY="496" android:startColor="#252730" android:endColor="#101116"/></aapt:attr>
+    </path>
+    <path android:pathData="M112,124Q112,112 126,112H173Q184,112 184,124V226L278,124Q288,112 299,112H357Q371,112 359,126L271,235L369,381Q377,394 365,394H301Q294,394 286,384L184,267V382Q184,396 171,396H127Q112,396 112,382Z">
+        <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="112" android:startY="112" android:endX="351.4" android:endY="396"><item android:offset="0" android:color="#FFFFFF"/><item android:offset="0.58" android:color="#F3F4F7"/><item android:offset="1" android:color="#B8BBC7"/></gradient></aapt:attr>
+    </path>
+    <path android:pathData="M214,205Q214,193 228,201L303,242Q317,250 303,258L228,300Q214,308 214,294Z">
+        <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="214" android:startY="193" android:endX="317" android:endY="308" android:startColor="#FF363B" android:endColor="#E90024"/></aapt:attr>
+    </path>
+    <path android:fillColor="#FFFFFF" android:pathData="M245,227Q242,225 242,233V269Q242,277 249,273L280,255Q285,252 280,248Z"/>
+    <path android:pathData="M448,101a48,48 0,1 1,-96,0a48,48 0,1 1,96,0">
+        <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="352" android:startY="53" android:endX="448" android:endY="149" android:startColor="#FF363B" android:endColor="#E90024"/></aapt:attr>
+    </path>
+    <path android:fillColor="#00000000" android:strokeColor="#FFFFFF" android:strokeWidth="9" android:strokeLineCap="round" android:strokeLineJoin="round" android:pathData="M400,72V113M384,99L400,116 416,99M374,124V131Q374,135 379,135H421Q426,135 426,130V124"/>
+</vector>

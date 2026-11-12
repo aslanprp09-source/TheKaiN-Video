@@ -35,7 +35,10 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.11.1"
-      - run: gradle --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest
+      - name: Compile APKs and run JVM tests
+        run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest
+      - name: Run Lint after generated test sources are stable
+        run: gradle --no-daemon :app:lintDebug
       - name: Verify executed JVM tests
         if: always()
         run: python3 tools/report-tests.py app/build/test-results/testDebugUnitTest
@@ -44,6 +47,8 @@ jobs:
           name: TheKaiN-rebuild-Android-0.1-debug
           path: rewrite/android/app/build/outputs/apk/debug/app-debug.apk
   android-device-tests:
+    permissions:
+      contents: write
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
@@ -62,6 +67,7 @@ jobs:
         with:
           gradle-version: "8.11.1"
       - name: Prepare official Android 35 emulator
+        id: prepare-emulator
         run: |
           set -Eeuo pipefail
           trap 'echo "::error title=M4 emulator setup::Failed command on line $LINENO: $BASH_COMMAND"' ERR
@@ -99,7 +105,7 @@ jobs:
         run: |
           gradle --no-daemon :app:installDebug :app:installDebugAndroidTest
           adb -s "$ANDROID_SERIAL" shell pm grant com.thekain.video.rebuild android.permission.POST_NOTIFICATIONS
-          gradle --no-daemon :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.notClass=com.thekain.video.ProcessRestartTest,com.thekain.video.NotificationDeniedTest
+          gradle --no-daemon :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.notClass=com.thekain.video.ProcessRestartTest,com.thekain.video.NotificationDeniedTest,com.thekain.video.M5VisualTest
       - name: Verify instrumentation results
         if: always()
         run: python3 tools/report-tests.py app/build/outputs/androidTest-results/connected
@@ -107,12 +113,26 @@ jobs:
         run: |
           gradle --no-daemon :app:installDebug :app:installDebugAndroidTest
           bash tools/process-restart-smoke.sh "$RUNNER_TEMP/m4-device-evidence"
+      - name: Compose layouts at 360, 412 and 600 dp in both themes
+        id: visual-matrix
+        if: always() && steps.prepare-emulator.conclusion == 'success'
+        run: |
+          gradle --no-daemon :app:installDebug :app:installDebugAndroidTest
+          bash tools/compose-visual-smoke.sh "$RUNNER_TEMP/m5-visual-evidence"
+      - name: Prepare bounded UI review bundle
+        if: always() && steps.visual-matrix.conclusion == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 -m pip install pillow==11.3.0
+          python3 tools/visual-report.py "$RUNNER_TEMP/m5-visual-evidence"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: M4-Android-device-validation
+          name: M5-Android-device-validation
           path: |
             rewrite/android/app/build/outputs/androidTest-results/
             rewrite/android/app/build/reports/androidTests/
             ${{ runner.temp }}/m4-device-evidence/
+            ${{ runner.temp }}/m5-visual-evidence/
             ${{ runner.temp }}/m4-emulator.log
