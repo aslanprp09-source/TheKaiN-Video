@@ -109,10 +109,14 @@ jobs:
           gradle --no-daemon :app:installDebug :app:installDebugAndroidTest
           bash tools/process-restart-smoke.sh "$RUNNER_TEMP/m4-device-evidence"
       - name: Compose layouts at 360, 412 and 600 dp in both themes
+        id: visual-matrix
         if: always() && steps.prepare-emulator.conclusion == 'success'
         run: |
           gradle --no-daemon :app:installDebug :app:installDebugAndroidTest
           bash tools/compose-visual-smoke.sh "$RUNNER_TEMP/m5-visual-evidence"
+      - name: Prepare bounded UI review bundle
+        if: always() && steps.visual-matrix.conclusion == 'success'
+        run: |
           python3 -m pip install pillow==11.3.0
           python3 tools/visual-report.py "$RUNNER_TEMP/m5-visual-evidence"
       - uses: actions/upload-artifact@v4

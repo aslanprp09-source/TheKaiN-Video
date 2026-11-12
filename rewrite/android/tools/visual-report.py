@@ -35,8 +35,8 @@ with zipfile.ZipFile(bundle, 'w', zipfile.ZIP_DEFLATED) as archive:
         archive.writestr(f'{name}.webp', output.getvalue())
 (folder / 'review-bundle.zip').write_bytes(bundle.getvalue())
 encoded = base64.b64encode(bundle.getvalue()).decode('ascii')
-chunks = [encoded[i:i+16000] for i in range(0, len(encoded), 16000)]
-assert len(chunks) <= 30, 'Review bundle exceeds the bounded annotation budget'
+chunks = [encoded[i:i+60000] for i in range(0, len(encoded), 60000)]
+assert len(chunks) <= 9, 'Review bundle exceeds the bounded annotation budget'
 for i, chunk in enumerate(chunks, 1):
     print(f'::notice title=M5 review bundle {i}/{len(chunks)}::{chunk}')
 print('::notice title=M5 evidence::42 PNGs validated; renderer fixtures, not website/device release claims')
