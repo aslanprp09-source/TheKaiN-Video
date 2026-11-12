@@ -47,6 +47,26 @@ class WorkflowPolicyTest(unittest.TestCase):
             if variant == 'upload': steps['upload-signed']['if'] = 'always()'
             with self.subTest(variant=variant): self.assertTrue(check(self.docs, self.lock))
 
+    def test_required_pr_checks_target_only_rebuild(self):
+        name = '.github/workflows/rewrite-ci.yml'
+        self.assertEqual(self.docs[name]['on']['pull_request'],
+                         {'branches': ['rebuild-2026-11-11']})
+        for variant in ('missing', 'main', 'wildcard', 'unrestricted', 'push-main'):
+            with self.subTest(variant=variant):
+                self.setUp()
+                triggers = self.docs[name]['on']
+                if variant == 'missing':
+                    del triggers['pull_request']
+                elif variant == 'main':
+                    triggers['pull_request']['branches'] = ['main']
+                elif variant == 'wildcard':
+                    triggers['pull_request']['branches'] = ['*']
+                elif variant == 'unrestricted':
+                    triggers['pull_request'] = {}
+                elif variant == 'push-main':
+                    triggers['push']['branches'] = ['main']
+                self.assertTrue(check(self.docs, self.lock))
+
     def test_duplicate_keys_cannot_hide_a_workflow_override(self):
         with self.assertRaises(ValueError):
             yaml.load('permissions: {contents: read}\npermissions: {contents: write}\n', Loader=UniqueLoader)
