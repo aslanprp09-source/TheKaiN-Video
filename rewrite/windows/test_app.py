@@ -5,9 +5,10 @@ import json
 import tempfile
 import time
 import unittest
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
-from PySide6.QtCore import QObject, Signal, QTimer, Qt, QSettings
+from PySide6.QtCore import QObject, Signal, QTimer, Qt, QSettings, QEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QLineEdit
 from domain import AnalyzeResult, DownloadError, ErrorCode, FormatVariant
@@ -27,6 +28,25 @@ def wait_until(predicate, timeout=3):
     while not predicate() and time.monotonic() < deadline:
         QTest.qWait(10)
     assert predicate(), 'Qt operation timed out'
+
+
+@contextmanager
+def async_window(directory, analyzer=None):
+    """A real background controller must stop even if fixture startup/assertions fail."""
+    controller = Controller(directory, analyzer=analyzer)
+    window = MainWindow(directory, controller=controller)
+    window.show()
+    try:
+        # Hosted Windows cold initialization has a separate bounded allowance;
+        # ordinary state transitions and responsiveness assertions retain 3s.
+        wait_until(lambda: window.backend_ready, timeout=10)
+        yield window, controller
+    finally:
+        window.close()
+        wait_until(lambda: window.allow_close, timeout=10)
+        window.deleteLater()
+        APP.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        APP.processEvents()
 
 
 class FixtureController(QObject):
@@ -300,32 +320,46 @@ class DesktopTest(unittest.TestCase):
 
 
 class AsyncBridgeTest(unittest.TestCase):
+    def test_failed_startup_wait_stops_controller_and_releases_queue_lock(self):
+        from unittest.mock import patch
+        from download_queue import InstanceLock
+        with tempfile.TemporaryDirectory() as directory:
+            controller = Controller(directory)
+            real_wait = wait_until
+            calls = []
+            def fail_first_wait(predicate, timeout=3):
+                calls.append(timeout)
+                if len(calls) == 1:
+                    real_wait(lambda: controller.queue is not None and controller.queue.lease is not None, timeout=10)
+                    raise AssertionError('owned injected startup timeout')
+                real_wait(predicate, timeout)
+            with patch('test_app.Controller', return_value=controller), \
+                    patch('test_app.wait_until', side_effect=fail_first_wait), \
+                    self.assertRaisesRegex(AssertionError, 'owned injected startup timeout'):
+                with async_window(directory):
+                    self.fail('Failed fixture startup must not enter the test body')
+            self.assertTrue(controller.stopping)
+            lock_path = Path(directory) / 'queue.lock'
+            lease = InstanceLock(lock_path)
+            lease.close()
+            lock_path.unlink()  # Windows denies this if any fixture handle survived.
+
     def test_actual_enqueue_failure_signal_releases_pending_guard(self):
         from unittest.mock import patch
         class OwnedAnalyzer:
             def analyze(self, url, cancel):
                 return parse_metadata(json.loads((FIXTURES / 'one.json').read_text(encoding='utf-8')), url)
-        with tempfile.TemporaryDirectory() as directory:
-            controller = Controller(directory, analyzer=OwnedAnalyzer())
-            window = MainWindow(directory, controller=controller)
-            window.show()
-            try:
-                wait_until(lambda: window.backend_ready)
-                window.url_edit.setText('https://example.invalid/owned')
-                window.analyze()
-                wait_until(lambda: window.media is not None)
-                with patch.object(controller.queue, 'enqueue', side_effect=OSError('owned failure')) as enqueue:
-                    window.download()
-                    self.assertTrue(window.enqueue_pending)
-                    wait_until(lambda: not window.enqueue_pending)
-                    enqueue.assert_called_once()
-                self.assertTrue(window.download_button.isEnabled())
-                self.assertFalse(window.notice.isHidden())
-            finally:
-                window.close()
-                wait_until(lambda: window.allow_close)
-                window.deleteLater()
-                APP.processEvents()
+        with tempfile.TemporaryDirectory() as directory, async_window(directory, OwnedAnalyzer()) as (window, controller):
+            window.url_edit.setText('https://example.invalid/owned')
+            window.analyze()
+            wait_until(lambda: window.media is not None)
+            with patch.object(controller.queue, 'enqueue', side_effect=OSError('owned failure')) as enqueue:
+                window.download()
+                self.assertTrue(window.enqueue_pending)
+                wait_until(lambda: not window.enqueue_pending)
+                enqueue.assert_called_once()
+            self.assertTrue(window.download_button.isEnabled())
+            self.assertFalse(window.notice.isHidden())
 
     def test_actual_bounded_thumbnail_worker_and_stale_image_rejection(self):
         import threading
@@ -357,11 +391,7 @@ class AsyncBridgeTest(unittest.TestCase):
                 fixture['thumbnail'] = f'http://127.0.0.1:{server.server_port}/owned.png'
                 return parse_metadata(fixture, url)
         try:
-            with tempfile.TemporaryDirectory() as directory:
-                controller = Controller(directory, analyzer=OwnedAnalyzer())
-                window = MainWindow(directory, controller=controller)
-                window.show()
-                wait_until(lambda: window.backend_ready)
+            with tempfile.TemporaryDirectory() as directory, async_window(directory, OwnedAnalyzer()) as (window, controller):
                 window.url_edit.setText('https://example.invalid/owned')
                 window.analyze()
                 wait_until(lambda: not window.thumbnail_label.pixmap().isNull())
@@ -370,10 +400,6 @@ class AsyncBridgeTest(unittest.TestCase):
                 controller.thumbnail.emit(previous, image)
                 self.assertTrue(window.thumbnail_label.pixmap().isNull())
                 self.assertTrue(window.preview.isHidden())
-                window.close()
-                wait_until(lambda: window.allow_close)
-                window.deleteLater()
-                APP.processEvents()
         finally:
             server.shutdown()
             server.server_close()
@@ -384,21 +410,13 @@ class AsyncBridgeTest(unittest.TestCase):
             def analyze(self, url, cancel):
                 cancel.wait(.06)
                 return parse_metadata(json.loads((FIXTURES / 'one.json').read_text(encoding='utf-8')), url)
-        with tempfile.TemporaryDirectory() as directory:
-            controller = Controller(directory, analyzer=OwnedAnalyzer())
-            window = MainWindow(directory, controller=controller)
-            window.show()
-            wait_until(lambda: window.backend_ready)
+        with tempfile.TemporaryDirectory() as directory, async_window(directory, OwnedAnalyzer()) as (window, controller):
             window.url_edit.setText('https://example.invalid/owned')
             window.analyze()
             self.assertTrue(window.analyzing)
             window.navigate(1)
             self.assertEqual(window.pages.currentIndex(), 1)
             wait_until(lambda: window.media is not None)
-            window.close()
-            wait_until(lambda: window.allow_close)
-            window.deleteLater()
-            APP.processEvents()
 
 
 class PresentationTest(unittest.TestCase):
