@@ -62,6 +62,7 @@ jobs:
         with:
           gradle-version: "8.11.1"
       - name: Prepare official Android 35 emulator
+        id: prepare-emulator
         run: |
           set -Eeuo pipefail
           trap 'echo "::error title=M4 emulator setup::Failed command on line $LINENO: $BASH_COMMAND"' ERR
@@ -108,7 +109,9 @@ jobs:
           gradle --no-daemon :app:installDebug :app:installDebugAndroidTest
           bash tools/process-restart-smoke.sh "$RUNNER_TEMP/m4-device-evidence"
       - name: Compose layouts at 360, 412 and 600 dp in both themes
+        if: always() && steps.prepare-emulator.conclusion == 'success'
         run: |
+          gradle --no-daemon :app:installDebug :app:installDebugAndroidTest
           bash tools/compose-visual-smoke.sh "$RUNNER_TEMP/m5-visual-evidence"
           python3 -m pip install pillow==11.3.0
           python3 tools/visual-report.py "$RUNNER_TEMP/m5-visual-evidence"

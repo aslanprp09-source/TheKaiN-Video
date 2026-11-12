@@ -145,7 +145,7 @@ class M5ComposeTest {
             assertTrue("Keyboard was not displayed", ime > 0)
             assertTrue("CTA overlapped the keyboard", cta.bottom <= fullBottom - ime + 1)
         }
-        compose.onRoot().performKeyInput { keyDown(Key.CtrlLeft); pressKey(Key.Enter); keyUp(Key.CtrlLeft) }
+        compose.onNodeWithTag("source_input").performKeyInput { keyDown(Key.CtrlLeft); pressKey(Key.Enter); keyUp(Key.CtrlLeft) }
         compose.runOnIdle { assertEquals(1, submitted) }
         compose.onNodeWithTag("download_button").assertIsNotEnabled()
     }
@@ -154,7 +154,7 @@ class M5ComposeTest {
     @Test fun ctrlLReturnsHomeAndFocusesTheLinkField() {
         start(ScreenState(page = Page.DOWNLOADS))
         compose.onNodeWithTag("task_search").performClick()
-        compose.onRoot().performKeyInput { keyDown(Key.CtrlLeft); pressKey(Key.L); keyUp(Key.CtrlLeft) }
+        compose.onNodeWithTag("task_search").performKeyInput { keyDown(Key.CtrlLeft); pressKey(Key.L); keyUp(Key.CtrlLeft) }
         compose.onNodeWithTag("source_input").assertIsFocused()
     }
 
