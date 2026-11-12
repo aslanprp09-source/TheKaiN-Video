@@ -12,18 +12,42 @@ on:
         type: boolean
         default: false
         description: Explicitly request protected INTERNAL QA Android signing
+permissions:
+  contents: read
 jobs:
+  ci-policy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.11.18'
+      - name: Install pinned CI policy parser
+        run: |
+          python -m pip install --require-hashes --only-binary=:all: --no-deps -r rewrite/ci/requirements.lock
+      - name: Check rebuild workflows and negative security scenarios
+        run: |
+          python rewrite/ci/workflow_policy.py
+          python -m unittest discover -s rewrite/ci -p 'test_*.py' -v
   experimental-packages:
     if: github.event_name == 'workflow_dispatch' && inputs.build_packages
+    needs: ci-policy
+    permissions:
+      contents: read
+      actions: read
     uses: ./.github/workflows/rewrite-packaging.yml
     with:
       sign_android: ${{ inputs.sign_android }}
-    secrets: inherit
   windows-tests:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.11.18"
       - name: Install media verification and Qt runtime tools
@@ -42,12 +66,14 @@ jobs:
       run:
         working-directory: rewrite/android
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         with:
           distribution: temurin
           java-version: "17"
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
         with:
           gradle-version: "8.11.1"
       - name: Compile APKs and run JVM tests
@@ -57,13 +83,11 @@ jobs:
       - name: Verify executed JVM tests
         if: always()
         run: python3 tools/report-tests.py app/build/test-results/testDebugUnitTest
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: TheKaiN-rebuild-Android-0.1-debug
           path: rewrite/android/app/build/outputs/apk/debug/app-debug.apk
   android-device-tests:
-    permissions:
-      contents: write
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
@@ -73,12 +97,14 @@ jobs:
       run:
         working-directory: rewrite/android
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         with:
           distribution: temurin
           java-version: "17"
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
         with:
           gradle-version: "8.11.1"
       - name: Prepare official Android 35 emulator
@@ -136,12 +162,10 @@ jobs:
           bash tools/compose-visual-smoke.sh "$RUNNER_TEMP/m5-visual-evidence"
       - name: Prepare bounded UI review bundle
         if: always() && steps.visual-matrix.conclusion == 'success'
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           python3 -m pip install pillow==11.3.0
           python3 tools/visual-report.py "$RUNNER_TEMP/m5-visual-evidence"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: M5-Android-device-validation

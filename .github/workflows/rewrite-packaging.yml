@@ -14,12 +14,32 @@ on:
 permissions:
   contents: read
 jobs:
+  signing-policy:
+    permissions:
+      contents: read
+      actions: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      authorized: ${{ steps.policy.outputs.authorized }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Audit protected environment without access to signing secrets
+        id: policy
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SIGN_ANDROID_REQUESTED: ${{ inputs.sign_android }}
+        run: python3 rewrite/ci/signing_policy.py --requested "$SIGN_ANDROID_REQUESTED"
   windows-installer:
     runs-on: windows-2025
     timeout-minutes: 35
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.14.10'
           architecture: x64
@@ -62,7 +82,7 @@ jobs:
           for path in pathlib.Path(os.environ['RUNNER_TEMP']).glob('m6-*.log'):
               value = path.read_text(errors='replace')[-3500:]
               print('::error title=' + path.name + '::' + value.replace('%','%25').replace('\r','%0D').replace('\n','%0A'))
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: M6-Windows-unsigned-experimental
@@ -74,18 +94,25 @@ jobs:
             ${{ runner.temp }}/thekain-installed-qa/*install.log
             ${{ runner.temp }}/m6-*.log
   android-unsigned:
+    outputs:
+      signing-artifact-id: ${{ steps.signing-input.outputs.artifact-id }}
+      apk-sha: ${{ steps.proof.outputs.apk_sha256 }}
+      aab-sha: ${{ steps.proof.outputs.aab_sha256 }}
+      manifest-sha: ${{ steps.proof.outputs.manifest_sha256 }}
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     defaults:
       run:
         working-directory: rewrite/android
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         with:
           distribution: temurin
           java-version: '17'
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
         with:
           gradle-version: '8.11.1'
       - name: Test and build actual unsigned release variants
@@ -98,7 +125,17 @@ jobs:
           python3 ../release/inspect-android.py --apk app/build/outputs/apk/release/app-release-unsigned.apk --aab app/build/outputs/bundle/release/app-release.aab --tools "$ANDROID_HOME/build-tools/35.0.0" --output ../release/out/android-unsigned
           python3 ../release/manifest.py ../release/out/android-unsigned --commit "$GITHUB_SHA" --platform android --channel unsigned-experimental
           echo '::notice title=M6 signing::BLOCKED: default build is unsigned; configure protected signing access and request internal QA signing explicitly.'
-      - uses: actions/upload-artifact@v4
+      - name: Bind unsigned signing inputs to source and same-run digests
+        id: proof
+        run: python3 ../ci/artifact_signing.py proof --input ../release/out/android-unsigned --commit "$GITHUB_SHA"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        id: signing-input
+        with:
+          name: M6-Android-signing-input-${{ github.sha }}
+          path: rewrite/release/out/android-unsigned/
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: M6-Android-unsigned-experimental
@@ -108,49 +145,90 @@ jobs:
             rewrite/android/app/build/generated/releaseLegal/
             rewrite/android/app/build/reports/lint-results-release.*
             rewrite/android/app/build/test-results/testReleaseUnitTest/
-  android-signed-internal-qa:
-    if: inputs.sign_android
-    needs: [android-unsigned, windows-installer]
-    environment: release-signing
+  signing-rehearsal:
+    needs: android-unsigned
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
-    defaults:
-      run:
-        working-directory: rewrite/android
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         with:
           distribution: temurin
           java-version: '17'
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          gradle-version: '8.11.1'
-      - name: Build and verify internal QA signatures with temporary key material
+          artifact-ids: ${{ needs.android-unsigned.outputs.signing-artifact-id }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/thekain-rehearsal-input
+      - name: Verify same-run proof after artifact download
+        env:
+          APK_SHA: ${{ needs.android-unsigned.outputs.apk-sha }}
+          AAB_SHA: ${{ needs.android-unsigned.outputs.aab-sha }}
+          MANIFEST_SHA: ${{ needs.android-unsigned.outputs.manifest-sha }}
+        run: python3 rewrite/ci/artifact_signing.py verify --input "$RUNNER_TEMP/thekain-rehearsal-input" --commit "$GITHUB_SHA" --apk-sha "$APK_SHA" --aab-sha "$AAB_SHA" --manifest-sha "$MANIFEST_SHA"
+      - name: Rehearse tools on a fresh host with a disposable key; upload no signed test output
+        env:
+          CI_UNSIGNED_INPUT: ${{ runner.temp }}/thekain-rehearsal-input
+        run: python3 rewrite/ci/signing_rehearsal.py
+  android-signed-internal-qa:
+    if: inputs.sign_android && needs.signing-policy.outputs.authorized == 'true' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/rebuild-2026-11-11'
+    needs: [signing-policy, android-unsigned, windows-installer, signing-rehearsal]
+    permissions:
+      contents: read
+      actions: read
+    environment: release-signing
+    concurrency:
+      group: thekain-android-signing
+      cancel-in-progress: false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        id: checkout
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Recheck branch tip and environment after approval, before exposing key material
+        id: policy-recheck
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 rewrite/ci/signing_policy.py --requested true
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        id: setup-java
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        id: download-unsigned
+        with:
+          artifact-ids: ${{ needs.android-unsigned.outputs.signing-artifact-id }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/thekain-unsigned-input
+      - name: Reject substituted artifacts before the secret-bearing step
+        id: verify-unsigned
+        env:
+          APK_SHA: ${{ needs.android-unsigned.outputs.apk-sha }}
+          AAB_SHA: ${{ needs.android-unsigned.outputs.aab-sha }}
+          MANIFEST_SHA: ${{ needs.android-unsigned.outputs.manifest-sha }}
+        run: python3 rewrite/ci/artifact_signing.py verify --input "$RUNNER_TEMP/thekain-unsigned-input" --commit "$GITHUB_SHA" --apk-sha "$APK_SHA" --aab-sha "$AAB_SHA" --manifest-sha "$MANIFEST_SHA"
+      - name: Sign verified APK/AAB copies; no project build or cache receives the key
+        id: sign-artifacts
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           THEKAIN_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           THEKAIN_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           THEKAIN_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           ANDROID_SIGNING_CERT_SHA256: ${{ vars.ANDROID_SIGNING_CERT_SHA256 }}
-        run: |
-          set -euo pipefail
-          umask 077
-          export THEKAIN_KEYSTORE="$RUNNER_TEMP/thekain-controlled-signing.jks"
-          trap 'rm -f "$THEKAIN_KEYSTORE"' EXIT
-          python3 - <<'PYKEY'
-          import os, base64
-          names = ['ANDROID_KEYSTORE_BASE64', 'THEKAIN_STORE_PASSWORD', 'THEKAIN_KEY_ALIAS', 'THEKAIN_KEY_PASSWORD', 'ANDROID_SIGNING_CERT_SHA256']
-          if not all(os.environ.get(n) for n in names):
-              raise SystemExit('Signing BLOCKED: configure all protected signing secrets and the public certificate digest; no key is generated automatically.')
-          with open(os.environ['THEKAIN_KEYSTORE'], 'wb') as f:
-              f.write(base64.b64decode(os.environ['ANDROID_KEYSTORE_BASE64'], validate=True))
-          PYKEY
-          gradle --no-daemon --no-configuration-cache :app:assembleRelease :app:bundleRelease
-          python3 ../release/inspect-android.py --signed --apk app/build/outputs/apk/release/app-release.apk --aab app/build/outputs/bundle/release/app-release.aab --tools "$ANDROID_HOME/build-tools/35.0.0" --output ../release/out/android-signed
-          python3 ../release/manifest.py ../release/out/android-signed --commit "$GITHUB_SHA" --platform android --channel signed-internal-qa
-      - uses: actions/upload-artifact@v4
+          APK_SHA: ${{ needs.android-unsigned.outputs.apk-sha }}
+          AAB_SHA: ${{ needs.android-unsigned.outputs.aab-sha }}
+          MANIFEST_SHA: ${{ needs.android-unsigned.outputs.manifest-sha }}
+        run: python3 rewrite/ci/artifact_signing.py sign --input "$RUNNER_TEMP/thekain-unsigned-input" --commit "$GITHUB_SHA" --apk-sha "$APK_SHA" --aab-sha "$AAB_SHA" --manifest-sha "$MANIFEST_SHA" --tools "$ANDROID_HOME/build-tools/35.0.0" --java-home "$JAVA_HOME" --output "$RUNNER_TEMP/thekain-signed-output"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        id: upload-signed
         with:
           name: M6-Android-signed-INTERNAL-QA
-          path: rewrite/release/out/android-signed/
+          path: ${{ runner.temp }}/thekain-signed-output/
           if-no-files-found: error
+          retention-days: 7
