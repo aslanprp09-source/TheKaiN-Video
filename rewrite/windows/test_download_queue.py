@@ -475,12 +475,26 @@ class RepositoryAndToolsTest(unittest.TestCase):
             self.assertEqual(JobRepository(d).get(job.id), job)
             with self.assertRaises(ValueError):
                 repo.update(job.id, S.COMPLETED)
-            with sqlite3.connect(repo.db) as con:
+            with repo.connect() as con:
                 con.execute('PRAGMA user_version=99')
             with self.assertRaises(RuntimeError):
                 JobRepository(d)
-            with sqlite3.connect(repo.db) as con:
+            with repo.connect() as con:
                 self.assertEqual(con.execute('PRAGMA user_version').fetchone()[0], 99)
+
+    def test_failed_queue_owner_can_acquire_after_original_closes(self):
+        from download_queue import InstanceLock
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'queue.lock'
+            first = InstanceLock(path)
+            try:
+                with self.assertRaises(RuntimeError):
+                    InstanceLock(path)
+            finally:
+                first.close()
+            second = InstanceLock(path)
+            second.close()
+            path.unlink()  # No failed acquisition may retain a Windows file handle.
 
     def test_sanitizes_windows_names(self):
         for name in ('../CON', 'NUL', 'LPT1.wav', 'a/b\\c:<>?*', '', '...'):

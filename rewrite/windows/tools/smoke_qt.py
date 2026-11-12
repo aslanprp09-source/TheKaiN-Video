@@ -27,7 +27,7 @@ from test_download_queue import FixtureHandler, VARIANT
 
 class OwnedAnalyzer:
     def analyze(self, url, cancel):
-        data = json.loads((Path(__file__).resolve().parents[1] / 'fixtures/three.json').read_text())
+        data = json.loads((Path(__file__).resolve().parents[1] / 'fixtures/three.json').read_text(encoding='utf-8'))
         data['title'] = 'Тестовый ролик — отдельные видео и аудио дорожки'
         data['thumbnail'] = None
         if cancel.wait(.05):

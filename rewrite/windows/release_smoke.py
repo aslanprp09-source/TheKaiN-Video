@@ -77,7 +77,7 @@ def pipeline(root, evidence):
 
 
 def gui(root, evidence):
-    from PySide6.QtCore import QSettings, qVersion
+    from PySide6.QtCore import QSettings, Qt, qVersion
     from PySide6.QtWidgets import QApplication
     from desktop.window import MainWindow
     app = QApplication.instance() or QApplication([])
@@ -96,6 +96,12 @@ def gui(root, evidence):
         assert all(window.tools.values()), 'Installed runtime prerequisites missing'
         assert not window.brand_icon.pixmap().isNull(), 'Approved SVG/plugin missing'
         assert window.grab().save(str(evidence / 'installed-home.png')), 'Screenshot failed'
+        preview = evidence / 'installed-home.webp'
+        for quality in (65, 45, 25):
+            assert window.grab().scaledToWidth(720, Qt.TransformationMode.SmoothTransformation).save(str(preview), 'WEBP', quality)
+            if preview.stat().st_size <= 18000:
+                break
+        assert preview.stat().st_size <= 18000, 'Bounded review preview is too large'
         return {'qt': qVersion(), 'tools': window.tools, 'startup': True, 'svg': True}
     finally:
         window.close()

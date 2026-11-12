@@ -6,11 +6,13 @@ if ((git rev-parse HEAD) -ne $Commit) { throw 'Build commit must match the check
 if (git status --porcelain --untracked-files=normal -- rewrite .github/workflows) { throw 'Commit source changes before packaging' }
 $release = Split-Path $PSScriptRoot -Parent
 $env:PYTHONHASHSEED = '0'
+$env:PYTHONIOENCODING = 'utf-8'
+$env:PYTHONUTF8 = '1'
 $env:SOURCE_DATE_EPOCH = (git show -s --format=%ct $Commit)
 $env:QT_QPA_PLATFORM = 'offscreen'
 python "$PSScriptRoot/prepare-build.py" $Commit
 python "$PSScriptRoot/collect-notices.py" "$release/build/notices"
-python -m pip inspect --local | Set-Content "$release/build/pip-inspect.json" -Encoding utf8
+python -m pip --no-color inspect --local | Set-Content "$release/build/pip-inspect.json" -Encoding utf8
 python -m PyInstaller --noconfirm --clean --distpath "$release/out/frozen" --workpath "$release/build/pyinstaller" "$PSScriptRoot/TheKaiN.spec"
 $bundle = (Resolve-Path "$release/out/frozen/TheKaiNVideo").Path
 $artifacts = "$release/out/windows-artifacts"

@@ -36,4 +36,7 @@ if __name__ == '__main__':
     parser.add_argument('--channel', required=True, choices=['unsigned-experimental', 'signed-internal-qa'])
     args = parser.parse_args()
     report = write_manifest(args.root, args.commit, args.platform, args.channel)
-    print(json.dumps(report, indent=2))
+    print(f"{len(report['files'])} files hashed for {report['source_commit']}; {report['channel']}")
+    for file in report['files']:
+        if Path(file['file']).suffix.lower() in ('.exe', '.zip', '.apk', '.aab'):
+            print('::notice title=M6 package SHA-256::' + json.dumps(file))

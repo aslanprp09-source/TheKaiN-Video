@@ -37,6 +37,8 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           python rewrite/release/run-windows-tests.py
           python -m unittest discover -s rewrite/release -p "test_*.py" -v
       - name: Freeze GUI and worker, collect notices, compile installer and hashes
@@ -50,13 +52,15 @@ jobs:
           $installers = @(Get-ChildItem rewrite/release/out/windows-artifacts/*-setup.exe)
           if ($installers.Count -ne 1) { throw 'Expected exactly one installer' }
           ./rewrite/release/windows/smoke-installed.ps1 -Installer ($installers[0].FullName) -Evidence "$env:RUNNER_TEMP/thekain-installed-qa" *>&1 | Tee-Object "$env:RUNNER_TEMP/m6-installed.log"
+      - name: Expose bounded owned native UI preview
+        run: python rewrite/release/windows/review-evidence.py "$env:RUNNER_TEMP/thekain-installed-qa/installed-run"
       - name: Expose bounded packaging failure diagnostics
         if: failure()
         shell: python
         run: |
           import os, pathlib
           for path in pathlib.Path(os.environ['RUNNER_TEMP']).glob('m6-*.log'):
-              value = path.read_text(errors='replace')[-5000:]
+              value = path.read_text(errors='replace')[-3500:]
               print('::error title=' + path.name + '::' + value.replace('%','%25').replace('\r','%0D').replace('\n','%0A'))
       - uses: actions/upload-artifact@v4
         if: always()

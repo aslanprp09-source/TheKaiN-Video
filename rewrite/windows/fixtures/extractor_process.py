@@ -3,6 +3,8 @@ import sys
 import time
 from pathlib import Path
 
+sys.stdout.reconfigure(encoding='utf-8')  # Match the actual extractor machine protocol.
+
 mode = sys.argv[1]
 if mode == "wait":
     time.sleep(20)
