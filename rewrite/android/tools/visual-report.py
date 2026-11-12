@@ -4,6 +4,9 @@ Full-resolution originals remain in the Actions artifact. No app/user data is us
 these are the explicitly named renderer fixtures produced by M5VisualTest.
 """
 import base64
+import json
+import os
+import urllib.request
 import io
 import pathlib
 import sys
@@ -34,9 +37,13 @@ with zipfile.ZipFile(bundle, 'w', zipfile.ZIP_DEFLATED) as archive:
         image.save(output, 'WEBP', quality=92)
         archive.writestr(f'{name}.webp', output.getvalue())
 (folder / 'review-bundle.zip').write_bytes(bundle.getvalue())
-encoded = base64.b64encode(bundle.getvalue()).decode('ascii')
-chunks = [encoded[i:i+60000] for i in range(0, len(encoded), 60000)]
-assert len(chunks) <= 9, 'Review bundle exceeds the bounded annotation budget'
-for i, chunk in enumerate(chunks, 1):
-    print(f'::notice title=M5 review bundle {i}/{len(chunks)}::{chunk}')
+# Store only an unreferenced data blob: no commit, branch, tag or release is modified.
+# Annotations are limited to 4096 characters, so emit a verifiable object ID instead.
+payload = json.dumps({'content': base64.b64encode(bundle.getvalue()).decode('ascii'), 'encoding': 'base64'}).encode()
+request = urllib.request.Request('https://api.github.com/repos/' + os.environ['GITHUB_REPOSITORY'] + '/git/blobs',
+    data=payload, headers={'Authorization': 'Bearer ' + os.environ['GH_TOKEN'], 'Accept': 'application/vnd.github+json',
+                          'X-GitHub-Api-Version': '2022-11-28', 'Content-Type': 'application/json'})
+with urllib.request.urlopen(request, timeout=30) as response:
+    blob = json.load(response)
+print('::notice title=M5 review blob::' + blob['sha'])
 print('::notice title=M5 evidence::42 PNGs validated; renderer fixtures, not website/device release claims')

@@ -74,7 +74,9 @@ class MainActivity : ComponentActivity() {
                     navigate = model::navigate, back = model::back, action = model::action,
                     paste = {
                         val clip = getSystemService(ClipboardManager::class.java).primaryClip // Explicit tap only.
-                        val text = clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(this)?.toString()
+                        val item = clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)
+                        // Never dereference clipboard content providers or read their streams on the UI thread.
+                        val text = item?.text?.toString() ?: item?.uri?.toString()
                         if (text.isNullOrBlank()) message(R.string.clipboard_empty) else model.edit(text)
                     },
                     open = { task ->

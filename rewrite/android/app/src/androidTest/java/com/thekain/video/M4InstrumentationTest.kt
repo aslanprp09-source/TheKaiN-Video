@@ -11,6 +11,9 @@ import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.Until
 import androidx.test.uiautomator.UiDevice
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import androidx.core.view.ViewCompat
 import com.thekain.video.data.*
 import com.thekain.video.domain.*
 import com.thekain.video.storage.*
@@ -345,8 +348,26 @@ class M4InstrumentationTest {
                 scenario.recreate()
                 assertEquals(1, graph.repository.all().count { it.id == id })
                 assertEquals(output, graph.repository.get(id!!).outputUri)
+                scenario.onActivity { activity ->
+                    activity.currentFocus?.clearFocus()
+                    WindowInsetsControllerCompat(activity.window, activity.window.decorView).hide(WindowInsetsCompat.Type.ime())
+                }
+                withTimeout(10_000) {
+                    while (true) {
+                        var ime = false
+                        scenario.onActivity { activity -> ime = ViewCompat.getRootWindowInsets(activity.window.decorView)?.isVisible(WindowInsetsCompat.Type.ime()) == true }
+                        if (!ime) break
+                        delay(50)
+                    }
+                }
+                device.waitForIdle(3000)
                 device.wait(Until.findObject(By.res("nav_downloads")), 10_000)!!.click()
-                assertTrue(device.wait(Until.hasObject(By.res("task_$id")), 10_000))
+                assertTrue("Downloads navigation did not complete", device.wait(Until.hasObject(By.res("task_search")), 10_000))
+                if (!device.wait(Until.hasObject(By.res("task_$id")), 10_000)) {
+                    val dump = File(root, "recreated-ui.xml").apply { parentFile!!.mkdirs() }
+                    device.dumpWindowHierarchy(dump)
+                    fail("Completed row absent after recreation: " + dump.readText().take(5000))
+                }
                 assertEquals(if (retryFailure) 3 else 2, server.requestCount) // HEAD + actual transfer(s).
                 assertEquals(if (retryFailure) 2 else 1, graph.repository.get(id!!).attempt)
                 withTimeout(30_000) {

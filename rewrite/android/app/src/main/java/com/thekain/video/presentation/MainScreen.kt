@@ -78,7 +78,7 @@ data class UiActions(
                     }; true
                 }
                 event.isCtrlPressed && event.key == Key.Enter -> {
-                    if (state.page == Page.HOME && event.nativeKeyEvent.repeatCount == 0) actions.download(); true
+                    if (state.page == Page.HOME && event.nativeKeyEvent.repeatCount == 0) { keyboard?.hide(); focus.clearFocus(); actions.download() }; true
                 }
                 event.key == Key.Escape -> { keyboard?.hide(); focus.clearFocus(); if (state.home.phase == AnalysisPhase.ANALYZING) actions.cancelAnalysis(); true }
                 else -> false
@@ -132,6 +132,7 @@ data class UiActions(
     val home = state.home
     val ready = home.phase == AnalysisPhase.READY && home.variant != null
     val keyboard = LocalSoftwareKeyboardController.current
+    val focus = LocalFocusManager.current
     Column(Modifier.fillMaxSize()) {
         LazyColumn(Modifier.weight(1f).testTag("home_content"), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
             item {
@@ -143,12 +144,12 @@ data class UiActions(
                 OutlinedTextField(value = home.draft, onValueChange = actions.edit, modifier = Modifier.fillMaxWidth().focusRequester(urlFocus).testTag("source_input")
                     .onPreviewKeyEvent { event ->
                         if (event.type == KeyEventType.KeyDown && event.key == Key.Enter && !event.isShiftPressed && !event.isCtrlPressed) {
-                            if (event.nativeKeyEvent.repeatCount == 0) { keyboard?.hide(); actions.analyze() }; true
+                            if (event.nativeKeyEvent.repeatCount == 0) { keyboard?.hide(); focus.clearFocus(); actions.analyze() }; true
                         } else false
                     }, enabled = !home.enqueuePending,
                     label = { Text(stringResource(R.string.source_label)) }, placeholder = { Text("https://…") }, maxLines = 3,
                     shape = RoundedCornerShape(14.dp), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Go),
-                    keyboardActions = KeyboardActions(onGo = { keyboard?.hide(); actions.analyze() }),
+                    keyboardActions = KeyboardActions(onGo = { keyboard?.hide(); focus.clearFocus(); actions.analyze() }),
                     trailingIcon = { if (home.draft.isNotEmpty()) IconButton(onClick = { actions.edit("") }, enabled = !home.enqueuePending, modifier = Modifier.size(48.dp).testTag("clear_button")) {
                         Icon(Icons.Default.Close, stringResource(R.string.clear))
                     } })
@@ -184,7 +185,7 @@ data class UiActions(
             Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (home.phase == AnalysisPhase.ANALYZING) OutlinedButton(onClick = actions.cancelAnalysis, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("cancel_analysis")) {
                     Text(stringResource(R.string.cancel_analysis))
-                } else Button(onClick = { keyboard?.hide(); if (ready) actions.download() else actions.analyze() },
+                } else Button(onClick = { keyboard?.hide(); focus.clearFocus(); if (ready) actions.download() else actions.analyze() },
                     enabled = home.draft.isNotBlank() && !home.enqueuePending,
                     modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag(if (ready) "download_button" else "analyze_button"),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC52A38), contentColor = Color.White), shape = RoundedCornerShape(14.dp)) {

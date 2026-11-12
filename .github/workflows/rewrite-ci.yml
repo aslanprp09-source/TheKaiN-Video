@@ -44,6 +44,8 @@ jobs:
           name: TheKaiN-rebuild-Android-0.1-debug
           path: rewrite/android/app/build/outputs/apk/debug/app-debug.apk
   android-device-tests:
+    permissions:
+      contents: write
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
@@ -116,6 +118,8 @@ jobs:
           bash tools/compose-visual-smoke.sh "$RUNNER_TEMP/m5-visual-evidence"
       - name: Prepare bounded UI review bundle
         if: always() && steps.visual-matrix.conclusion == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           python3 -m pip install pillow==11.3.0
           python3 tools/visual-report.py "$RUNNER_TEMP/m5-visual-evidence"
