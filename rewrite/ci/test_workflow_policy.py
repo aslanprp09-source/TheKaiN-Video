@@ -36,7 +36,7 @@ class WorkflowPolicyTest(unittest.TestCase):
         for variant in ('trigger', 'ref', 'environment', 'cache', 'secret', 'download', 'upload'):
             self.setUp()
             package = self.docs['.github/workflows/rewrite-packaging.yml']
-            sign = package['jobs']['android-signed-internal-qa']
+            sign = self.docs['.github/workflows/rewrite-ci.yml']['jobs']['android-signed-internal-qa']
             steps = {s['id']: s for s in sign['steps']}
             if variant == 'trigger': package['on']['pull_request_target'] = {}
             if variant == 'ref': sign['if'] = 'inputs.sign_android'
@@ -45,6 +45,43 @@ class WorkflowPolicyTest(unittest.TestCase):
             if variant == 'secret': steps['setup-java']['env'] = {'KEY': '${{ secrets.ANDROID_KEYSTORE_BASE64 }}'}
             if variant == 'download': steps['download-unsigned']['with']['run-id'] = '${{ inputs.run_id }}'
             if variant == 'upload': steps['upload-signed']['if'] = 'always()'
+            with self.subTest(variant=variant): self.assertTrue(check(self.docs, self.lock))
+
+    def test_secrets_cannot_cross_the_build_boundary_or_enter_unprotected_jobs(self):
+        for variant in ('named-forward', 'call-declaration', 'build-step', 'build-environment',
+                'workflow-env', 'bracket-access', 'serialize-context', 'output'):
+            self.setUp()
+            ci = self.docs['.github/workflows/rewrite-ci.yml']
+            package = self.docs['.github/workflows/rewrite-packaging.yml']
+            secret = '${{ secrets.ANDROID_KEYSTORE_BASE64 }}'
+            if variant == 'named-forward': ci['jobs']['experimental-packages']['secrets'] = {'ANDROID_KEYSTORE_BASE64': secret}
+            if variant == 'call-declaration': package['on']['workflow_call']['secrets'] = {'ANDROID_KEYSTORE_BASE64': {'required': 'true'}}
+            if variant == 'build-step': package['jobs']['android-unsigned']['steps'][0]['env'] = {'KEY': secret}
+            if variant == 'build-environment': package['jobs']['android-unsigned']['environment'] = 'release-signing'
+            if variant == 'workflow-env': ci['env'] = {'KEY': secret}
+            if variant == 'bracket-access': ci['jobs']['windows-tests']['env'] = {'KEY': "${{ secrets['ANDROID_KEYSTORE_BASE64'] }}"}
+            if variant == 'serialize-context': ci['jobs']['windows-tests']['env'] = {'KEY': '${{ toJSON(secrets) }}'}
+            if variant == 'output': package['on']['workflow_call']['outputs']['apk-sha']['value'] = secret
+            with self.subTest(variant=variant): self.assertTrue(check(self.docs, self.lock))
+
+    def test_direct_signer_requires_all_ci_and_public_same_run_build_outputs(self):
+        for variant in ('reusable-signer', 'no-device-check', 'no-build', 'wrong-proof', 'fake-authorization', 'extra-output',
+                'no-rehearsal', 'skip-rehearsal', 'skip-windows', 'ignore-build-failure', 'ignore-signing-failure'):
+            self.setUp()
+            ci = self.docs['.github/workflows/rewrite-ci.yml']
+            package = self.docs['.github/workflows/rewrite-packaging.yml']
+            sign = ci['jobs']['android-signed-internal-qa']
+            if variant == 'reusable-signer': package['jobs']['android-signed-internal-qa'] = ci['jobs'].pop('android-signed-internal-qa')
+            if variant == 'no-device-check': sign['needs'].remove('android-device-tests')
+            if variant == 'no-build': sign['needs'].remove('experimental-packages')
+            if variant == 'wrong-proof': package['on']['workflow_call']['outputs']['apk-sha']['value'] = '${{ inputs.apk_sha }}'
+            if variant == 'fake-authorization': package['on']['workflow_call']['outputs']['signing-authorized']['value'] = 'true'
+            if variant == 'extra-output': package['on']['workflow_call']['outputs']['unreviewed'] = {'value': '${{ jobs.android-unsigned.outputs.extra }}'}
+            if variant == 'no-rehearsal': del package['jobs']['signing-rehearsal']
+            if variant == 'skip-rehearsal': package['jobs']['signing-rehearsal']['if'] = 'false'
+            if variant == 'skip-windows': package['jobs']['windows-installer']['if'] = 'false'
+            if variant == 'ignore-build-failure': package['jobs']['android-unsigned']['continue-on-error'] = 'true'
+            if variant == 'ignore-signing-failure': next(s for s in sign['steps'] if s['id'] == 'sign-artifacts')['continue-on-error'] = 'true'
             with self.subTest(variant=variant): self.assertTrue(check(self.docs, self.lock))
 
     def test_required_pr_checks_target_only_rebuild(self):

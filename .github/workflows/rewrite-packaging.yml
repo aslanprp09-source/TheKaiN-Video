@@ -1,6 +1,22 @@
 name: Rebuild experimental packages — no publication
 on:
   workflow_call:
+    outputs:
+      signing-authorized:
+        description: Public policy decision; never contains signing credentials
+        value: ${{ jobs.signing-policy.outputs.authorized }}
+      signing-artifact-id:
+        description: Unsigned artifact uploaded by this workflow run
+        value: ${{ jobs.android-unsigned.outputs.signing-artifact-id }}
+      apk-sha:
+        description: Same-run unsigned APK SHA-256
+        value: ${{ jobs.android-unsigned.outputs.apk-sha }}
+      aab-sha:
+        description: Same-run unsigned AAB SHA-256
+        value: ${{ jobs.android-unsigned.outputs.aab-sha }}
+      manifest-sha:
+        description: Same-run unsigned manifest SHA-256
+        value: ${{ jobs.android-unsigned.outputs.manifest-sha }}
     inputs:
       sign_android:
         type: boolean
@@ -10,7 +26,7 @@ on:
       sign_android:
         type: boolean
         default: false
-        description: Build signed INTERNAL QA output using the protected release-signing environment
+        description: Audit eligibility only; protected signing runs through Clean rebuild
 permissions:
   contents: read
 jobs:
@@ -180,63 +196,3 @@ jobs:
         env:
           CI_UNSIGNED_INPUT: ${{ runner.temp }}/thekain-rehearsal-input
         run: python3 rewrite/ci/signing_rehearsal.py
-  android-signed-internal-qa:
-    if: inputs.sign_android && needs.signing-policy.outputs.authorized == 'true' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/rebuild-2026-11-11'
-    needs: [signing-policy, android-unsigned, windows-installer, signing-rehearsal]
-    permissions:
-      contents: read
-      actions: read
-    environment: release-signing
-    concurrency:
-      group: thekain-android-signing
-      cancel-in-progress: false
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        id: checkout
-        with:
-          persist-credentials: false
-          ref: ${{ github.sha }}
-      - name: Recheck branch tip and environment after approval, before exposing key material
-        id: policy-recheck
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: python3 rewrite/ci/signing_policy.py --requested true
-      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
-        id: setup-java
-        with:
-          distribution: temurin
-          java-version: '17'
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        id: download-unsigned
-        with:
-          artifact-ids: ${{ needs.android-unsigned.outputs.signing-artifact-id }}
-          merge-multiple: true
-          path: ${{ runner.temp }}/thekain-unsigned-input
-      - name: Reject substituted artifacts before the secret-bearing step
-        id: verify-unsigned
-        env:
-          APK_SHA: ${{ needs.android-unsigned.outputs.apk-sha }}
-          AAB_SHA: ${{ needs.android-unsigned.outputs.aab-sha }}
-          MANIFEST_SHA: ${{ needs.android-unsigned.outputs.manifest-sha }}
-        run: python3 rewrite/ci/artifact_signing.py verify --input "$RUNNER_TEMP/thekain-unsigned-input" --commit "$GITHUB_SHA" --apk-sha "$APK_SHA" --aab-sha "$AAB_SHA" --manifest-sha "$MANIFEST_SHA"
-      - name: Sign verified APK/AAB copies; no project build or cache receives the key
-        id: sign-artifacts
-        env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          THEKAIN_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          THEKAIN_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          THEKAIN_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          ANDROID_SIGNING_CERT_SHA256: ${{ vars.ANDROID_SIGNING_CERT_SHA256 }}
-          APK_SHA: ${{ needs.android-unsigned.outputs.apk-sha }}
-          AAB_SHA: ${{ needs.android-unsigned.outputs.aab-sha }}
-          MANIFEST_SHA: ${{ needs.android-unsigned.outputs.manifest-sha }}
-        run: python3 rewrite/ci/artifact_signing.py sign --input "$RUNNER_TEMP/thekain-unsigned-input" --commit "$GITHUB_SHA" --apk-sha "$APK_SHA" --aab-sha "$AAB_SHA" --manifest-sha "$MANIFEST_SHA" --tools "$ANDROID_HOME/build-tools/35.0.0" --java-home "$JAVA_HOME" --output "$RUNNER_TEMP/thekain-signed-output"
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        id: upload-signed
-        with:
-          name: M6-Android-signed-INTERNAL-QA
-          path: ${{ runner.temp }}/thekain-signed-output/
-          if-no-files-found: error
-          retention-days: 7

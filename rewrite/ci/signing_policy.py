@@ -11,8 +11,8 @@ REPOSITORY = 'aslanprp09-source/TheKaiN-Video'
 BRANCH = 'rebuild-2026-11-11'
 REF = 'refs/heads/' + BRANCH
 ENVIRONMENT = 'release-signing'
-WORKFLOWS = {f'{REPOSITORY}/.github/workflows/{name}@{REF}'
-             for name in ('rewrite-ci.yml', 'rewrite-packaging.yml')}
+WORKFLOWS = {f'{REPOSITORY}/.github/workflows/rewrite-ci.yml@{REF}'}
+REVIEWER = ('User', 355790290, 'KaiN1One')
 
 
 def assess(context, environment, branches, tip):
@@ -35,6 +35,9 @@ def assess(context, environment, branches, tip):
     reviewers = [v for rule in reviews for v in rule.get('reviewers', [])]
     if not reviews or any(r.get('prevent_self_review') is not True for r in reviews) or not reviewers:
         errors.append('INDEPENDENT_REVIEW_REQUIRED')
+    identities = [(v.get('type'), v.get('reviewer', {}).get('id'), v.get('reviewer', {}).get('login')) for v in reviewers]
+    if identities != [REVIEWER]:
+        errors.append('ONLY_KAIN1ONE_REVIEWER_REQUIRED')
     actors = {context.get('actor'), context.get('triggering_actor')}
     independent = [v for v in reviewers if v.get('type') in ('User', 'Team') and
                    isinstance(v.get('reviewer', {}).get('id'), int) and v['reviewer']['id'] > 0 and
