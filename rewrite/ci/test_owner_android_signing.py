@@ -179,21 +179,27 @@ class OwnerSigningTests(unittest.TestCase):
             recorded['env'] = kw['env'].copy()
             Path(args[args.index('-file') + 1]).write_text('PUBLIC CSR FIXTURE')
         with patch.object(owner.subprocess, 'run', side_effect=fake_run):
-            owner.verify_private_key('keytool', self.key, 'owner', 'STORE-PRIVATE', 'KEY-PRIVATE')
+            owner.verify_private_key('keytool', self.key, 'owner', 'STORE-PRIVATE', 'STORE-PRIVATE')
         self.assertIn('-certreq', recorded['args'])
         self.assertIn('-storepass:env', recorded['args'])
         self.assertIn('-keypass:env', recorded['args'])
         self.assertNotIn('STORE-PRIVATE', recorded['args'])
         self.assertNotIn('KEY-PRIVATE', recorded['args'])
         self.assertEqual(recorded['env']['THEKAIN_LOCAL_STOREPASS'], 'STORE-PRIVATE')
-        self.assertEqual(recorded['env']['THEKAIN_LOCAL_KEYPASS'], 'KEY-PRIVATE')
+        self.assertEqual(recorded['env']['THEKAIN_LOCAL_KEYPASS'], 'STORE-PRIVATE')
+
+    def test_pkcs12_mismatched_key_password_rejected_before_keytool(self):
+        with patch.object(owner.subprocess, 'run') as child:
+            with self.assertRaisesRegex(owner.SetupError, 'match'):
+                owner.verify_private_key('keytool', self.key, 'owner', 'store-pass', 'wrong-key-pass')
+        child.assert_not_called()
 
     def test_private_key_wrong_password_aborts_before_github(self):
         from subprocess import CalledProcessError
         with patch.object(owner.subprocess, 'run',
                           side_effect=CalledProcessError(1, ['keytool'], stderr=b'SENSITIVE')):
             with self.assertRaises(owner.SetupError) as ex:
-                owner.verify_private_key('keytool', self.key, 'owner', 'pass', 'bad')
+                owner.verify_private_key('keytool', self.key, 'owner', 'pass', 'pass')
         self.assertNotIn('SENSITIVE', str(ex.exception))
 
     def test_cancelled_publish_makes_no_writes(self):
