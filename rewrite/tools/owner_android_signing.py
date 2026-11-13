@@ -189,6 +189,11 @@ def fingerprint(keytool, keystore, alias, password):
 
 def verify_private_key(keytool, keystore, alias, store_password, key_password):
     """Prove that both passwords unlock the private signing key, without exporting it."""
+    # keytool with a JDK-managed PKCS#12 store uses one password for both store
+    # and private key; -keypass may be ignored by some JDK versions. Enforce
+    # equality explicitly so a typo never reaches the release-signing secrets.
+    if store_password != key_password:
+        raise SetupError("JDK PKCS#12 requires the key password to match the store password")
     child_env = os.environ.copy()
     child_env["THEKAIN_LOCAL_STOREPASS"] = store_password
     child_env["THEKAIN_LOCAL_KEYPASS"] = key_password
