@@ -186,6 +186,31 @@ def fingerprint(keytool, keystore, alias, password):
     return hashlib.sha256(der).hexdigest()
 
 
+
+def verify_private_key(keytool, keystore, alias, store_password, key_password):
+    """Prove that both passwords unlock the private signing key, without exporting it."""
+    child_env = os.environ.copy()
+    child_env["THEKAIN_LOCAL_STOREPASS"] = store_password
+    child_env["THEKAIN_LOCAL_KEYPASS"] = key_password
+    # A CSR contains only the public key and a signature proving access to the private key.
+    # The temporary public CSR is removed when this block completes.
+    with tempfile.TemporaryDirectory(prefix="thekain-key-access-") as temporary:
+        proof = Path(temporary) / "access.csr"
+        args = [keytool, "-certreq", "-storetype", "PKCS12", "-keystore", str(keystore),
+                "-alias", alias, "-file", str(proof),
+                "-storepass:env", "THEKAIN_LOCAL_STOREPASS",
+                "-keypass:env", "THEKAIN_LOCAL_KEYPASS"]
+        try:
+            subprocess.run(args, env=child_env, capture_output=True, check=True, timeout=90)
+        except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            raise SetupError("Cannot access signing private key with supplied passwords/alias") from None
+        finally:
+            child_env.pop("THEKAIN_LOCAL_STOREPASS", None)
+            child_env.pop("THEKAIN_LOCAL_KEYPASS", None)
+        if not proof.is_file() or proof.stat().st_size == 0:
+            raise SetupError("Private key access check did not produce a public certificate request")
+
+
 def gh_json(gh, endpoint):
     try:
         result = subprocess.run([gh, "api", endpoint], capture_output=True, check=True, timeout=35, text=True)
@@ -251,6 +276,7 @@ def publish(keystore, alias, one, two):
     if not key_password:
         raise SetupError("A nonempty private key password is required")
     cert_sha256 = fingerprint(keytool, source, alias, store_password)
+    verify_private_key(keytool, source, alias, store_password, key_password)
     check_github(gh)
     print("PUBLIC certificate SHA-256: " + cert_sha256)
     print("Only environment secrets/variables will be changed. No workflows will be started.")
