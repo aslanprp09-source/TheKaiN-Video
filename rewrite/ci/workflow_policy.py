@@ -50,8 +50,13 @@ def check(documents, lock):
     for filename, data in documents.items():
         require(data.get('permissions') == {'contents': 'read'}, 'Default token must be contents:read only')
         events = data.get('on', {})
-        allowed = {'push', 'workflow_dispatch'} if filename.endswith('rewrite-ci.yml') else {'workflow_dispatch', 'workflow_call'}
+        allowed = {'push', 'pull_request', 'workflow_dispatch'} if filename.endswith('rewrite-ci.yml') else {'workflow_dispatch', 'workflow_call'}
         require(set(events) == allowed, 'Unreviewed workflow trigger')
+        if filename.endswith('rewrite-ci.yml'):
+            require(events.get('push') == {'branches': ['rebuild-2026-11-11']},
+                    'Push events must target only rebuild branch')
+            require(events.get('pull_request') == {'branches': ['rebuild-2026-11-11']},
+                    'Required PR checks must run for PRs targeting rebuild branch')
         for event in ('workflow_dispatch', 'workflow_call'):
             if event in events:
                 setting = events[event].get('inputs', {}).get('sign_android', {})
