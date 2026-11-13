@@ -172,11 +172,36 @@ class OwnerSigningTests(unittest.TestCase):
                 owner.gh_json('gh', 'test')
         self.assertNotIn('private test secret', str(ex.exception))
 
+    def test_private_key_password_is_verified_via_public_csr_and_env_only(self):
+        recorded = {}
+        def fake_run(args, **kw):
+            recorded['args'] = args
+            recorded['env'] = kw['env'].copy()
+            Path(args[args.index('-file') + 1]).write_text('PUBLIC CSR FIXTURE')
+        with patch.object(owner.subprocess, 'run', side_effect=fake_run):
+            owner.verify_private_key('keytool', self.key, 'owner', 'STORE-PRIVATE', 'KEY-PRIVATE')
+        self.assertIn('-certreq', recorded['args'])
+        self.assertIn('-storepass:env', recorded['args'])
+        self.assertIn('-keypass:env', recorded['args'])
+        self.assertNotIn('STORE-PRIVATE', recorded['args'])
+        self.assertNotIn('KEY-PRIVATE', recorded['args'])
+        self.assertEqual(recorded['env']['THEKAIN_LOCAL_STOREPASS'], 'STORE-PRIVATE')
+        self.assertEqual(recorded['env']['THEKAIN_LOCAL_KEYPASS'], 'KEY-PRIVATE')
+
+    def test_private_key_wrong_password_aborts_before_github(self):
+        from subprocess import CalledProcessError
+        with patch.object(owner.subprocess, 'run',
+                          side_effect=CalledProcessError(1, ['keytool'], stderr=b'SENSITIVE')):
+            with self.assertRaises(owner.SetupError) as ex:
+                owner.verify_private_key('keytool', self.key, 'owner', 'pass', 'bad')
+        self.assertNotIn('SENSITIVE', str(ex.exception))
+
     def test_cancelled_publish_makes_no_writes(self):
         self.one.touch(); self.two.touch()
         with patch.object(owner, 'owner_only'), patch.object(owner, 'executable', side_effect=['keytool','7z','gh']), \
              patch.object(owner, 'verify_archives'), \
              patch.object(owner, 'fingerprint', return_value='a'*64), \
+             patch.object(owner, 'verify_private_key'), \
              patch.object(owner, 'check_github'), \
              patch.object(owner.getpass, 'getpass', side_effect=['store','key']), \
              patch('builtins.input', return_value='NO'), patch.object(owner, 'gh_set') as upload:
