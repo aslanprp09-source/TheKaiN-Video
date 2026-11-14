@@ -13,7 +13,7 @@ def fixture():
     env = {'name': 'release-signing', 'can_admins_bypass': False,
         'deployment_branch_policy': {'protected_branches': False, 'custom_branch_policies': True},
         'protection_rules': [{'type': 'required_reviewers', 'prevent_self_review': True,
-                             'reviewers': [{'type': 'User', 'reviewer': {'id': 202, 'login': 'independent-reviewer'}}]}]}
+                             'reviewers': [{'type': 'User', 'reviewer': {'id': 355790290, 'login': 'KaiN1One'}}]}]}
     branches = {'total_count': 1, 'branch_policies': [{'name': BRANCH, 'type': 'branch'}]}
     return context, env, branches, 'a' * 40
 
@@ -45,7 +45,8 @@ class SigningPolicyTest(unittest.TestCase):
         for field, value in [('ref', 'refs/heads/main'), ('ref', 'refs/heads/codex/test'),
             ('ref', 'refs/tags/rebuild-2026-11-11'), ('ref', 'refs/pull/14/merge'),
             ('event', 'push'), ('event', 'pull_request_target'), ('repository', 'fork/TheKaiN-Video'),
-            ('workflow_ref', REPOSITORY + '/.github/workflows/unreviewed.yml@' + REF), ('sha', 'b' * 40)]:
+            ('workflow_ref', REPOSITORY + '/.github/workflows/unreviewed.yml@' + REF),
+            ('workflow_ref', REPOSITORY + '/.github/workflows/rewrite-packaging.yml@' + REF), ('sha', 'b' * 40)]:
             with self.subTest(field=field, value=value):
                 context, env, branches, tip = fixture()
                 context[field] = value
@@ -59,6 +60,18 @@ class SigningPolicyTest(unittest.TestCase):
             if change == 'admin': env['can_admins_bypass'] = True
             if change == 'unknown-admin': del env['can_admins_bypass']
             if change == 'only-initiator': env['protection_rules'][0]['reviewers'][0]['reviewer']['login'] = 'builder'
+            with self.subTest(change=change): self.assertTrue(assess(context, env, branches, tip))
+
+    def test_only_kain1one_can_be_the_configured_independent_approver(self):
+        for change in ('different-login', 'different-id', 'extra-reviewer', 'team', 'initiator', 'rerun-initiator'):
+            context, env, branches, tip = fixture()
+            reviewers = env['protection_rules'][0]['reviewers']
+            if change == 'different-login': reviewers[0]['reviewer']['login'] = 'other-reviewer'
+            if change == 'different-id': reviewers[0]['reviewer']['id'] = 202
+            if change == 'extra-reviewer': reviewers.append({'type': 'User', 'reviewer': {'id': 202, 'login': 'other-reviewer'}})
+            if change == 'team': reviewers[0]['type'] = 'Team'
+            if change == 'initiator': context['actor'] = 'KaiN1One'
+            if change == 'rerun-initiator': context['triggering_actor'] = 'KaiN1One'
             with self.subTest(change=change): self.assertTrue(assess(context, env, branches, tip))
 
     def test_wildcards_tags_extra_or_truncated_branch_policy_fail_closed(self):

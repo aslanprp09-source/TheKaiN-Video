@@ -15,6 +15,29 @@ APK = 'TheKaiN-0.1.0-m6-unsigned.apk'
 AAB = 'TheKaiN-0.1.0-m6-unsigned.aab'
 FILES = {APK, AAB, 'inspection.json'}
 SECRET_NAMES = ('ANDROID_KEYSTORE_BASE64', 'THEKAIN_STORE_PASSWORD', 'THEKAIN_KEY_ALIAS', 'THEKAIN_KEY_PASSWORD')
+FAILURES = {
+    'MISSING_KEYSTORE': 'Set environment secret ANDROID_KEYSTORE_BASE64.',
+    'MISSING_STORE_PASSWORD': 'Set environment secret ANDROID_KEYSTORE_PASSWORD.',
+    'MISSING_KEY_ALIAS': 'Set environment secret ANDROID_KEY_ALIAS.',
+    'MISSING_KEY_PASSWORD': 'Set environment secret ANDROID_KEY_PASSWORD.',
+    'INVALID_CERTIFICATE_SHA256': 'Set environment variable ANDROID_SIGNING_CERT_SHA256 to the public certificate SHA-256: exactly 64 hex characters, without separators.',
+    'INVALID_KEY_ALIAS': 'The key alias must match the controlled ASCII alias policy.',
+    'INVALID_KEYSTORE_BASE64': 'The keystore secret must contain strict single-line Base64.',
+    'INVALID_KEYSTORE_SIZE': 'The decoded keystore must be nonempty and at most 1 MiB.',
+    'APK_SIGNING_FAILED': 'APK signer failed. Verify the keystore, alias and passwords locally with the owner tool.',
+    'AAB_SIGNING_FAILED': 'AAB signer failed. Verify the keystore, alias and passwords locally with the owner tool.',
+    'SIGNED_OUTPUT_VERIFICATION_FAILED': 'Signed APK/AAB inspection failed. Verify the expected certificate and release identity; no output is accepted.',
+    'SIGNED_MANIFEST_FAILED': 'Signed output manifest creation failed; no output is accepted.',
+    'UNEXPECTED_SIGNING_FAILURE': 'Invalid artifact or unexpected signing failure; no output is accepted.',
+}
+
+
+class SigningFailure(RuntimeError):
+    """Only fixed allowlisted codes may cross the secret-bearing boundary."""
+
+    def __init__(self, code):
+        self.code = code if code in FAILURES else 'UNEXPECTED_SIGNING_FAILURE'
+        super().__init__(self.code)
 
 
 def digest(path):
@@ -81,6 +104,13 @@ def run_tool(arguments, env):
         raise RuntimeError('Signing/verification tool failed: ' + Path(arguments[0]).name)  # No raw stderr/credentials.
 
 
+def signing_tool(code, arguments, env):
+    try:
+        run_tool(arguments, env)
+    except (RuntimeError, OSError, subprocess.SubprocessError):
+        raise SigningFailure(code) from None  # Never forward exception text or tool output.
+
+
 def sign(folder, output, commit, expected, tools, java_home):
     if expected is None:
         raise ValueError('Independent same-run proof required')
@@ -91,12 +121,19 @@ def sign(folder, output, commit, expected, tools, java_home):
         raise ValueError('Signing output must be a fresh separate directory')
     certificate = os.environ.get('ANDROID_SIGNING_CERT_SHA256', '')
     values = {name: os.environ.get(name, '') for name in SECRET_NAMES}
-    if not all(values.values()) or not re.fullmatch('[0-9a-fA-F]{64}', certificate) or not re.fullmatch(
-            '[A-Za-z0-9][A-Za-z0-9_.-]{0,127}', values['THEKAIN_KEY_ALIAS']):
-        raise ValueError('Signing configuration is incomplete or invalid')
-    raw = base64.b64decode(values['ANDROID_KEYSTORE_BASE64'], validate=True)
+    for name, code in zip(SECRET_NAMES, ('MISSING_KEYSTORE', 'MISSING_STORE_PASSWORD', 'MISSING_KEY_ALIAS', 'MISSING_KEY_PASSWORD')):
+        if not values[name]:
+            raise SigningFailure(code)
+    if not re.fullmatch('[0-9a-fA-F]{64}', certificate):
+        raise SigningFailure('INVALID_CERTIFICATE_SHA256')
+    if not re.fullmatch('[A-Za-z0-9][A-Za-z0-9_.-]{0,127}', values['THEKAIN_KEY_ALIAS']):
+        raise SigningFailure('INVALID_KEY_ALIAS')
+    try:
+        raw = base64.b64decode(values['ANDROID_KEYSTORE_BASE64'], validate=True)
+    except ValueError:
+        raise SigningFailure('INVALID_KEYSTORE_BASE64') from None
     if not 0 < len(raw) <= 1024 * 1024:
-        raise ValueError('Invalid keystore size')
+        raise SigningFailure('INVALID_KEYSTORE_SIZE')
     env = public_environment()
     tool_env = {**env, 'THEKAIN_STORE_PASSWORD': values['THEKAIN_STORE_PASSWORD'],
                 'THEKAIN_KEY_PASSWORD': values['THEKAIN_KEY_PASSWORD']}
@@ -109,15 +146,15 @@ def sign(folder, output, commit, expected, tools, java_home):
             with os.fdopen(fd, 'wb') as stream:
                 stream.write(raw)
             apk, aab = private / 'signed.apk', private / 'signed.aab'
-            run_tool([Path(tools) / 'apksigner', 'sign', '--ks', key, '--ks-key-alias', values['THEKAIN_KEY_ALIAS'],
+            signing_tool('APK_SIGNING_FAILED', [Path(tools) / 'apksigner', 'sign', '--ks', key, '--ks-key-alias', values['THEKAIN_KEY_ALIAS'],
                 '--ks-pass', 'env:THEKAIN_STORE_PASSWORD', '--key-pass', 'env:THEKAIN_KEY_PASSWORD',
                 '--out', apk, folder / APK], tool_env)
-            run_tool([Path(java_home) / 'bin/jarsigner', '-keystore', key, '-storepass:env', 'THEKAIN_STORE_PASSWORD',
+            signing_tool('AAB_SIGNING_FAILED', [Path(java_home) / 'bin/jarsigner', '-keystore', key, '-storepass:env', 'THEKAIN_STORE_PASSWORD',
                 '-keypass:env', 'THEKAIN_KEY_PASSWORD', '-signedjar', aab, folder / AAB, values['THEKAIN_KEY_ALIAS']], tool_env)
             key.unlink()  # No key exists while repository verification scripts execute.
-            run_tool([sys.executable, release / 'inspect-android.py', '--signed', '--apk', apk, '--aab', aab,
+            signing_tool('SIGNED_OUTPUT_VERIFICATION_FAILED', [sys.executable, release / 'inspect-android.py', '--signed', '--apk', apk, '--aab', aab,
                       '--tools', tools, '--output', output], env)
-            run_tool([sys.executable, release / 'manifest.py', output, '--commit', commit,
+            signing_tool('SIGNED_MANIFEST_FAILED', [sys.executable, release / 'manifest.py', output, '--commit', commit,
                       '--platform', 'android', '--channel', 'signed-internal-qa'], env)
     except BaseException:
         if output.exists():
@@ -151,8 +188,9 @@ def main():
                     stream.write(key + '=' + value + '\n')
         print(json.dumps({'verified': True, 'source_commit': args.commit, **proof}))
         return 0
-    except (ValueError, RuntimeError, OSError, KeyError, TypeError, subprocess.SubprocessError):
-        print('::error title=Signing BLOCKED::Invalid artifact, signing configuration or tool result; no signed artifact is accepted.')
+    except (ValueError, RuntimeError, OSError, KeyError, TypeError, subprocess.SubprocessError) as error:
+        code = error.code if isinstance(error, SigningFailure) else 'UNEXPECTED_SIGNING_FAILURE'
+        print('::error title=Signing BLOCKED::' + code + ': ' + FAILURES[code] + ' No signed artifact is accepted.')
         return 1
 
 
