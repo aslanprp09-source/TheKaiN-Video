@@ -25,7 +25,7 @@ Updates require review of upstream release notes, the exact tag-to-commit mappin
 
 ## Signing is explicitly gated
 
-The existing `release-signing` environment and reviewer configuration are preserved. No workflow creates an environment, adds secrets or generates a permanent signing identity. An unsigned policy audit succeeds while reporting BLOCKED; a requested signing attempt fails closed when any requirement is missing or unreadable. Real signing remains unverified until a separate successful protected run after review/merge of the fix.
+The existing `release-signing` environment and reviewer configuration are preserved. No workflow creates an environment, adds secrets or generates a permanent signing identity. An unsigned policy audit succeeds while reporting BLOCKED; a requested signing attempt fails closed when any requirement is missing or unreadable. The first real-key internal QA signing is now verified by [run #69](https://github.com/aslanprp09-source/TheKaiN-Video/actions/runs/43574136079), after review and merge of PR #20; see the [bounded evidence record](../release/evidence/android-signing-run-69.json). This historical pass does not authorize future runs or public distribution.
 
 Before GitHub schedules that job, a separate unprivileged `signing-policy` job reads environment/ref metadata through read-only GitHub API requests. It requires:
 
@@ -39,7 +39,7 @@ No preflight step creates or updates environment settings. A missing environment
 
 ### Owner setup, before adding secrets
 
-For the current signing fix, **do not recreate the existing environment, replace the permanent key or re-enter secrets**. The owner has confirmed PKCS12 / `PrivateKeyEntry`, two independently restored encrypted backups, four environment secrets and the public certificate variable. This confirmation is separate from proof of a successful signed build. The current integration cannot list environment secret metadata (HTTP 403); that integration permission does not explain the Actions `workflow_call` behavior below.
+For the current signing setup, **do not recreate the existing environment, replace the permanent key or re-enter secrets**. The owner has confirmed PKCS12 / `PrivateKeyEntry`, two independently restored encrypted backups, four environment secrets and the public certificate variable. Run #69 separately confirmed a successful real-key protected build. Independent artifact re-verification and physical-device acceptance remain pending. The current integration cannot list environment secret metadata (HTTP 403); that integration permission does not explain the Actions `workflow_call` behavior below.
 
 On initial setup only, configure `release-signing`, require KaiN1One, prevent self-review, disable administrator bypass and allow only the named rebuild branch. Confirm the repository's plan supports enforcement; otherwise leave signing blocked. Preserve `rebuild-reviewed-changes` with independent PR review and the four required checks.
 
@@ -92,6 +92,8 @@ Negative tests cover tags/main/feature/PR/fork contexts, old commits, missing/un
 Existing desktop/debug/emulator/unsigned packaging tests still run with the pinned Actions. No test of a real user key or actual protected environment approval is claimed until owner configuration and a recorded approved run exist.
 
 ## First real-key verification after review and merge
+
+The first protected execution of the review/merge/dispatch/approval sequence below is complete in run #69; its real signer and certificate checks passed in Actions. Independent verification of the downloaded artifact and device/upgrade acceptance remain open. Keep the recorded source/evidence for that run; future executions require a fresh reviewed current tip and their own environment approval.
 
 1. Independently review PR #20 and merge only into `rebuild-2026-11-11` after all four required checks pass. Keep issue #6 open. An old failed run executes old source and cannot test this fix.
 2. Read the new rebuild HEAD and recheck the existing environment/rules. Keep the owner's current key, four environment secrets and public `ANDROID_SIGNING_CERT_SHA256` unchanged. Expected public certificate: `2E8FBB21ADB81873D257FF685E904B710F7E63DF4C9EA207C6BF2C0B27CB973E`.

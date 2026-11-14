@@ -68,7 +68,9 @@ gh workflow run rewrite-ci.yml --ref codex/issue-6-packaging -f build_packages=t
 
 The original debug/JVM/emulator jobs still run. Packaging adds native Windows and Android release checks. The optional signing job being skipped is expected, not evidence of a signature.
 
-## Signing access — BLOCKED until configured securely
+## Android signing — protected internal QA PASS; public release BLOCKED
+
+Key setup and restored encrypted backups are owner-confirmed. After review/merge of PR #20, [protected run #69](https://github.com/aslanprp09-source/TheKaiN-Video/actions/runs/43574136079) passed on source `c1b8752d8eb4dfa065704edfa8b9c891168764cf`, with separate `release-signing` approval by KaiN1One. All nine jobs succeeded, including the real APK/AAB signer and its signature/certificate checks. The [evidence record](../release/evidence/android-signing-run-69.json) separates Actions verification from pending independent verification. `ci-signing-protection` and `android-signing` are PASS; `production_ready` and `automatic_publication` remain false.
 
 The [CI hardening requirements and owner runbook](CI_SIGNING_SECURITY.md) now govern this path. Actions use reviewed commit SHAs. Before a protected job can be scheduled, a read-only audit requires the current manual rebuild ref/commit, actual independent reviewers, no administrator/self-review bypass and an exact deployment branch allowlist. Missing/unreadable protection stays BLOCKED. No environment or user signing key is created by this task.
 
@@ -77,6 +79,13 @@ The repository must have a protected GitHub **environment `release-signing`**, r
 After owner configuration, explicitly choose `sign_android=true` on rebuild. The job depends on the protection audit and unsigned/native packaging checks, then signs only the same-run artifact ID and independently verified APK/AAB/manifest hashes. It performs no Gradle/build/cache execution with a key. A private temporary mode-0600 keystore is removed before credential-free verification scripts run; failures remove partial signed outputs. No key upload, release action or publication step exists. APK apksigner and AAB jarsigner/keytool checks must match the configured public fingerprint. Missing secrets/certificate explicitly fail an opted-in signing request as BLOCKED. Preserve the key securely for future upgrades; backup/rotation/store enrollment are owner responsibilities. The manual Gradle signing configuration remains separate from this isolated CI artifact signer and is not used by the protected job.
 
 Windows Authenticode remains BLOCKED; unsigned installer/EXEs are labeled accordingly. No user-controlled Windows certificate/service has been supplied. SmartScreen reputation and clean-machine trust prompts need real Windows QA.
+
+## Next priorities after the first protected signing
+
+1. **Independent artifact review — BLOCKED.** Obtain `M6-Android-signed-INTERNAL-QA` from run #69 (artifact ID `14105834067`) through a trusted download path. Preserve a review copy before its recorded retention expiry. For the original downloaded ZIP, recompute SHA-256 and compare with `artifact.zip_sha256` in the evidence record; this is a ZIP digest, not a certificate fingerprint. Extract into a fresh directory, verify `SHA256SUMS`, check `manifest.json` source commit/channel and inspect the APK/AAB with the reviewed source's `inspect-android.py --signed`, SDK tools 35 and JDK 17. Supply the recorded public certificate SHA-256, use a fresh output directory and retain the resulting report. Verify package/version, both actual certificate digests and strict AAB integrity. No private key is needed. The prior Cloud download was blocked by network policy, so independent download/hash/signature checks have not been claimed.
+2. **Physical-device acceptance — BLOCKED.** After artifact review, test the signed APK on real devices in the matrix below, including Android 8–9 while minSdk remains 26. Record exact artifact/source/hash, device/OEM/OS/ABI and results. Cover clean installation, playback, notifications, background/force-stop/reboot recovery, permissions/storage, accessibility and upgrade/data preservation. A same-version reinstall is not upgrade evidence; a valid upgrade case needs a higher versionCode and the same signing identity. Emulator success does not close physical or 16 KiB runtime gates.
+
+The post-merge push run #68 initially had four UI failures in 29 tests (window focus, IME timeout and missing source input). Its failed job passed on a fresh runner in attempt 2 without code/assertion changes; run #69 also passed all 29 primary device tests. This observed instability remains a QA concern, not proof of an exclusively infrastructure cause. These historical CI results do not grant production release approval.
 
 ## QA record to complete before release
 
@@ -93,7 +102,7 @@ For each run record exact commit, manifest/hash, OS/device/OEM/ABI, fixture/perm
 | Privacy | No cookies/accounts/telemetry; redacted typed diagnostics | Inspect actual logs, notifications, backups/queue files and network capture with signed URL |
 | Accessibility | Windows Qt keyboard/200% tests, Android 48 dp/IME/130%/360–600 dp tests | Windows 100/150/200% real keyboard/screen reader; TalkBack, 200% font, gestures, hardware keyboard |
 | Installer and uninstall | Disposable hosted Windows installation, frozen pipeline/GUI and uninstall | Snapshot of clean Windows 11 x64 without Python, media tools explicitly supplied; Start menu, reopen, rollback, paths with Cyrillic, data preserved |
-| Android signatures / 16 KiB | Actual signature-state and ELF/ZIP checks | Configured owner signature, upgrade continuity, real 16 KiB runtime/device |
+| Android signatures / 16 KiB | Protected owner-key APK/AAB signature checks passed in run #69; ELF/ZIP prerequisites checked in Actions | Independent downloaded-artifact verification, upgrade continuity, real 16 KiB runtime/device |
 | Storage retention / background | Recovery staging deliberately retained; one Android pipeline | Cleanup implementation/retention agreement; OEM idle/battery/foreground notification checks |
 
 Physical matrix — **all currently BLOCKED**, not attempted in this cloud:

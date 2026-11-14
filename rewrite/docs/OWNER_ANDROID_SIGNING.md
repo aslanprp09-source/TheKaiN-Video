@@ -1,6 +1,6 @@
 # Android release-signing — безопасный шаг владельца (Windows)
 
-**Текущий этап:** владелец уже подтвердил постоянный PKCS12-ключ, две проверенные восстановлением зашифрованные копии и записи в существующем `release-signing`. **Для исправления workflow повторять создание ключа или замену секретов не требуется.** Разделы 1–4 ниже — инструкция первоначальной настройки. После независимого review/merge исправления используйте [проверку нового защищённого запуска](CI_SIGNING_SECURITY.md#first-real-key-verification-after-review-and-merge). Успешная реальная подпись ещё должна быть подтверждена отдельно. Публичный релиз по [M6 #6](https://github.com/aslanprp09-source/TheKaiN-Video/issues/6) остаётся BLOCKED; целевая ветка только `rebuild-2026-11-11`.
+**Текущий этап:** создание постоянного PKCS12-ключа, проверка восстановления двух зашифрованных копий, настройка Environment secrets и первая реальная защищённая Android-подпись успешно пройдены. После независимого review/merge PR #20 [run #69](https://github.com/aslanprp09-source/TheKaiN-Video/actions/runs/43574136079) подписал и проверил APK/AAB после отдельного approval KaiN1One; [доказательства и границы проверки](../release/evidence/android-signing-run-69.json) сохранены. **Повторять создание ключа или замену секретов не требуется.** Разделы 1–4 ниже — инструкция первоначальной настройки. Следующие приоритеты — независимая проверка готового артефакта и испытания на физических устройствах по [M6 QA](M6_RELEASE_QA.md#next-priorities-after-the-first-protected-signing). Публичный релиз по [M6 #6](https://github.com/aslanprp09-source/TheKaiN-Video/issues/6) остаётся BLOCKED; целевая ветка только `rebuild-2026-11-11`.
 
 ## Что установлено заранее
 
@@ -86,7 +86,7 @@ py -3 rewrite/tools/owner_android_signing.py publish `
 
 ## 5. Отдельный внутренний signing run и Windows
 
-Этот инструмент **не запускает** signed workflow и **не меняет** `main`, теги, releases, branch protection или `qa-gates.json` напрямую. После подтверждения владельца: текущий `rebuild` HEAD; `workflow_dispatch` с `build_packages=true`, `sign_android=true`; обязательное независимое approval `KaiN1One`; затем анализ фактических подписей APK/AAB, manifest/хешей и installation/upgrade QA. До проведения этого шага real-key signing — **не проверен**.
+Этот инструмент **не запускает** signed workflow и **не меняет** `main`, теги, releases, branch protection или `qa-gates.json` напрямую. Первая реальная подпись уже подтверждена run #69. Для каждого будущего signing run по-прежнему нужны текущий reviewed `rebuild` HEAD, явный `workflow_dispatch` с `build_packages=true`, `sign_android=true` и отдельное независимое approval `KaiN1One`. Затем отдельно выполняются проверка скачанного артефакта и installation/upgrade QA; успех CI не закрывает их автоматически.
 
 **Windows:** использовать иной signing identity. Никакой автоматический Windows-signing job не добавляется до выбора подходящего удостоверяющего центра, проверки требований к стране/типу заявителя и согласования хранения ключа (включая HSM/токен/облачное API), Authenticode timestamp и проверки цепочки. Android keystore не годится для Windows. Вопрос должен решаться отдельным review PR; текущая Windows-сборка остаётся unsigned experimental.
 

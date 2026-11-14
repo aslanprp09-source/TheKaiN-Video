@@ -6,9 +6,9 @@
   "gates": [
     {
       "id": "ci-signing-protection",
-      "status": "BLOCKED",
-      "reason": "Pinned CI policy is implemented; actual protected environment/reviewers/branch restrictions and an approved user-key run are not configured or verified",
-      "evidence": "rewrite/docs/CI_SIGNING_SECURITY.md"
+      "status": "PASS",
+      "reason": "Protected internal QA run 43574136079 passed on reviewed rebuild commit c1b8752d8eb4dfa065704edfa8b9c891168764cf after separate release-signing approval by KaiN1One; future runs still require their own policy checks and environment approval",
+      "evidence": "rewrite/release/evidence/android-signing-run-69.json"
     },
     {
       "id": "windows11-clean",
@@ -24,9 +24,15 @@
     },
     {
       "id": "android-signing",
+      "status": "PASS",
+      "reason": "Owner-confirmed permanent PKCS12 key and restored backups, Environment secrets and expected public certificate were used successfully by the protected APK/AAB signer in run 43574136079; signatures were verified inside Actions for signed internal QA",
+      "evidence": "rewrite/release/evidence/android-signing-run-69.json"
+    },
+    {
+      "id": "android-signed-artifact-review",
       "status": "BLOCKED",
-      "reason": "Protected keystore secrets and expected public certificate not configured for this task",
-      "evidence": null
+      "reason": "Independent download, ZIP digest recomputation, manifest/source checks and APK/AAB signature/certificate re-verification of artifact 14105834067 remain pending; Cloud artifact download was blocked by network policy",
+      "evidence": "rewrite/release/evidence/android-signing-run-69.json"
     },
     {
       "id": "android-physical-10plus",

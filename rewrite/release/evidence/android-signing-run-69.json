@@ -1,0 +1,69 @@
+{
+  "schema": 1,
+  "scope": "approved-protected-android-signing-internal-qa",
+  "source_commit": "c1b8752d8eb4dfa065704edfa8b9c891168764cf",
+  "branch": "rebuild-2026-11-11",
+  "pull_request": {
+    "url": "https://github.com/aslanprp09-source/TheKaiN-Video/pull/20",
+    "reviewed_commit": "2993ad112cdaf763a9556e230b63dbeae58fd70e",
+    "reviewer": "KaiN1One",
+    "review_id": 5902971974,
+    "state": "APPROVED",
+    "merged": true
+  },
+  "run": {
+    "id": 43574136079,
+    "number": 69,
+    "attempt": 1,
+    "url": "https://github.com/aslanprp09-source/TheKaiN-Video/actions/runs/43574136079",
+    "event": "workflow_dispatch",
+    "conclusion": "success",
+    "successful_jobs": 9
+  },
+  "deployment_approval": {
+    "environment": "release-signing",
+    "reviewer": "KaiN1One",
+    "reviewer_id": 355790290,
+    "state": "approved",
+    "evidence_url": "https://api.github.com/repos/aslanprp09-source/TheKaiN-Video/actions/runs/43574136079/approvals"
+  },
+  "protected_signer": {
+    "job_id": 132386469558,
+    "job_name": "android-signed-internal-qa",
+    "conclusion": "success",
+    "checks_passed_in_actions": [
+      "post-approval branch tip and environment policy",
+      "same-run unsigned artifact source and digests",
+      "APK signing and apksigner verification",
+      "AAB signing and strict pinned-certificate verification",
+      "APK/AAB certificate comparison with the expected Environment variable",
+      "signed internal QA manifest and upload"
+    ]
+  },
+  "expected_certificate": {
+    "sha256": "2E8FBB21ADB81873D257FF685E904B710F7E63DF4C9EA207C6BF2C0B27CB973E",
+    "source": "owner-confirmed public Environment variable; matched by workflow verification",
+    "independently_extracted_from_artifact": false
+  },
+  "artifact": {
+    "id": 14105834067,
+    "name": "M6-Android-signed-INTERNAL-QA",
+    "size_in_bytes": 13614516,
+    "zip_sha256": "3e78443334f1b1b39b7ec95ee79e3598857670f48f3906b9a0d60457296a7546",
+    "digest_source": "GitHub artifact API metadata; not locally recomputed",
+    "metadata_url": "https://api.github.com/repos/aslanprp09-source/TheKaiN-Video/actions/artifacts/14105834067",
+    "created_at": "2026-11-14T08:24:30Z",
+    "expires_at": "2026-11-21T08:24:28Z"
+  },
+  "independent_artifact_review": {
+    "status": "BLOCKED",
+    "downloaded": false,
+    "zip_digest_recomputed": false,
+    "manifest_and_source_checked": false,
+    "signatures_reverified": false,
+    "reason": "Cloud artifact storage download blocked by network policy"
+  },
+  "physical_device_qa": "BLOCKED",
+  "production_ready": false,
+  "automatic_publication": false
+}
