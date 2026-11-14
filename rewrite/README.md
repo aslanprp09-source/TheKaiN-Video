@@ -32,6 +32,6 @@ Open `rewrite/android` in Android Studio (JDK 17, SDK 35), or use Gradle 8.11.1:
 
 See [M4 architecture, test commands and limitations](docs/M4_ANDROID.md) and [dependency versions/licenses](docs/M4_DEPENDENCIES.md). The rebuild workflow builds a debug APK and runs native Android integration checks on an API 35 emulator. Physical-device and signed-distribution validation remain release requirements.
 
-M6 adds unsigned Android release APK/AAB with inventories/hashes and protected opt-in internal signing configuration. No key is generated or committed; missing signing access, physical-device/clean Windows 11 QA and distribution review remain BLOCKED. See [M6 QA](docs/M6_RELEASE_QA.md) and [dependency record](docs/M6_DEPENDENCIES.md).
+M6 adds unsigned Android release APK/AAB with inventories/hashes and protected opt-in internal signing. The first owner-key APK/AAB signing passed in protected run #69 after independent approval; [the evidence record](release/evidence/android-signing-run-69.json) keeps that pass separate from pending independent artifact verification. Physical-device/upgrade QA, clean Windows 11 and distribution review remain BLOCKED, with public release disabled. No private key is committed. See [M6 QA](docs/M6_RELEASE_QA.md) and [dependency record](docs/M6_DEPENDENCIES.md).
 
 Review research and milestones under docs/. This is a development foundation, not a verified production release.
