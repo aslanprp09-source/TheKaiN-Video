@@ -1,18 +1,45 @@
 """Inspect actual APK/AAB identities and signatures; never infer signing from a filename."""
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import shutil
+import ssl
 import subprocess
 import struct
+import tempfile
 import zipfile
 
 
 def run(arguments):
     return subprocess.run([str(a) for a in arguments], capture_output=True, text=True,
                           encoding='utf-8', errors='replace', timeout=60)
+
+
+def verify_bundle_signature(aab, certificate):
+    cert = run(['keytool', '-printcert', '-rfc', '-jarfile', aab])
+    certificates = re.findall(r'-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----', cert.stdout, re.S)
+    if cert.returncode or not certificates or \
+            hashlib.sha256(ssl.PEM_cert_to_DER_cert(certificates[0])).hexdigest() != certificate.lower():
+        raise ValueError('AAB signature/certificate mismatch')
+    # Ordinary jarsigner -verify returns zero for bundles with unsigned entries.
+    # Trust only the pinned public leaf, so strict verification also works for the
+    # owner's self-signed Android certificate without ignoring any error bits.
+    with tempfile.TemporaryDirectory(prefix='thekain-public-certificate-') as directory:
+        root = Path(directory)
+        public, trust = root / 'public.pem', root / 'public-trust.p12'
+        public.write_text(certificates[0], encoding='ascii')
+        imported = run(['keytool', '-importcert', '-noprompt', '-alias', 'expected-signer',
+                        '-storetype', 'PKCS12', '-keystore', trust, '-storepass', 'public-certificate-only',
+                        '-file', public])
+        if imported.returncode:
+            raise ValueError('AAB public certificate trust setup failed')
+        jar = run(['jarsigner', '-verify', '-strict', '-keystore', trust,
+                   '-storepass', 'public-certificate-only', aab, 'expected-signer'])
+        if jar.returncode:
+            raise ValueError('AAB signature/integrity verification failed')
 
 
 def inspect(apk, aab, tools, signed, expected_certificate=None):
@@ -61,11 +88,7 @@ def inspect(apk, aab, tools, signed, expected_certificate=None):
         if bool(jar_signers) != signed:
             raise ValueError('Unexpected AAB signature state')
     if signed:
-        jar = run(['jarsigner', '-verify', aab])
-        cert = run(['keytool', '-printcert', '-jarfile', aab])
-        jar_digest = re.search(r'SHA256:\s*([0-9A-Fa-f:]+)', cert.stdout)
-        if jar.returncode or cert.returncode or not jar_digest or jar_digest[1].replace(':', '').lower() != certificate:
-            raise ValueError('AAB signature/certificate mismatch')
+        verify_bundle_signature(aab, certificate)
     return {'application_id': identity[1], 'version_code': int(identity[2]), 'version_name': identity[3],
             'debuggable': False, 'signed': signed, 'certificate_sha256': certificate,
             'runtime_artifacts': len(inventory['components']), 'native_libraries': native,

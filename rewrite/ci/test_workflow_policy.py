@@ -104,6 +104,15 @@ class WorkflowPolicyTest(unittest.TestCase):
                     triggers['push']['branches'] = ['main']
                 self.assertTrue(check(self.docs, self.lock))
 
+    def test_protected_steps_cannot_skip_post_approval_checks_or_replace_the_shell(self):
+        for step_id in ('policy-recheck', 'verify-unsigned', 'sign-artifacts'):
+            for field, value in (('if', 'false'), ('if', 'always()'), ('shell', 'python')):
+                with self.subTest(step=step_id, field=field, value=value):
+                    self.setUp()
+                    sign = self.docs['.github/workflows/rewrite-ci.yml']['jobs']['android-signed-internal-qa']
+                    next(s for s in sign['steps'] if s['id'] == step_id)[field] = value
+                    self.assertTrue(check(self.docs, self.lock))
+
     def test_duplicate_keys_cannot_hide_a_workflow_override(self):
         with self.assertRaises(ValueError):
             yaml.load('permissions: {contents: read}\npermissions: {contents: write}\n', Loader=UniqueLoader)

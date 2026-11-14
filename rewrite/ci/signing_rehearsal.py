@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import zipfile
 from unittest.mock import patch
 from artifact_signing import verify, sign, digest, SigningFailure, run_tool as real_tool
 
@@ -44,8 +45,13 @@ def rehearse():
             output = root / label
             def tool(arguments, environment):
                 if corrupt and len(arguments) > 1 and Path(arguments[1]).name == 'inspect-android.py':
-                    path = Path(arguments[arguments.index('--' + corrupt) + 1])
-                    path.write_bytes(path.read_bytes()[:-1])  # Damage the actual signed copy, never the unsigned upload.
+                    argument = '--aab' if corrupt == 'unsigned-aab-entry' else '--' + corrupt
+                    path = Path(arguments[arguments.index(argument) + 1])
+                    if corrupt == 'unsigned-aab-entry':
+                        with zipfile.ZipFile(path, 'a') as archive:
+                            archive.writestr('base/unsigned-regression.txt', b'unsigned owned fixture')
+                    else:
+                        path.write_bytes(path.read_bytes()[:-1])  # Damage the signed copy, never the unsigned upload.
                 real_tool(arguments, environment)
             with patch.dict(os.environ, {**values, **changed}), \
                     (patch('artifact_signing.run_tool', side_effect=tool) if corrupt else contextlib.nullcontext()):
@@ -74,8 +80,9 @@ def rehearse():
         rejected('wrong-certificate', {'ANDROID_SIGNING_CERT_SHA256': '0' * 64}, 'SIGNED_OUTPUT_VERIFICATION_FAILED')
         rejected('corrupt-signed-apk', {}, 'SIGNED_OUTPUT_VERIFICATION_FAILED', 'apk')
         rejected('corrupt-signed-aab', {}, 'SIGNED_OUTPUT_VERIFICATION_FAILED', 'aab')
+        rejected('unsigned-aab-entry', {}, 'SIGNED_OUTPUT_VERIFICATION_FAILED', 'unsigned-aab-entry')
         intact(root / 'absent-output')
-    print('::notice title=Signing rehearsal::PASS: disposable RSA-4096 PKCS12, signed APK/AAB verified; 11 negative cases rejected, private staging cleaned, unsigned input unchanged; no key/signed test output retained or uploaded')
+    print('::notice title=Signing rehearsal::PASS: disposable RSA-4096 PKCS12, signed APK/AAB verified; 12 negative cases rejected, private staging cleaned, unsigned input unchanged; no key/signed test output retained or uploaded')
 
 
 def main():

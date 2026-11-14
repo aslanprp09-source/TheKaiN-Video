@@ -131,6 +131,8 @@ def check(documents, lock):
     steps = sign.get('steps', [])
     require([s.get('id') for s in steps] == ['checkout', 'policy-recheck', 'setup-java', 'download-unsigned', 'verify-unsigned', 'sign-artifacts', 'upload-signed'], 'Signing job step boundary changed')
     for step in steps:
+        require('if' not in step and 'shell' not in step,
+                'Protected signing steps must use the default success gate and runner shell')
         require('gradle' not in step.get('uses', '').lower() and 'gradle' not in step.get('run', '').lower() and
                 not any(k.startswith('cache') for k in step.get('with', {})), 'No builds or caches in the signing job')
     by_id = {s.get('id'): s for s in steps}
