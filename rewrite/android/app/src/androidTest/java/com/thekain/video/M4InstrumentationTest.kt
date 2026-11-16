@@ -113,16 +113,20 @@ class M4InstrumentationTest {
     }
 
     @Test fun removalDeletesOnlyExactCompletedOwnedOutput() = runBlocking<Unit> {
-        server.enqueue(response())
+        server.enqueue(response()); server.enqueue(response())
         val task = create("/remove-file.mp4")
+        val otherTask = create("/other-file.mp4")
         assertEquals(EngineResult.COMPLETED, engine().run(task.id))
+        assertEquals(EngineResult.COMPLETED, engine().run(otherTask.id))
         val done = repo.get(task.id)
+        val other = repo.get(otherTask.id)
         val uri = Uri.parse(done.outputUri)
         try {
-            publisher.deleteCompletedOutput(done.copy(outputUri = "content://media/external/downloads/0"))
-            fail("A mismatched output URI must be rejected")
+            publisher.deleteCompletedOutput(done.copy(outputUri = other.outputUri))
+            fail("A different owned task's output must be rejected")
         } catch (_: IllegalArgumentException) { }
-        assertNotNull(context.contentResolver.openInputStream(uri))
+        context.contentResolver.openInputStream(uri)!!.use { assertTrue(it.read() >= 0) }
+        context.contentResolver.openInputStream(Uri.parse(other.outputUri))!!.use { assertTrue(it.read() >= 0) }
         publisher.deleteCompletedOutput(done)
         assertTrue(repo.removeCompleted(task.id))
         context.contentResolver.query(uri, arrayOf(MediaStore.MediaColumns._ID), null, null, null)!!.use {
