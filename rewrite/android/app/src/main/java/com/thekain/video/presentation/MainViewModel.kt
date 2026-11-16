@@ -6,6 +6,8 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import com.thekain.video.TheKaiNApp
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 
 class MainViewModel(app: Application, private val saved: SavedStateHandle) : AndroidViewModel(app) {
@@ -16,6 +18,8 @@ class MainViewModel(app: Application, private val saved: SavedStateHandle) : And
     val page = saved.getStateFlow("page", Page.HOME.name)
     private val messages = MutableSharedFlow<Boolean>(extraBufferCapacity = 1)
     val accepted = messages.asSharedFlow()
+    private val mutableRemovals = MutableSharedFlow<Boolean>(extraBufferCapacity = 1)
+    val removals = mutableRemovals.asSharedFlow()
     init {
         viewModelScope.launch {
             graph.submission.collect { value ->
@@ -35,4 +39,12 @@ class MainViewModel(app: Application, private val saved: SavedStateHandle) : And
     }
     fun back() { saved["page"] = if (page.value == Page.SETTINGS.name) saved.get<String>("settings_parent") ?: Page.HOME.name else Page.HOME.name }
     fun action(id: String, kind: String) = graph.action(id, kind)
+    fun removeCompleted(id: String, removeFile: Boolean) {
+        viewModelScope.launch {
+            val success = withContext(Dispatchers.IO) {
+                runCatching { graph.removeCompleted(id, removeFile) }.getOrDefault(false)
+            }
+            mutableRemovals.emit(success)
+        }
+    }
 }
