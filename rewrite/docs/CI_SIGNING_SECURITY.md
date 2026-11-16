@@ -78,6 +78,13 @@ Successful output remains **signed internal QA**, with `production_ready: false`
 
 ## Reproducible verification
 
+The separate [independent run #69 verifier](INDEPENDENT_ANDROID_VERIFICATION.md)
+uses a reviewed manual mode of the existing Clean rebuild workflow. It has no
+signing Environment/secret/cache, grants only read access for source, Actions and
+PR review metadata, and skips application builds and signing. Ordinary CI and
+the protected real signer retain their existing boundaries. Its tests and code
+do not assert that the real independent verification has run.
+
 ```sh
 python -m pip install --require-hashes --only-binary=:all: --no-deps -r rewrite/ci/requirements.lock
 python rewrite/ci/workflow_policy.py
