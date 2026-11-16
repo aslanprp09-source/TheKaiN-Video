@@ -1,0 +1,20 @@
+{
+  "repository": "aslanprp09-source/TheKaiN-Video",
+  "repository_id": 1445635588,
+  "run_id": 43574136079,
+  "run_number": 69,
+  "branch": "rebuild-2026-11-11",
+  "source_commit": "c1b8752d8eb4dfa065704edfa8b9c891168764cf",
+  "artifact_id": 14105834067,
+  "artifact_name": "M6-Android-signed-INTERNAL-QA",
+  "zip_bytes": 13614516,
+  "zip_sha256": "3e78443334f1b1b39b7ec95ee79e3598857670f48f3906b9a0d60457296a7546",
+  "certificate_sha256": "2e8fbb21adb81873d257ff685e904b710f7e63df4c9ea207c6bf2c0b27cb973e",
+  "files": {
+    "TheKaiN-0.1.0-m6-signed-internal-qa.apk": {"bytes": 7308373, "sha256": "ad8d5d38ec46a188ccb8d98de3a3f52af5aa72b6d57e0f368903fdc940ce42db"},
+    "TheKaiN-0.1.0-m6-signed-internal-qa.aab": {"bytes": 6929941, "sha256": "ec6038b123793b2d59276466c786993cc5625f081f10a5d7d97b15708fb180c4"},
+    "SHA256SUMS": {"bytes": 294, "sha256": "28ef3ac93fd34ebd8533d6d8014100c3b1a478efe8fc1e21d4d8c6f6fec09e90"},
+    "inspection.json": {"bytes": 1103, "sha256": "98f22d6ea0f165ac8735866f71589a1de90baf6ab5efd283e33f32ab528aa385"},
+    "manifest.json": {"bytes": 716, "sha256": "dd78acfe770e374b2bd74a5b5b4def10d6789b0598cfb7ff059170da3a996913"}
+  }
+}

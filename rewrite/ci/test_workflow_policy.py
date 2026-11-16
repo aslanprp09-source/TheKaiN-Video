@@ -121,3 +121,35 @@ class WorkflowPolicyTest(unittest.TestCase):
         gate = self.docs['.github/workflows/rewrite-packaging.yml']['jobs']['signing-policy']
         gate['steps'] = [s for s in gate['steps'] if s.get('id') != 'workflow-check']
         self.assertTrue(check(self.docs, self.lock))
+
+    def test_independent_verifier_cannot_gain_credentials_builds_or_skip_checks(self):
+        for variant in ('environment', 'secrets', 'write', 'oidc', 'job-env', 'defaults',
+                'cache', 'extra-step', 'skip-check', 'replace-command', 'input-interpolation',
+                'wrong-ref', 'wrong-trigger', 'broader-upload', 'default-on', 'build-conflict',
+                'skip-source-ci', 'forward-token', 'ignore-failure', 'no-preflight-input', 'unbound-preflight'):
+            self.setUp()
+            ci = self.docs['.github/workflows/rewrite-ci.yml']
+            job = ci['jobs']['android-independent-verifier']
+            steps = {s['id']: s for s in job['steps']}
+            if variant == 'environment': job['environment'] = 'release-signing'
+            if variant == 'secrets': steps['verify']['env']['KEY'] = '${{ secrets.ANDROID_KEYSTORE_BASE64 }}'
+            if variant == 'write': job['permissions']['actions'] = 'write'
+            if variant == 'oidc': job['permissions']['id-token'] = 'write'
+            if variant == 'job-env': job['env'] = {'GH_TOKEN': '${{ github.token }}'}
+            if variant == 'defaults': job['defaults'] = {'run': {'shell': 'python'}}
+            if variant == 'cache': steps['setup-java']['with']['cache'] = 'gradle'
+            if variant == 'extra-step': job['steps'].append({'run': 'gradle assembleRelease'})
+            if variant == 'skip-check': steps['verify']['if'] = 'false'
+            if variant == 'replace-command': steps['verify']['run'] = 'echo PASS'
+            if variant == 'input-interpolation': steps['verify']['run'] += ' ${{ inputs.command }}'
+            if variant == 'wrong-ref': steps['checkout']['with']['ref'] = 'main'
+            if variant == 'wrong-trigger': job['if'] = 'inputs.verify_artifact'
+            if variant == 'broader-upload': steps['upload-report']['with']['path'] = '${{ runner.temp }}/'
+            if variant == 'default-on': ci['on']['workflow_dispatch']['inputs']['verify_artifact']['default'] = 'true'
+            if variant == 'build-conflict': ci['jobs']['experimental-packages']['if'] = 'inputs.build_packages'
+            if variant == 'skip-source-ci': ci['jobs']['android-debug']['if'] = 'false'
+            if variant == 'forward-token': steps['setup-java']['env'] = {'GH_TOKEN': '${{ github.token }}'}
+            if variant == 'ignore-failure': steps['verify']['continue-on-error'] = 'true'
+            if variant == 'no-preflight-input': del ci['on']['workflow_dispatch']['inputs']['bypass_preflight_comment']
+            if variant == 'unbound-preflight': del steps['verify']['env']['BYPASS_PREFLIGHT_COMMENT_ID']
+            with self.subTest(variant=variant): self.assertTrue(check(self.docs, self.lock))
