@@ -8,8 +8,9 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 CI_WORKFLOW = '.github/workflows/rewrite-ci.yml'
 PACKAGE_WORKFLOW = '.github/workflows/rewrite-packaging.yml'
-SIGN_CONDITION = "inputs.build_packages && inputs.sign_android && needs.experimental-packages.outputs.signing-authorized == 'true' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/rebuild-2026-11-11'"
-BUILD_CONDITION = "github.event_name == 'workflow_dispatch' && inputs.build_packages"
+SIGN_CONDITION = "inputs.build_packages && inputs.sign_android && needs.experimental-packages.outputs.signing-authorized == 'true' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/rebuild-2026-11-11' && !inputs.verify_artifact"
+BUILD_CONDITION = "github.event_name == 'workflow_dispatch' && inputs.build_packages && !inputs.verify_artifact"
+VERIFY_CONDITION = "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/rebuild-2026-11-11' && inputs.verify_artifact && !inputs.build_packages && !inputs.sign_android"
 REQUIRED_CHECKS = {'ci-policy', 'windows-tests', 'android-debug', 'android-device-tests'}
 PUBLIC_OUTPUTS = {
     'signing-authorized': '${{ jobs.signing-policy.outputs.authorized }}',
@@ -83,7 +84,9 @@ def check(documents, lock):
         for job_id, job in data.get('jobs', {}).items():
             require('continue-on-error' not in job, 'Failed jobs must fail the workflow')
             permissions = job.get('permissions', {})
-            require(isinstance(permissions, dict) and all(k in ('contents', 'actions') and v == 'read'
+            allowed_permissions = ('contents', 'actions', 'pull-requests') if (
+                filename == CI_WORKFLOW and job_id == 'android-independent-verifier') else ('contents', 'actions')
+            require(isinstance(permissions, dict) and all(k in allowed_permissions and v == 'read'
                 for k, v in permissions.items()), 'Write, OIDC or broad token permissions forbidden')
             require('secrets' not in job, 'Broad secret forwarding forbidden')
             if 'environment' in job:
@@ -103,6 +106,49 @@ def check(documents, lock):
                         require(step.get('with', {}).get('persist-credentials') == 'false', 'Persisted checkout credentials forbidden')
     require(seen == set(lock['actions']), 'Action inventory and workflow usage differ')
     ci = documents[CI_WORKFLOW]
+    verifier_input = ci['on'].get('workflow_dispatch', {}).get('inputs', {}).get('verify_artifact', {})
+    require(verifier_input.get('type') == 'boolean' and verifier_input.get('default') == 'false',
+            'Independent verifier must default off')
+    for name in REQUIRED_CHECKS - {'ci-policy'}:
+        require(ci['jobs'].get(name, {}).get('if') == '${{ !inputs.verify_artifact }}',
+                'Source CI must run normally and skip only in explicit verifier mode')
+    require(any(s.get('if') == 'inputs.verify_artifact && (inputs.build_packages || inputs.sign_android)'
+                and s.get('run') == 'exit 1' for s in ci['jobs']['ci-policy']['steps']),
+            'Conflicting verifier/build modes must fail')
+    verify = ci['jobs'].get('android-independent-verifier', {})
+    require(set(verify) == {'if', 'needs', 'permissions', 'runs-on', 'timeout-minutes', 'steps'}
+            and verify.get('if') == VERIFY_CONDITION and verify.get('needs') == 'ci-policy'
+            and verify.get('runs-on') == 'ubuntu-24.04' and verify.get('timeout-minutes') == '10'
+            and verify.get('permissions') == {'contents': 'read', 'actions': 'read', 'pull-requests': 'read'},
+            'Verifier requires isolated hosted runner, read-only access and reviewed manual mode')
+    verify_steps = verify.get('steps', [])
+    require([s.get('id') for s in verify_steps] == ['checkout', 'setup-java', 'verify', 'upload-report'],
+            'Verifier must have no build, cache, forwarding or extra steps')
+    for step in verify_steps:
+        require(set(step) <= {'id', 'name', 'uses', 'with', 'run', 'env', 'if'},
+                'Verifier step boundary changed')
+        require('if' not in step or step.get('id') == 'upload-report', 'Verifier checks must not be skipped')
+    verifier_steps = {s.get('id'): s for s in verify_steps}
+    require(verifier_steps.get('checkout', {}).get('with') == {
+        'persist-credentials': 'false', 'ref': '${{ github.sha }}'}, 'Verifier checkout must bind execution SHA')
+    require(verifier_steps.get('setup-java', {}).get('with') == {
+        'distribution': 'temurin', 'java-version': '17'}, 'Verifier must use JDK 17 without caches')
+    run = verifier_steps.get('verify', {})
+    require(run.get('run') == 'python3 rewrite/ci/android_artifact_verifier.py --output "$RUNNER_TEMP/thekain-independent-verification"'
+            and run.get('env') == {'GH_TOKEN': '${{ github.token }}'} and 'uses' not in run and 'with' not in run,
+            'Only the reviewed verifier may receive the read-only API token')
+    for step in verify_steps:
+        require(step.get('id') == 'verify' or ('run' not in step and 'env' not in step),
+                'Verifier actions may not receive extra commands or environment')
+        if step.get('id') != 'verify':
+            expected_action = {'checkout': 'actions/checkout', 'setup-java': 'actions/setup-java',
+                               'upload-report': 'actions/upload-artifact'}.get(step.get('id'))
+            require(step.get('uses', '').split('@')[0] == expected_action, 'Verifier action boundary changed')
+    upload_report = verifier_steps.get('upload-report', {})
+    require(upload_report.get('if') == 'always()' and upload_report.get('with') == {
+        'name': 'M6-Android-independent-verification',
+        'path': '${{ runner.temp }}/thekain-independent-verification/',
+        'if-no-files-found': 'error', 'retention-days': '7'}, 'Verifier must retain bounded failure/success evidence only')
     call = ci['jobs']['experimental-packages']
     require(call.get('needs') == 'ci-policy', 'Packaging must depend on workflow policy')
     require(call.get('if') == BUILD_CONDITION and call.get('with') == {'sign_android': '${{ inputs.sign_android }}'},

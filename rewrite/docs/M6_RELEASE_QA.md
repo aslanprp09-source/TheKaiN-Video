@@ -82,6 +82,11 @@ Windows Authenticode remains BLOCKED; unsigned installer/EXEs are labeled accord
 
 ## Next priorities after the first protected signing
 
+The scoped [independent official-tools verifier](INDEPENDENT_ANDROID_VERIFICATION.md)
+provides a separate post-review execution path for the original run #69 ZIP.
+Implementation/fixture tests alone leave its real result NOT_RUN and the artifact
+review gate BLOCKED; record the actual hosted run/report before updating results.
+
 1. **Independent artifact review — BLOCKED.** Obtain `M6-Android-signed-INTERNAL-QA` from run #69 (artifact ID `14105834067`) through a trusted download path. Preserve a review copy before its recorded retention expiry. For the original downloaded ZIP, recompute SHA-256 and compare with `artifact.zip_sha256` in the evidence record; this is a ZIP digest, not a certificate fingerprint. Extract into a fresh directory, verify `SHA256SUMS`, check `manifest.json` source commit/channel and inspect the APK/AAB with the reviewed source's `inspect-android.py --signed`, SDK tools 35 and JDK 17. Supply the recorded public certificate SHA-256, use a fresh output directory and retain the resulting report. Verify package/version, both actual certificate digests and strict AAB integrity. No private key is needed. The prior Cloud download was blocked by network policy, so independent download/hash/signature checks have not been claimed.
 2. **Physical-device acceptance — BLOCKED.** After artifact review, test the signed APK on real devices in the matrix below, including Android 8–9 while minSdk remains 26. Record exact artifact/source/hash, device/OEM/OS/ABI and results. Cover clean installation, playback, notifications, background/force-stop/reboot recovery, permissions/storage, accessibility and upgrade/data preservation. A same-version reinstall is not upgrade evidence; a valid upgrade case needs a higher versionCode and the same signing identity. Emulator success does not close physical or 16 KiB runtime gates.
 
