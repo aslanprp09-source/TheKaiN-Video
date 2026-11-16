@@ -67,11 +67,17 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+            LaunchedEffect(model) {
+                model.removals.collect { success ->
+                    message(if (success) R.string.remove_completed_success else R.string.remove_completed_failed)
+                }
+            }
             TheKaiNTheme(preferences) {
                 MainScreen(ScreenState(home, tasks, Page.valueOf(page), preferences, notifications), UiActions(
                     edit = model::edit, analyze = model.home::analyze, cancelAnalysis = model.home::cancelAnalysis,
                     select = model.home::select, download = { model.home.download() }, confirmRepeat = { model.home.download(true) }, dismissRepeat = model.home::dismissRepeat,
                     navigate = model::navigate, back = model::back, action = model::action,
+                    removeCompleted = model::removeCompleted,
                     paste = {
                         val clip = getSystemService(ClipboardManager::class.java).primaryClip // Explicit tap only.
                         val item = clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)
