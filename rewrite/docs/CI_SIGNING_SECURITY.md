@@ -84,6 +84,12 @@ signing Environment/secret/cache, grants only read access for source, Actions an
 PR review metadata, and skips application builds and signing. Ordinary CI and
 the protected real signer retain their existing boundaries. Its tests and code
 do not assert that the real independent verification has run.
+The first real verifier run #77 failed before download because GitHub hides
+`bypass_actors` from its read-only token. The verifier runbook requires a separate
+owner API preflight, published as a fresh unedited Issue #6 JSON comment bound to
+the exact merged verifier commit and unchanged public ruleset revisions. Runner
+permissions remain read-only; missing/stale/forged proof or unsuccessful actual
+required PR CI blocks processing. No management token enters Actions.
 
 ```sh
 python -m pip install --require-hashes --only-binary=:all: --no-deps -r rewrite/ci/requirements.lock

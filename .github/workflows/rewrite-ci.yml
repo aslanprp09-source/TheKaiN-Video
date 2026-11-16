@@ -18,6 +18,10 @@ on:
         type: boolean
         default: false
         description: Only verify original signed run 69 artifact after independent review (no build/signing)
+      bypass_preflight_comment:
+        type: string
+        default: ''
+        description: Public Issue 6 comment ID from the fresh owner no-bypass API audit (verifier only)
 permissions:
   contents: read
 jobs:
@@ -25,8 +29,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - name: Reject conflicting verifier and build/signing modes
-        if: inputs.verify_artifact && (inputs.build_packages || inputs.sign_android)
+      - name: Reject conflicting or unaudited verifier mode
+        if: inputs.verify_artifact && (inputs.build_packages || inputs.sign_android || !inputs.bypass_preflight_comment)
         run: exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -275,6 +279,7 @@ jobs:
         id: verify
         env:
           GH_TOKEN: ${{ github.token }}
+          BYPASS_PREFLIGHT_COMMENT_ID: ${{ inputs.bypass_preflight_comment }}
         run: python3 rewrite/ci/android_artifact_verifier.py --output "$RUNNER_TEMP/thekain-independent-verification"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         id: upload-report

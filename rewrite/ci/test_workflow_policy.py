@@ -126,7 +126,7 @@ class WorkflowPolicyTest(unittest.TestCase):
         for variant in ('environment', 'secrets', 'write', 'oidc', 'job-env', 'defaults',
                 'cache', 'extra-step', 'skip-check', 'replace-command', 'input-interpolation',
                 'wrong-ref', 'wrong-trigger', 'broader-upload', 'default-on', 'build-conflict',
-                'skip-source-ci', 'forward-token', 'ignore-failure'):
+                'skip-source-ci', 'forward-token', 'ignore-failure', 'no-preflight-input', 'unbound-preflight'):
             self.setUp()
             ci = self.docs['.github/workflows/rewrite-ci.yml']
             job = ci['jobs']['android-independent-verifier']
@@ -150,4 +150,6 @@ class WorkflowPolicyTest(unittest.TestCase):
             if variant == 'skip-source-ci': ci['jobs']['android-debug']['if'] = 'false'
             if variant == 'forward-token': steps['setup-java']['env'] = {'GH_TOKEN': '${{ github.token }}'}
             if variant == 'ignore-failure': steps['verify']['continue-on-error'] = 'true'
+            if variant == 'no-preflight-input': del ci['on']['workflow_dispatch']['inputs']['bypass_preflight_comment']
+            if variant == 'unbound-preflight': del steps['verify']['env']['BYPASS_PREFLIGHT_COMMENT_ID']
             with self.subTest(variant=variant): self.assertTrue(check(self.docs, self.lock))
