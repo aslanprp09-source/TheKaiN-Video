@@ -53,7 +53,8 @@ data class UiActions(
     val select: (String) -> Unit = {}, val download: () -> Unit = {}, val confirmRepeat: () -> Unit = {},
     val dismissRepeat: () -> Unit = {}, val paste: () -> Unit = {}, val navigate: (Page) -> Unit = {},
     val action: (String, String) -> Unit = { _, _ -> }, val open: (DownloadTask) -> Unit = {},
-    val back: () -> Unit = {}, val theme: (ThemeMode) -> Unit = {}, val language: (String) -> Unit = {}, val notifications: () -> Unit = {})
+    val back: () -> Unit = {}, val theme: (ThemeMode) -> Unit = {}, val language: (String) -> Unit = {},
+    val notifications: () -> Unit = {}, val removeCompleted: (String, Boolean) -> Unit = { _, _ -> })
 
 @Composable fun MainScreen(state: ScreenState, actions: UiActions, snackbar: SnackbarHostState = remember { SnackbarHostState() }) {
     val density = LocalDensity.current
@@ -301,6 +302,7 @@ data class UiActions(
 }
 
 @Composable private fun TaskCard(task: DownloadTask, actions: UiActions, library: Boolean = false) {
+    var confirmRemoval by remember(task.id) { mutableStateOf(false) }
     Card(Modifier.fillMaxWidth().testTag("task_${task.id}"), shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(task.name, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
@@ -321,6 +323,7 @@ data class UiActions(
             if (task.state == TransferState.DOWNLOADING && !task.resumable) Text(stringResource(R.string.pause_unavailable), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (task.state == TransferState.COMPLETED) OutlinedButton(onClick = { actions.open(task) }, modifier = Modifier.heightIn(min = 48.dp).testTag("open_${task.id}")) { Text(stringResource(R.string.open)) }
+                if (task.state == TransferState.COMPLETED) OutlinedButton(onClick = { confirmRemoval = true }, modifier = Modifier.heightIn(min = 48.dp).testTag("remove_${task.id}")) { Text(stringResource(R.string.remove_download)) }
                 if (task.state == TransferState.DOWNLOADING && task.resumable && task.bytes > 0) TaskButton(R.string.pause, task, "pause", actions)
                 if (task.state == TransferState.PAUSED) TaskButton(R.string.resume, task, "resume", actions)
                 if (task.state == TransferState.FAILED) TaskButton(R.string.retry, task, "retry", actions)
@@ -328,6 +331,27 @@ data class UiActions(
             }
         }
     }
+    if (confirmRemoval) AlertDialog(
+        onDismissRequest = { confirmRemoval = false },
+        title = { Text(stringResource(R.string.remove_download_title)) },
+        text = { Text(stringResource(R.string.remove_download_message, task.name)) },
+        confirmButton = {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Button(onClick = { confirmRemoval = false; actions.removeCompleted(task.id, true) },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("remove_file_${task.id}")) {
+                    Text(stringResource(R.string.remove_file_and_record))
+                }
+                OutlinedButton(onClick = { confirmRemoval = false; actions.removeCompleted(task.id, false) },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("remove_record_${task.id}")) {
+                    Text(stringResource(R.string.remove_record_only))
+                }
+                TextButton(onClick = { confirmRemoval = false },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("remove_cancel_${task.id}")) {
+                    Text(stringResource(R.string.cancel))
+                }
+            }
+        }
+    )
 }
 
 @Composable private fun TaskButton(label: Int, task: DownloadTask, kind: String, actions: UiActions) {
