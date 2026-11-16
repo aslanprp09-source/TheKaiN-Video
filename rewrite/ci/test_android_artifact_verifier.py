@@ -22,7 +22,7 @@ PIN = v.parse_json(v.SOURCE.read_bytes())
 SHA = 'a' * 40
 ENV = {'GITHUB_SHA': SHA, 'GITHUB_REPOSITORY': PIN['repository'],
        'GITHUB_REF': 'refs/heads/' + PIN['branch'], 'GITHUB_EVENT_NAME': 'workflow_dispatch',
-       'RUNNER_ENVIRONMENT': 'github-hosted', 'GITHUB_RUN_ID': '123'}
+       'RUNNER_ENVIRONMENT': 'github-hosted', 'GITHUB_RUN_ID': '123', 'BYPASS_PREFLIGHT_COMMENT_ID': '789'}
 APK = next(n for n in PIN['files'] if n.endswith('.apk'))
 AAB = next(n for n in PIN['files'] if n.endswith('.aab'))
 
@@ -60,6 +60,7 @@ def write_zip(path, raw):
 class FakeAPI:
     def __init__(self, pin, archive=None):
         self.pin, self.archive = pin, archive
+        self.base = 'https://api.github.com/repos/' + pin['repository']
         self.run = {'id': pin['run_id'], 'run_number': pin['run_number'], 'head_branch': pin['branch'],
             'head_sha': pin['source_commit'], 'status': 'completed', 'conclusion': 'success',
             'event': 'workflow_dispatch', 'path': '.github/workflows/rewrite-ci.yml',
@@ -72,7 +73,14 @@ class FakeAPI:
                 'head_sha': pin['source_commit']}}
         self.pr = {'number': 22, 'merged_at': '2026-11-16T00:00:00Z', 'merge_commit_sha': SHA,
             'base': {'ref': pin['branch'], 'repo': {'full_name': pin['repository']}},
-            'head': {'sha': 'b' * 40}, 'user': {'id': 352417087}}
+            'head': {'sha': 'b' * 40, 'ref': 'owned-verifier', 'repo': {'full_name': pin['repository']}},
+            'user': {'id': 352417087}}
+        self.ci_run = {'id': 123, 'workflow_id': v.CI_WORKFLOW_ID, 'event': 'pull_request',
+            'head_sha': 'b' * 40, 'head_branch': 'owned-verifier', 'status': 'completed',
+            'conclusion': 'success', 'path': '.github/workflows/rewrite-ci.yml',
+            'repository': {'full_name': pin['repository']},
+            'head_repository': {'full_name': pin['repository']}}
+        self.ci_jobs = [{'name': name, 'status': 'completed', 'conclusion': 'success'} for name in v.REQUIRED_CI]
         self.review = {'id': 99, 'state': 'APPROVED', 'commit_id': 'b' * 40,
             'user': {'id': 355790290, 'login': 'KaiN1One'}}
         self.rules = [{'type': k, 'ruleset_id': 1} for k in ('deletion', 'non_fast_forward')]
@@ -82,10 +90,20 @@ class FakeAPI:
             {'type': 'required_status_checks', 'ruleset_id': 1, 'parameters': {
                 'strict_required_status_checks_policy': True,
                 'required_status_checks': [{'context': n, 'integration_id': 15368} for n in v.REQUIRED_CI]}}]
-        self.ruleset = {'enforcement': 'active', 'bypass_actors': []}
+        self.ruleset = {'id': 1, 'name': 'owned-protection', 'target': 'branch',
+            'source_type': 'Repository', 'source': pin['repository'],
+            'enforcement': 'active', 'bypass_actors': [],
+            'created_at': '2026-11-13T00:00:00Z', 'updated_at': '2026-11-13T00:00:00Z',
+            'conditions': {'ref_name': {'include': ['refs/heads/' + pin['branch']], 'exclude': []}},
+            'rules': deepcopy(self.rules)}
         self.downloaded = False
+        timestamp = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        self.comment = {'id': 789, 'user': {'login': 'aslanprp09-source', 'id': 352417087},
+            'issue_url': self.base + '/issues/6', 'created_at': timestamp, 'updated_at': timestamp,
+            'body': json.dumps(v.audit_bypass_before_launch(self, pin, SHA))}
 
     def json(self, path):
+        if path.startswith('/issues/comments/'): return self.comment
         if path.startswith('/git/ref/'): return {'object': {'sha': SHA}}
         if path.startswith('/actions/runs/'): return self.run
         if path.startswith('/actions/artifacts/'): return self.artifact
@@ -94,6 +112,9 @@ class FakeAPI:
         raise AssertionError(path)
 
     def pages(self, path, field=None):
+        if path.startswith('/rules/branches/'): return self.rules
+        if path.startswith('/actions/workflows/'): return [self.ci_run]
+        if path.endswith('/jobs'): return self.ci_jobs
         if path.endswith('/artifacts'): return [self.artifact]
         if path.startswith('/commits/'): return [self.pr]
         if path.startswith('/pulls/'): return [self.review]
@@ -186,6 +207,114 @@ class VerifierTest(unittest.TestCase):
         self.archive.write_bytes(b'not a ZIP')
         with self.assertRaises(zipfile.BadZipFile): self.contents()
 
+    def test_read_only_hidden_bypass_metadata_is_explicit_and_does_not_skip_actual_ci(self):
+        self.api.ruleset.pop('bypass_actors')
+        details = v.reviewed_execution(self.api, self.pin, ENV)
+        configuration = details['rulesets'][0]['bypass_configuration']
+        self.assertEqual(configuration['status'], 'PASS')
+        self.assertFalse(configuration['direct_field_visible'])
+        self.assertEqual(configuration['preflight_comment_id'], 789)
+        self.assertEqual(details['required_ci']['run_id'], 123)
+        self.api.ci_jobs[0]['conclusion'] = 'skipped'
+        with self.assertRaisesRegex(v.VerificationError, 'REQUIRED_CI_JOB_NOT_SUCCESSFUL'):
+            v.reviewed_execution(self.api, self.pin, ENV)
+
+    def test_latest_approved_head_ci_must_be_the_real_successful_workflow(self):
+        for key, value in {'workflow_id': 1, 'event': 'workflow_dispatch', 'head_sha': 'c' * 40,
+            'head_branch': 'other', 'status': 'in_progress', 'conclusion': 'failure', 'path': 'other.yml',
+            'repository': {'full_name': 'other/repo'}, 'head_repository': {'full_name': 'fork/repo'}}.items():
+            api = FakeAPI(self.pin)
+            api.ci_run[key] = value
+            with self.subTest(key=key), self.assertRaises(v.VerificationError):
+                v.reviewed_execution(api, self.pin, ENV)
+        with patch.object(self.api, 'pages', return_value=[]), self.assertRaises(v.VerificationError):
+            v.approved_head_ci(self.api, self.pin, self.api.pr)
+        for variant in ('failed', 'skipped', 'missing', 'duplicate'):
+            api = FakeAPI(self.pin)
+            if variant in ('failed', 'skipped'): api.ci_jobs[0]['conclusion'] = variant
+            if variant == 'missing': api.ci_jobs.pop()
+            if variant == 'duplicate': api.ci_jobs.append(deepcopy(api.ci_jobs[0]))
+            with self.subTest(variant=variant), self.assertRaises(v.VerificationError):
+                v.reviewed_execution(api, self.pin, ENV)
+        api = FakeAPI(self.pin)
+        api.pr['head']['repo']['full_name'] = 'fork/repo'
+        with self.assertRaises(v.VerificationError): v.reviewed_execution(api, self.pin, ENV)
+
+    def test_external_no_bypass_preflight_requires_visible_empty_metadata_and_current_tip(self):
+        audit = v.audit_bypass_before_launch(self.api, self.pin, SHA)
+        self.assertEqual(audit['status'], 'PASS')
+        self.assertEqual(audit['rulesets'][0]['bypass_actors'], [])
+        self.assertEqual(len(audit['rulesets'][0]['public_sha256']), 64)
+        self.assertFalse(self.api.downloaded)
+        for variant in ('hidden', 'bypass', 'inactive', 'no-rules', 'old-tip'):
+            api, commit = FakeAPI(self.pin), SHA
+            if variant == 'hidden': api.ruleset.pop('bypass_actors')
+            if variant == 'bypass': api.ruleset['bypass_actors'] = [{'actor_id': 1}]
+            if variant == 'inactive': api.ruleset['enforcement'] = 'disabled'
+            if variant == 'no-rules': api.rules = []
+            if variant == 'old-tip': commit = 'c' * 40
+            with self.subTest(variant=variant), self.assertRaises(v.VerificationError):
+                v.audit_bypass_before_launch(api, self.pin, commit)
+
+    def test_ruleset_revision_timestamps_are_canonical_across_equivalent_timezones(self):
+        original = v.public_ruleset_digest(self.api.ruleset)
+        self.api.ruleset['created_at'] = '2026-11-13T05:00:00.000+05:00'
+        self.api.ruleset['updated_at'] = '2026-11-13T05:00:00+05:00'
+        self.assertEqual(original, v.public_ruleset_digest(self.api.ruleset))
+        v.reviewed_execution(self.api, self.pin, ENV)
+
+    def test_hidden_configuration_requires_bound_external_proof_in_fixture_report(self):
+        self.api.ruleset.pop('bypass_actors')
+        with patch.object(v, 'tool_versions', return_value={}), patch.object(v, 'verify_apk', return_value={}), \
+                patch.object(v, 'verify_aab', return_value={}):
+            report = v.execute(self.pin, self.api, ENV, self.root, self.root, self.root / 'hidden-report')
+        self.assertEqual(report['overall_status'], 'PASS')
+        config = report['checks']['review']['details']['rulesets'][0]['bypass_configuration']
+        self.assertFalse(config['direct_field_visible'])
+        self.assertEqual(config['preflight_comment_id'], 789)
+        self.api.comment['user']['id'] = 1
+        with patch.object(v, 'tool') as tool:
+            report = v.execute(self.pin, self.api, ENV, self.root, self.root, self.root / 'bad-proof')
+        self.assertEqual(report['overall_status'], 'FAIL')
+        self.assertEqual(report['checks']['provenance']['status'], 'NOT_RUN')
+        tool.assert_not_called()
+
+    def test_preflight_comment_identity_freshness_context_and_ruleset_revision_fail_closed(self):
+        for variant in ('missing', 'injection', 'other-comment-id', 'other-author', 'other-issue', 'edited', 'expired',
+                'wrong-commit', 'wrong-repository', 'old-audit', 'changed-revision', 'changed-public-rules',
+                'bypass-proof', 'missing-ruleset'):
+            api, env = FakeAPI(self.pin), dict(ENV)
+            proof = json.loads(api.comment['body'])
+            if variant == 'missing': env['BYPASS_PREFLIGHT_COMMENT_ID'] = ''
+            if variant == 'injection': env['BYPASS_PREFLIGHT_COMMENT_ID'] = '789/../../secrets'
+            if variant == 'other-comment-id': api.comment['id'] = 1
+            if variant == 'other-author': api.comment['user']['id'] = 1
+            if variant == 'other-issue': api.comment['issue_url'] = api.base + '/issues/7'
+            if variant == 'edited': api.comment['updated_at'] = '2099-01-01T00:00:00Z'
+            if variant == 'expired': api.comment['created_at'] = api.comment['updated_at'] = '2000-01-01T00:00:00Z'
+            if variant == 'wrong-commit': proof['verifier_commit'] = 'f' * 40
+            if variant == 'wrong-repository': proof['repository'] = 'other/repo'
+            if variant == 'old-audit': proof['audited_at'] = '2000-01-01T00:00:00Z'
+            if variant == 'changed-revision': api.ruleset['updated_at'] = '2026-11-16T00:00:00Z'
+            if variant == 'changed-public-rules': api.ruleset['conditions']['ref_name']['exclude'] = ['*']
+            if variant == 'bypass-proof': proof['rulesets'][0]['bypass_actors'] = [{'actor_id': 1}]
+            if variant == 'missing-ruleset': proof['rulesets'] = []
+            api.comment['body'] = json.dumps(proof)
+            with self.subTest(variant=variant), self.assertRaises(v.VerificationError):
+                v.reviewed_execution(api, self.pin, env)
+
+    def test_cli_prints_safe_stage_errors_when_artifact_report_download_is_unavailable(self):
+        import contextlib
+        self.api.ruleset['bypass_actors'] = [{'actor_id': 1}]
+        stdout = io.StringIO()
+        args = ['android_artifact_verifier.py', '--output', str(self.root / 'cli-result')]
+        with patch.object(v, 'GitHub', return_value=self.api), patch.dict(os.environ, ENV), \
+                patch('sys.argv', args), contextlib.redirect_stdout(stdout):
+            status = v.main()
+        self.assertEqual(status, 1)
+        self.assertIn('NO_BYPASS_RULESET_REQUIRED', stdout.getvalue())
+        self.assertIn('"provenance": {"status": "NOT_RUN"}', stdout.getvalue())
+
     def test_unsafe_archive_entries_are_rejected_without_extraction(self):
         for variant in ('traversal', 'absolute', 'backslash', 'unexpected', 'duplicate', 'symlink', 'directory', 'oversized'):
             raw = dict(self.raw)
@@ -250,7 +379,7 @@ class VerifierTest(unittest.TestCase):
                 with contextlib.ExitStack() as stack:
                     for stage, func in funcs.items():
                         stack.enter_context(patch.object(v, func, side_effect=(RuntimeError('secret-token https://storage/?sig=secret')
-                            if stage == fail_stage else None), return_value={}))
+                            if stage == fail_stage else None), return_value={'rulesets': []} if stage == 'review' else {}))
                     report = v.execute(self.pin, self.api, ENV, self.root, self.root, self.root / fail_stage)
                 self.assertEqual(report['overall_status'], 'FAIL')
                 self.assertEqual(report['checks'][fail_stage]['status'], 'FAIL')

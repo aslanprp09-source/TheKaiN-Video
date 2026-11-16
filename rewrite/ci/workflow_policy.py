@@ -109,10 +109,13 @@ def check(documents, lock):
     verifier_input = ci['on'].get('workflow_dispatch', {}).get('inputs', {}).get('verify_artifact', {})
     require(verifier_input.get('type') == 'boolean' and verifier_input.get('default') == 'false',
             'Independent verifier must default off')
+    preflight_input = ci['on'].get('workflow_dispatch', {}).get('inputs', {}).get('bypass_preflight_comment', {})
+    require(preflight_input.get('type') == 'string' and preflight_input.get('default') == '',
+            'Verifier needs an explicit fresh public preflight comment ID')
     for name in REQUIRED_CHECKS - {'ci-policy'}:
         require(ci['jobs'].get(name, {}).get('if') == '${{ !inputs.verify_artifact }}',
                 'Source CI must run normally and skip only in explicit verifier mode')
-    require(any(s.get('if') == 'inputs.verify_artifact && (inputs.build_packages || inputs.sign_android)'
+    require(any(s.get('if') == 'inputs.verify_artifact && (inputs.build_packages || inputs.sign_android || !inputs.bypass_preflight_comment)'
                 and s.get('run') == 'exit 1' for s in ci['jobs']['ci-policy']['steps']),
             'Conflicting verifier/build modes must fail')
     verify = ci['jobs'].get('android-independent-verifier', {})
@@ -135,7 +138,9 @@ def check(documents, lock):
         'distribution': 'temurin', 'java-version': '17'}, 'Verifier must use JDK 17 without caches')
     run = verifier_steps.get('verify', {})
     require(run.get('run') == 'python3 rewrite/ci/android_artifact_verifier.py --output "$RUNNER_TEMP/thekain-independent-verification"'
-            and run.get('env') == {'GH_TOKEN': '${{ github.token }}'} and 'uses' not in run and 'with' not in run,
+            and run.get('env') == {'GH_TOKEN': '${{ github.token }}',
+                'BYPASS_PREFLIGHT_COMMENT_ID': '${{ inputs.bypass_preflight_comment }}'}
+            and 'uses' not in run and 'with' not in run,
             'Only the reviewed verifier may receive the read-only API token')
     for step in verify_steps:
         require(step.get('id') == 'verify' or ('run' not in step and 'env' not in step),

@@ -22,6 +22,7 @@ import zipfile
 SOURCE = Path(__file__).with_name('android-verifier-source.json')
 CHECKS = ('review', 'provenance', 'zip', 'contents', 'tools', 'apk', 'aab')
 REQUIRED_CI = {'ci-policy', 'windows-tests', 'android-debug', 'android-device-tests'}
+CI_WORKFLOW_ID = 414273011
 MAX_JSON = 4 * 1024 * 1024
 PUBLIC_PASSWORD = 'public-certificate-only'
 
@@ -145,9 +146,12 @@ def reviewed_execution(api, pin, env):
     latest = max(independent, key=lambda r: r['id'], default={})
     require(latest.get('state') == 'APPROVED' and latest.get('commit_id') == pr['head']['sha']
             and pr['user']['id'] != 355790290, 'INDEPENDENT_CURRENT_HEAD_REVIEW_REQUIRED')
-    # Required checks belong to the PR commit or its GitHub test merge commit.
-    # Server-side strict protection governs the merge; read its effective rules too.
-    rules = api.json('/rules/branches/' + pin['branch'])
+    ci = approved_head_ci(api, pin, pr)
+    # Effective rules and actual review/CI are readable with the job token.
+    # GitHub hides bypass_actors unless the caller can WRITE the ruleset.
+    # Bind the mandatory external audit to its GitHub comment and the unchanged
+    # public ruleset revision. Never treat a hidden management field as [].
+    rules = api.pages('/rules/branches/' + pin['branch'])
     by_type = {r['type']: r for r in rules}
     require({'deletion', 'non_fast_forward', 'pull_request', 'required_status_checks'} <= set(by_type),
             'BRANCH_PROTECTION_REQUIRED')
@@ -159,12 +163,110 @@ def reviewed_execution(api, pin, env):
     require(checks_policy.get('strict_required_status_checks_policy') is True
             and REQUIRED_CI <= {c['context'] for c in checks_policy['required_status_checks']
                                if c.get('integration_id') == 15368}, 'STRICT_REQUIRED_CI_REQUIRED')
-    for ruleset_id in {r['ruleset_id'] for r in rules}:
+    proof = launch_preflight_proof(api, pin, sha, env.get('BYPASS_PREFLIGHT_COMMENT_ID', ''))
+    require({r['id'] for r in proof['rulesets']} == {r['ruleset_id'] for r in rules}
+            and len(proof['rulesets']) == len({r['ruleset_id'] for r in rules}),
+            'PREFLIGHT_RULESET_SET_MISMATCH')
+    rulesets = []
+    for ruleset_id in sorted({r['ruleset_id'] for r in rules}):
         ruleset = api.json(f'/rulesets/{ruleset_id}')
-        require(ruleset.get('enforcement') == 'active' and ruleset.get('bypass_actors') == [],
-                'NO_BYPASS_RULESET_REQUIRED')
+        require(ruleset.get('enforcement') == 'active', 'ACTIVE_RULESET_REQUIRED')
+        if 'bypass_actors' in ruleset:
+            require(ruleset['bypass_actors'] == [], 'NO_BYPASS_RULESET_REQUIRED')
+        audited = next(r for r in proof['rulesets'] if r['id'] == ruleset_id)
+        require(audited.get('enforcement') == 'active' and audited.get('bypass_actors') == []
+                and audited.get('updated_at') == canonical_timestamp(ruleset.get('updated_at'))
+                and audited.get('public_sha256') == public_ruleset_digest(ruleset),
+                'PREFLIGHT_RULESET_REVISION_MISMATCH')
+        rulesets.append({'id': ruleset_id, 'enforcement': ruleset['enforcement'],
+            'bypass_configuration': {'status': 'PASS', 'direct_field_visible': 'bypass_actors' in ruleset,
+                'source': 'external owner API audit, bound to unchanged public ruleset revision',
+                'preflight_comment_id': int(env['BYPASS_PREFLIGHT_COMMENT_ID']),
+                'public_sha256': audited['public_sha256'], 'updated_at': audited['updated_at']}})
     return {'pr': pr['number'], 'review_id': latest['id'], 'reviewed_head': pr['head']['sha'],
-            'verifier_commit': sha}
+            'verifier_commit': sha, 'required_ci': ci, 'rulesets': rulesets}
+
+
+def public_ruleset_digest(ruleset):
+    fields = ('id', 'name', 'target', 'source_type', 'source', 'enforcement',
+              'created_at', 'updated_at', 'conditions', 'rules')
+    require(all(k in ruleset for k in fields), 'INCOMPLETE_PUBLIC_RULESET_METADATA')
+    public = {k: ruleset[k] for k in fields}
+    for key in ('created_at', 'updated_at'):
+        public[key] = canonical_timestamp(public[key])
+    raw = json.dumps(public, sort_keys=True, separators=(',', ':')).encode()
+    return hashlib.sha256(raw).hexdigest()
+
+
+def canonical_timestamp(value):
+    moment = datetime.fromisoformat(value.replace('Z', '+00:00'))
+    require(moment.tzinfo is not None, 'TIMESTAMP_TIMEZONE_REQUIRED')
+    return moment.astimezone(timezone.utc).isoformat(timespec='microseconds')
+
+
+def launch_preflight_proof(api, pin, commit, comment_id):
+    require(bool(re.fullmatch('[1-9][0-9]{0,19}', comment_id)), 'PREFLIGHT_COMMENT_REQUIRED')
+    comment = api.json('/issues/comments/' + comment_id)
+    require(comment.get('id') == int(comment_id)
+            and comment.get('user', {}).get('login') == 'aslanprp09-source'
+            and comment['user'].get('id') == 352417087
+            and comment.get('issue_url') == api.base + '/issues/6'
+            and comment.get('updated_at') == comment.get('created_at'), 'UNTRUSTED_PREFLIGHT_COMMENT')
+    created = datetime.fromisoformat(comment['created_at'].replace('Z', '+00:00'))
+    require(-30 <= (datetime.now(timezone.utc) - created).total_seconds() <= 15 * 60,
+            'PREFLIGHT_COMMENT_EXPIRED')
+    require(len(comment.get('body', '').encode()) <= 65536, 'PREFLIGHT_COMMENT_TOO_LARGE')
+    proof = parse_json(comment['body'])
+    require(all(proof.get(k) == value for k, value in {'schema': 1,
+        'scope': 'thekain-verifier-no-bypass-preflight', 'status': 'PASS',
+        'repository': pin['repository'], 'branch': pin['branch'], 'verifier_commit': commit,
+        'production_ready': False, 'automatic_publication': False}.items()), 'PREFLIGHT_CONTEXT_MISMATCH')
+    audited_at = datetime.fromisoformat(proof['audited_at'].replace('Z', '+00:00'))
+    require(-2 <= (created - audited_at).total_seconds() <= 120, 'PREFLIGHT_AUDIT_STALE')
+    return proof
+
+
+def approved_head_ci(api, pin, pr):
+    require(pr['head'].get('repo', {}).get('full_name') == pin['repository'],
+            'VERIFIER_PR_SOURCE_REPOSITORY_MISMATCH')
+    runs = api.pages(f'/actions/workflows/{CI_WORKFLOW_ID}/runs?event=pull_request&head_sha={pr["head"]["sha"]}',
+                     'workflow_runs')
+    require(bool(runs), 'APPROVED_HEAD_CI_REQUIRED')
+    run = max(runs, key=lambda r: r['id'])
+    require(all(run.get(k) == value for k, value in {'workflow_id': CI_WORKFLOW_ID,
+        'event': 'pull_request', 'head_sha': pr['head']['sha'], 'head_branch': pr['head']['ref'],
+        'status': 'completed', 'conclusion': 'success', 'path': '.github/workflows/rewrite-ci.yml'}.items())
+        and all(run.get(k, {}).get('full_name') == pin['repository'] for k in
+                ('repository', 'head_repository')), 'APPROVED_HEAD_CI_MISMATCH')
+    jobs = api.pages(f'/actions/runs/{run["id"]}/jobs', 'jobs')
+    for name in REQUIRED_CI:
+        matches = [job for job in jobs if job.get('name') == name]
+        require(len(matches) == 1 and matches[0].get('status') == 'completed'
+                and matches[0].get('conclusion') == 'success', 'REQUIRED_CI_JOB_NOT_SUCCESSFUL')
+    return {'run_id': run['id'], 'head_sha': run['head_sha'],
+            'checks': {name: 'PASS' for name in sorted(REQUIRED_CI)}}
+
+
+def audit_bypass_before_launch(api, pin, commit):
+    """External read-only preflight; never pass its management-capable token to Actions."""
+    require(bool(re.fullmatch('[0-9a-f]{40}', commit or '')), 'INVALID_PREFLIGHT_COMMIT')
+    require(api.json('/git/ref/heads/' + pin['branch'])['object']['sha'] == commit,
+            'VERIFIER_CURRENT_TIP_REQUIRED')
+    rules = api.pages('/rules/branches/' + pin['branch'])
+    require(bool(rules), 'BRANCH_PROTECTION_REQUIRED')
+    audited = []
+    for ruleset_id in sorted({r['ruleset_id'] for r in rules}):
+        ruleset = api.json(f'/rulesets/{ruleset_id}')
+        require(ruleset.get('enforcement') == 'active', 'ACTIVE_RULESET_REQUIRED')
+        require('bypass_actors' in ruleset, 'BYPASS_CONFIGURATION_NOT_VISIBLE')
+        require(ruleset['bypass_actors'] == [], 'NO_BYPASS_RULESET_REQUIRED')
+        audited.append({'id': ruleset_id, 'enforcement': 'active', 'bypass_actors': [],
+                        'updated_at': canonical_timestamp(ruleset['updated_at']),
+                        'public_sha256': public_ruleset_digest(ruleset)})
+    return {'schema': 1, 'scope': 'thekain-verifier-no-bypass-preflight',
+            'repository': pin['repository'], 'branch': pin['branch'],
+            'verifier_commit': commit, 'audited_at': datetime.now(timezone.utc).isoformat(),
+            'rulesets': audited, 'status': 'PASS', 'production_ready': False, 'automatic_publication': False}
 
 
 def provenance(api, pin, now):
@@ -378,12 +480,27 @@ def execute(pin, api, env, tools, java, output):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--audit-bypass-commit', help='External read-only no-bypass preflight for this current tip')
     args = parser.parse_args()
     pin = parse_json(SOURCE.read_bytes())
-    report = execute(pin, GitHub(pin['repository'], os.environ.get('GH_TOKEN', '')),
+    api = GitHub(pin['repository'], os.environ.get('GH_TOKEN', ''))
+    if args.audit_bypass_commit:
+        try:
+            report = audit_bypass_before_launch(api, pin, args.audit_bypass_commit)
+        except Exception as error:
+            report = {'scope': 'external-launch-preflight; not artifact verification', 'status': 'FAIL',
+                'error_code': str(error) if isinstance(error, VerificationError) else 'UNEXPECTED_PREFLIGHT_ERROR',
+                'production_ready': False, 'automatic_publication': False}
+        args.output.mkdir(parents=True, exist_ok=False)
+        (args.output / 'launch-preflight.json').write_text(json.dumps(report, indent=2) + '\n')
+        print(json.dumps(report))
+        return 0 if report['status'] == 'PASS' else 1
+    report = execute(pin, api,
         os.environ, Path(os.environ.get('ANDROID_HOME', '/missing')) / 'build-tools/35.0.0',
         Path(os.environ.get('JAVA_HOME', '/missing')), args.output)
     print('Independent verifier: ' + report['overall_status'] + '; see report.json')
+    print(json.dumps({'checks': {name: {k: value for k, value in check.items()
+                       if k in ('status', 'error_code')} for name, check in report['checks'].items()}}))
     return 0 if report['overall_status'] == 'PASS' else 1
 
 

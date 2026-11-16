@@ -5,6 +5,16 @@ the real artifact. Until a separately reviewed hosted execution finishes, the
 official independent apksigner result is **NOT_RUN**. The existing
 `android-signed-artifact-review` gate remains BLOCKED. No gate is changed here.
 
+First real execution after PR #22, [run #77 / 43863660113](https://github.com/aslanprp09-source/TheKaiN-Video/actions/runs/43863660113),
+failed at the review-policy stage with `NO_BYPASS_RULESET_REQUIRED`, before source
+download or official signature tools. Its report artifact is `14223209960`;
+the owner supplied that error code from report.json. This failure is preserved.
+GitHub's [ruleset API contract](https://docs.github.com/en/rest/repos/rules#get-a-repository-ruleset)
+states that `bypass_actors` is returned only to a caller with **write access to
+the ruleset**. Requiring that field inside a read-only job was an implementation
+error; fixture tests now model its absence explicitly. Do not grant management
+access to the job, interpret a missing field as an empty list, or waive the audit.
+
 ## Source and authority
 
 The committed [source pins](../ci/android-verifier-source.json) identify repository
@@ -44,29 +54,68 @@ the actual dispatch response and resulting run; an HTTP error is NOT_RUN.
    from its author. For this initial execution, run immediately on this PR's
    merged tip. Squash/rebase or later unrelated tips must still satisfy these
    API checks; never bypass a rejected review check.
-3. Dispatch **only after that review/merge** using the registered workflow:
+3. After review/merge, perform the **mandatory external no-bypass preflight**
+   using the existing owner GitHub connection that can read the complete
+   ruleset. This is a read-only API operation outside Actions. It does not grant
+   permissions, modify protection or forward its credential to the runner:
+
+   ```sh
+   python3 rewrite/ci/android_artifact_verifier.py \
+     --audit-bypass-commit "$REVIEWED_MERGE_SHA" \
+     --output "$FRESH_PREFLIGHT_DIRECTORY"
+   ```
+
+   Use a checkout of the reviewed implementation. Require exit zero and
+   `launch-preflight.json` status PASS: exact current rebuild tip, active effective
+   rulesets, and **visible** empty bypass lists. Missing management metadata fails
+   this preflight. Post the exact JSON as a **new unedited comment on Issue #6**
+   through the existing owner connection, without Markdown fences or added text.
+   No credentials occur in this JSON. Record its numeric comment ID. Post within
+   two minutes of the audit, then dispatch promptly; the runner accepts a comment
+   at most 15 minutes old. An expired/queued launch requires a fresh audit/comment,
+   never a relaxed freshness check.
+4. Dispatch **only after that review/merge and preflight** using the registered workflow:
 
    ```sh
    gh workflow run 414273011 --repo aslanprp09-source/TheKaiN-Video \
      --ref rebuild-2026-11-11 \
-     -f verify_artifact=true -f build_packages=false -f sign_android=false
+     -f verify_artifact=true -f build_packages=false -f sign_android=false \
+     -f bypass_preflight_comment="$PREFLIGHT_COMMENT_ID"
    ```
 
    Confirm that the new run's `head_sha` is the reviewed current tip, event is
-   `workflow_dispatch`, and `android-independent-verifier` actually ran. The
-   policy job still tests disposable fixtures; Windows/Android application
+   `workflow_dispatch`, and `android-independent-verifier` actually ran.
+   The comment ID is public data, never a credential or an arbitrary command.
+   The policy job still tests disposable fixtures; Windows/Android application
    builds, packaging, signing rehearsal and real signer are skipped in this
    explicit mode. Conflicting `verify_artifact` plus build/signing inputs fail
    policy. Ordinary push/PR/manual CI keeps all four required checks.
-4. If the dispatch endpoint refuses the branch workflow, record the response
+5. If the dispatch endpoint refuses the branch workflow, record the response
    without credentials and leave official verification NOT_RUN. Do not modify
    main, publish, rebuild run #69 or use another source as a substitute. Resolve
    any alternative entry point through a separately reviewed rebuild-only change.
 
-The script also checks the effective branch rules: strict required checks from
-GitHub Actions, independent last-push review, stale-review dismissal, resolved
-threads, no force push/deletion and active rulesets without bypass actors. API
-denial fails closed. It has no CLI option to skip review or replace the pins.
+The runner checks effective branch rules: strict required checks from GitHub
+Actions, independent last-push review, stale-review dismissal, resolved threads,
+and no force push/deletion. It also independently fetches the **latest PR CI run
+on the approved exact head**, requiring the registered workflow/source repository,
+completed success and exactly one successful job for each of the four checks.
+Skipped/failed/missing/duplicate jobs, another head/repository or unreadable API
+responses fail before processing the source artifact.
+
+The external audit is authenticated as a GitHub comment by the exact owner
+login/user ID on Issue #6. The runner verifies its ID, author, unedited state,
+timestamps, repository/branch/current verifier commit, exact effective ruleset set,
+active enforcement and explicit empty bypass lists. Each audit binds a canonical
+SHA-256 of all public ruleset configuration fields plus `updated_at`; the runner
+re-reads those fields and requires the **same revision**. Changed rules, timestamps,
+inventories, stale/forged/replayed/edited comments or hidden metadata at preflight
+fail closed. Direct field visibility is recorded separately from the authenticated
+external audit; no hidden/omitted configuration is silently marked PASS. The
+report identifies the public preflight comment and revision for each ruleset.
+As with any API preflight, a later protection edit requires a new audit/launch.
+This uses the owner's existing authorization as an explicit audit trust boundary,
+not an independently generated cryptographic attestation of the API response.
 
 ## Verification and access
 
@@ -77,7 +126,8 @@ as log files. A missing tool/version error fails the job; no SDK installation on
 the owner's Windows system is needed.
 
 Only `contents: read`, `actions: read`, and `pull-requests: read` are granted to
-this job. PR read access proves the new independent review; no issues write,
+this job. PR read access proves the new independent review and reads the public
+issue comment (the GitHub issue-comment endpoint accepts PR read permission); no issues write,
 deployments write, OIDC, signing Environment, private key, signing secret,
 `secrets: inherit`, cache or artifact code execution is used. The short-lived
 GITHUB_TOKEN enters only the verifier API step and is removed from tool process
@@ -118,6 +168,8 @@ codes, and overall status. A failed stage stops subsequent checks at NOT_RUN and
 forces overall FAIL. Workflow/checkout/JDK startup failure before the script may
 produce no JSON: the failed job is never evidence of PASS. Cancellation is also
 not PASS. The script writes the same status table to the job summary.
+CLI stdout additionally includes only the safe per-stage statuses/error codes,
+so an inaccessible artifact ZIP does not hide the cause of failure.
 
 After observing the completed real run, update Issue #6 separately with the PR,
 reviewed/verifier/source commits, verifier run and report artifact link, actual
