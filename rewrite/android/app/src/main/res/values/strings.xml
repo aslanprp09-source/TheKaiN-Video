@@ -9,6 +9,13 @@
     <string name="resume">Продолжить</string>
     <string name="retry">Повторить</string>
     <string name="open">Открыть файл</string>
+    <string name="remove_download">Удалить</string>
+    <string name="remove_download_title">Удалить загрузку?</string>
+    <string name="remove_download_message">Выберите, что удалить: %1$s. Удаление файла с устройства нельзя отменить.</string>
+    <string name="remove_record_only">Только убрать из списка</string>
+    <string name="remove_file_and_record">Удалить файл с устройства и запись</string>
+    <string name="remove_completed_success">Загрузка удалена.</string>
+    <string name="remove_completed_failed">Не удалось удалить. Файл и запись сохранены, если операция завершилась ошибкой до удаления файла.</string>
     <string name="downloads">Загрузки</string>
     <string name="idle">Ожидание ссылки</string>
     <string name="submitting">Добавляем задачу…</string>
