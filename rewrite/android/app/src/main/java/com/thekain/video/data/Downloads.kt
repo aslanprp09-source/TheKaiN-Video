@@ -44,6 +44,7 @@ interface DownloadDao {
     @Query("SELECT * FROM downloads WHERE id=:id") suspend fun get(id: String): DownloadTask?
     @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun insert(task: DownloadTask)
     @Update suspend fun update(task: DownloadTask)
+    @Query("DELETE FROM downloads WHERE id=:id AND state='COMPLETED'") suspend fun removeCompleted(id: String): Int
 }
 
 @Database(entities = [DownloadTask::class], version = 1, exportSchema = true)
@@ -54,6 +55,9 @@ class DownloadRepository(val db: DownloadsDb) {
     val changes = db.downloads().observe()
     suspend fun all() = db.downloads().all()
     suspend fun get(id: String): DownloadTask = db.downloads().get(id) ?: error("Unknown job")
+    /** Only immutable completed records may be removed. Active workers keep their rows. */
+    suspend fun removeCompleted(id: String): Boolean = db.downloads().removeCompleted(id) == 1
+
     suspend fun create(request: DirectRequest): DownloadTask {
         val task = DownloadTask(UUID.randomUUID().toString(), request.url, request.name, request.mime)
         db.downloads().insert(task)
