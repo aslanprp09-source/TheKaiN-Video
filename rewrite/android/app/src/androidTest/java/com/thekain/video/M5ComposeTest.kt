@@ -107,6 +107,10 @@ class M5ComposeTest {
         start(ScreenState(tasks = listOf(done), page = Page.LIBRARY),
             remove = { id, withFile -> calls += id to withFile })
         compose.onNodeWithTag("remove_done").performClick()
+        val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val evidence = java.io.File(context.filesDir, "removal-evidence").apply { mkdirs() }
+        assertTrue(device.takeScreenshot(java.io.File(evidence, "library-confirmation.png")))
         compose.onNodeWithTag("remove_cancel_done").performClick()
         assertTrue(calls.isEmpty())
         compose.onNodeWithTag("remove_done").performClick()
@@ -115,6 +119,21 @@ class M5ComposeTest {
         compose.onNodeWithTag("remove_done").performClick()
         compose.onNodeWithTag("remove_file_done").performClick()
         compose.runOnIdle { assertEquals(listOf("done" to false, "done" to true), calls) }
+    }
+
+    @Test fun downloadsShowBothChoicesAndPendingRemovalDisablesOpenAndRepeat() {
+        val done = UiFixtures.task("pending", TransferState.COMPLETED)
+        start(ScreenState(tasks = listOf(done), page = Page.DOWNLOADS))
+        compose.onNodeWithTag("remove_pending").performClick()
+        compose.onNodeWithTag("remove_record_pending").assertIsDisplayed()
+        compose.onNodeWithTag("remove_file_pending").assertIsDisplayed()
+        compose.onNodeWithTag("remove_cancel_pending").performClick()
+        compose.runOnIdle { state.value = state.value.copy(removing = setOf(done.id)) }
+        compose.onNodeWithTag("remove_pending").assertIsNotEnabled()
+        compose.onNodeWithTag("open_pending").assertIsNotEnabled()
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val evidence = java.io.File(context.filesDir, "removal-evidence").apply { mkdirs() }
+        assertTrue(UiDevice.getInstance(InstrumentationRegistry.getInstrumentation()).takeScreenshot(java.io.File(evidence, "downloads-pending.png")))
     }
 
     @Test fun libraryExcludesUnverifiedTasksAndFiltersAreFunctional() {

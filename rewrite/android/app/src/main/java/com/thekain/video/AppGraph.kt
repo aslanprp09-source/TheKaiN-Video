@@ -12,8 +12,6 @@ import com.thekain.video.transfer.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import java.io.File
 import java.util.concurrent.TimeUnit
 import java.util.UUID
@@ -37,13 +35,17 @@ class TheKaiNApp : Application() {
 class AppGraph(val context: Context) {
     val recoveryReady = CompletableDeferred<Unit>()
     private val actions = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val completedRemovalMutex = Mutex()
     private val mutableSubmission = MutableStateFlow(Submission())
     val submission = mutableSubmission.asStateFlow()
     val db = Room.databaseBuilder(context, DownloadsDb::class.java, "downloads.db").build()
     val repository = DownloadRepository(db)
     val verifier = MediaVerifier(context)
     val publisher = MediaPublisher(context, verifier)
+    private val remover = CompletedDownloadRemover(repository::find, repository::removeCompleted,
+        publisher::deleteCompletedOutput, CompletedStaging(File(context.filesDir, "transfers"))::delete) { task ->
+        val notificationId = (task.id.hashCode() and 0x0fffffff) or 0x10000000
+        context.getSystemService(NotificationManager::class.java).cancel(notificationId)
+    }
     // Dependency boundary for owned TLS fixtures; production always uses system trust.
     @Volatile var connections: Connections = systemConnections
     val sourceAnalyzer = SourceAnalyzer { input -> HttpsSourceAnalyzer(connections).analyze(input) }
@@ -79,17 +81,11 @@ class AppGraph(val context: Context) {
     }
 
     /** Keep the database record when deleting the real output fails. No active work may be removed. */
-    suspend fun removeCompleted(id: String, removeFile: Boolean): Boolean = completedRemovalMutex.withLock {
-        val task = repository.get(id)
-        if (task.state != TransferState.COMPLETED) return@withLock false
-        if (removeFile) publisher.deleteCompletedOutput(task)
-        val removed = repository.removeCompleted(id)
-        if (removed) {
-            val notificationId = (task.id.hashCode() and 0x0fffffff) or 0x10000000
-            context.getSystemService(NotificationManager::class.java).cancel(notificationId)
-        }
-        removed
-    }
+    suspend fun removeCompleted(id: String, removeFile: Boolean): RemovalOutcome =
+        withContext(Dispatchers.IO) { remover.remove(id, removeFile) }
+
+    suspend fun notifyTerminalIfPresent(id: String, notify: (DownloadTask) -> Unit) =
+        remover.notifyIfPresent(id, notify)
 
     suspend fun schedule(id: String, replace: Boolean = false) {
         val task = repository.get(id)

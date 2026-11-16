@@ -14,8 +14,12 @@
     <string name="remove_download_message">Choose what to remove: %1$s. Deleting the device file cannot be undone.</string>
     <string name="remove_record_only">Remove from list only</string>
     <string name="remove_file_and_record">Delete device file and record</string>
-    <string name="remove_completed_success">Download removed.</string>
-    <string name="remove_completed_failed">Removal failed. The record remains; check whether the device file still exists.</string>
+    <string name="remove_record_success">Record removed. This operation did not delete the device file.</string>
+    <string name="remove_file_success">Device file and record removed.</string>
+    <string name="remove_already_gone">Record already absent. This operation did not delete its file.</string>
+    <string name="remove_not_completed">Only completed downloads can be removed.</string>
+    <string name="remove_in_progress">Removing…</string>
+    <string name="remove_completed_failed">Removal could not finish. Check whether the file exists and retry removing the record.</string>
     <string name="downloads">Downloads</string>
     <string name="idle">Waiting for a link</string>
     <string name="submitting">Adding task…</string>

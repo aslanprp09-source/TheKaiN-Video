@@ -24,6 +24,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.thekain.video.presentation.*
+import com.thekain.video.domain.RemovalOutcome
 import kotlinx.coroutines.launch
 
 /** Presentation only; the accepted M4 transfer pipeline remains outside the Activity. */
@@ -36,6 +37,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             val home by model.home.state.collectAsStateWithLifecycle()
             val tasks by model.tasks.collectAsStateWithLifecycle()
+            val removing by model.removing.collectAsStateWithLifecycle()
             val preferences by model.preferences.state.collectAsStateWithLifecycle()
             val page by model.page.collectAsStateWithLifecycle()
             val snackbar = remember { SnackbarHostState() }
@@ -68,12 +70,18 @@ class MainActivity : ComponentActivity() {
                 }
             }
             LaunchedEffect(model) {
-                model.removals.collect { success ->
-                    message(if (success) R.string.remove_completed_success else R.string.remove_completed_failed)
+                model.removals.collect { result ->
+                    message(when (result) {
+                        RemovalOutcome.RECORD_REMOVED -> R.string.remove_record_success
+                        RemovalOutcome.FILE_AND_RECORD_REMOVED -> R.string.remove_file_success
+                        RemovalOutcome.ALREADY_REMOVED -> R.string.remove_already_gone
+                        RemovalOutcome.NOT_COMPLETED -> R.string.remove_not_completed
+                        RemovalOutcome.FAILED -> R.string.remove_completed_failed
+                    })
                 }
             }
             TheKaiNTheme(preferences) {
-                MainScreen(ScreenState(home, tasks, Page.valueOf(page), preferences, notifications), UiActions(
+                MainScreen(ScreenState(home, tasks, Page.valueOf(page), preferences, notifications, removing), UiActions(
                     edit = model::edit, analyze = model.home::analyze, cancelAnalysis = model.home::cancelAnalysis,
                     select = model.home::select, download = { model.home.download() }, confirmRepeat = { model.home.download(true) }, dismissRepeat = model.home::dismissRepeat,
                     navigate = model::navigate, back = model::back, action = model::action,

@@ -153,3 +153,16 @@ class WorkflowPolicyTest(unittest.TestCase):
             if variant == 'no-preflight-input': del ci['on']['workflow_dispatch']['inputs']['bypass_preflight_comment']
             if variant == 'unbound-preflight': del steps['verify']['env']['BYPASS_PREFLIGHT_COMMENT_ID']
             with self.subTest(variant=variant): self.assertTrue(check(self.docs, self.lock))
+
+    def test_legacy_storage_tests_keep_actual_api_boundaries_and_skip_verifier_mode(self):
+        for variant in ('missing', 'verifier-mode', 'matrix', 'self-hosted', 'environment', 'secret'):
+            self.setUp()
+            jobs = self.docs['.github/workflows/rewrite-ci.yml']['jobs']
+            legacy = jobs['android-legacy-device-tests']
+            if variant == 'missing': del jobs['android-legacy-device-tests']
+            if variant == 'verifier-mode': legacy['if'] = 'true'
+            if variant == 'matrix': legacy['strategy']['matrix']['api'] = ['35']
+            if variant == 'self-hosted': legacy['runs-on'] = 'self-hosted'
+            if variant == 'environment': legacy['environment'] = 'release-signing'
+            if variant == 'secret': legacy['env']['KEY'] = '${{ secrets.ANDROID_KEYSTORE_BASE64 }}'
+            with self.subTest(variant=variant): self.assertTrue(check(self.docs, self.lock))

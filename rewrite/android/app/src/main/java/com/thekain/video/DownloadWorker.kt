@@ -27,27 +27,27 @@ class DownloadWorker(context: Context, parameters: WorkerParameters) : Coroutine
         val id = inputData.getString("job_id") ?: return Result.failure()
         try {
             graph.recoveryReady.await()
-            val initial = graph.repository.get(id)
+            val initial = graph.repository.find(id) ?: return Result.success()
             if (initial.state in setOf(TransferState.COMPLETED, TransferState.CANCELED, TransferState.FAILED, TransferState.PAUSED)) return Result.success()
             setForeground(foreground(initial))
             var lastUpdate = 0L
             var lastState: TransferState? = null
             val result = graph.engine.run(id) { task ->
                 val now = System.currentTimeMillis()
-                if (now - lastUpdate > 750 || task.state != lastState) {
+                if (task.state != TransferState.COMPLETED && (now - lastUpdate > 750 || task.state != lastState)) {
                     setForeground(foreground(task))
                     lastUpdate = now
                     lastState = task.state
                 }
             }
             if (result == EngineResult.RETRY) return Result.retry()
-            terminal(graph.repository.get(id))
+            graph.notifyTerminalIfPresent(id, ::terminal)
             return if (result == EngineResult.FAILED) Result.failure() else Result.success()
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
             withContext(NonCancellable + Dispatchers.IO) {
-                val task = graph.repository.get(id)
+                val task = graph.repository.find(id) ?: return@withContext
                 if (task.state in setOf(TransferState.QUEUED, TransferState.DOWNLOADING, TransferState.PAUSING,
                         TransferState.VERIFYING, TransferState.PUBLISHING, TransferState.RETRY_WAIT))
                     graph.repository.change(id) { it.copy(state = TransferState.FAILED, error = TransferError.BACKGROUND_RESTRICTED) }

@@ -54,7 +54,8 @@ abstract class DownloadsDb : RoomDatabase() { abstract fun downloads(): Download
 class DownloadRepository(val db: DownloadsDb) {
     val changes = db.downloads().observe()
     suspend fun all() = db.downloads().all()
-    suspend fun get(id: String): DownloadTask = db.downloads().get(id) ?: error("Unknown job")
+    suspend fun find(id: String): DownloadTask? = db.downloads().get(id)
+    suspend fun get(id: String): DownloadTask = find(id) ?: error("Unknown job")
     /** Only immutable completed records may be removed. Active workers keep their rows. */
     suspend fun removeCompleted(id: String): Boolean = db.downloads().removeCompleted(id) == 1
 
@@ -76,14 +77,14 @@ class DownloadRepository(val db: DownloadsDb) {
     }
 
     suspend fun requestCancel(id: String): Boolean = db.withTransaction {
-        val task = get(id)
+        val task = find(id) ?: return@withTransaction false
         if (task.state in setOf(TransferState.COMPLETED, TransferState.CANCELED, TransferState.FAILED, TransferState.PUBLISHING)) return@withTransaction false
         change(id) { it.copy(state = if (it.state in setOf(TransferState.QUEUED, TransferState.PAUSED, TransferState.RETRY_WAIT)) TransferState.CANCELED else TransferState.CANCEL_REQUESTED) }
         true
     }
 
     suspend fun requestPause(id: String): Boolean = db.withTransaction {
-        val task = get(id)
+        val task = find(id) ?: return@withTransaction false
         if (task.state != TransferState.DOWNLOADING || !task.resumable || task.bytes <= 0) return@withTransaction false
         change(id) { it.copy(state = TransferState.PAUSING) }
         true

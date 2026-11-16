@@ -115,6 +115,11 @@ def check(documents, lock):
     for name in REQUIRED_CHECKS - {'ci-policy'}:
         require(ci['jobs'].get(name, {}).get('if') == '${{ !inputs.verify_artifact }}',
                 'Source CI must run normally and skip only in explicit verifier mode')
+    legacy = ci['jobs'].get('android-legacy-device-tests', {})
+    require(legacy.get('if') == '${{ !inputs.verify_artifact }}'
+            and legacy.get('runs-on') == 'ubuntu-24.04'
+            and legacy.get('strategy') == {'fail-fast': 'false', 'matrix': {'api': ['26', '29']}},
+            'Android storage boundary tests must use real hosted API 26/29 and skip verifier mode')
     require(any(s.get('if') == 'inputs.verify_artifact && (inputs.build_packages || inputs.sign_android || !inputs.bypass_preflight_comment)'
                 and s.get('run') == 'exit 1' for s in ci['jobs']['ci-policy']['steps']),
             'Conflicting verifier/build modes must fail')

@@ -170,6 +170,12 @@ jobs:
       - name: Verify instrumentation results
         if: always()
         run: python3 tools/report-tests.py app/build/outputs/androidTest-results/connected
+      - name: Collect completed-removal dialog and pending-state evidence
+        if: always() && steps.prepare-emulator.conclusion == 'success'
+        run: |
+          if adb -s "$ANDROID_SERIAL" shell run-as com.thekain.video.rebuild ls files/removal-evidence >/dev/null 2>&1; then
+            adb -s "$ANDROID_SERIAL" exec-out run-as com.thekain.video.rebuild tar -C files -cf - removal-evidence | tar -xf - -C "$RUNNER_TEMP"
+          fi
       - name: Cold process restart and adb UI evidence
         run: |
           gradle --no-daemon :app:installDebug :app:installDebugAndroidTest
@@ -195,6 +201,77 @@ jobs:
             ${{ runner.temp }}/m4-device-evidence/
             ${{ runner.temp }}/m5-visual-evidence/
             ${{ runner.temp }}/m4-emulator.log
+            ${{ runner.temp }}/removal-evidence/
+  android-legacy-device-tests:
+    if: ${{ !inputs.verify_artifact }}
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [26, 29]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      ANDROID_SERIAL: emulator-5554
+      ANDROID_AVD_HOME: /tmp/thekain-removal-avd
+      REMOVAL_API: ${{ matrix.api }}
+    defaults:
+      run:
+        working-directory: rewrite/android
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          gradle-version: '8.11.1'
+      - name: Prepare official Android storage-boundary emulator
+        run: |
+          set -Eeuo pipefail
+          test -e /dev/kvm
+          sudo chmod a+rw /dev/kvm
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends libpulse0 libglu1-mesa libxkbcommon-x11-0 libxcb-cursor0 libnss3
+          export PATH="$ANDROID_HOME/platform-tools:$PATH"
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platform-tools' 'emulator' "system-images;android-$REMOVAL_API;google_apis;x86_64"
+          mkdir -p "$ANDROID_AVD_HOME"
+          echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd -n Removal -k "system-images;android-$REMOVAL_API;google_apis;x86_64" --device pixel_2
+          "$ANDROID_HOME/emulator/emulator" -avd Removal -no-snapshot -no-window -no-audio -no-boot-anim -gpu swiftshader -memory 2048 -cores 2 -port 5554 > "$RUNNER_TEMP/removal-emulator.log" 2>&1 &
+          timeout 180 adb -s "$ANDROID_SERIAL" wait-for-device
+          booted=false
+          for i in $(seq 1 120); do
+            if [ "$(adb -s "$ANDROID_SERIAL" shell getprop sys.boot_completed | tr -d '\r')" = 1 ]; then booted=true; break; fi
+            sleep 2
+          done
+          test "$booted" = true
+          adb -s "$ANDROID_SERIAL" shell input keyevent 82
+      - name: Verify actual runtime API and completed-removal storage flows
+        run: |
+          test "$(adb -s "$ANDROID_SERIAL" shell getprop ro.build.version.sdk | tr -d '\r')" = "$REMOVAL_API"
+          gradle --no-daemon :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.thekain.video.CompletedRemovalInstrumentationTest
+      - name: Report executed storage tests
+        if: always()
+        run: python3 tools/report-tests.py app/build/outputs/androidTest-results/connected
+      - name: Save runtime identity and crash evidence
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/removal-runtime"
+          adb -s "$ANDROID_SERIAL" shell getprop ro.build.version.sdk > "$RUNNER_TEMP/removal-runtime/api.txt" || true
+          adb -s "$ANDROID_SERIAL" logcat -b crash -d > "$RUNNER_TEMP/removal-runtime/crash.txt" || true
+          cp "$RUNNER_TEMP/removal-emulator.log" "$RUNNER_TEMP/removal-runtime/" || true
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: M6-completed-removal-API-${{ matrix.api }}
+          path: |
+            rewrite/android/app/build/outputs/androidTest-results/
+            rewrite/android/app/build/reports/androidTests/
+            ${{ runner.temp }}/removal-runtime/
+          if-no-files-found: error
   android-signed-internal-qa:
     if: inputs.build_packages && inputs.sign_android && needs.experimental-packages.outputs.signing-authorized == 'true' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/rebuild-2026-11-11' && !inputs.verify_artifact
     needs: [ci-policy, windows-tests, android-debug, android-device-tests, experimental-packages]
