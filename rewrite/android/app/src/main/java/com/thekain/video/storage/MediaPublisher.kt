@@ -1,5 +1,6 @@
 package com.thekain.video.storage
 
+import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
@@ -14,6 +15,7 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import java.nio.file.Files
 
 interface OutputPublisher {
@@ -110,6 +112,40 @@ class MediaPublisher(private val context: Context, private val verifier: MediaVe
     private fun pending(uri: Uri): Boolean = resolver.query(uri, arrayOf(MediaStore.MediaColumns.IS_PENDING), null, null, null)?.use {
         it.moveToFirst() && it.getInt(0) == 1
     } ?: false
+
+
+    /** Delete only the completed output created for this exact task. Never accept an arbitrary URI. */
+    suspend fun deleteCompletedOutput(task: DownloadTask) {
+        require(task.state == TransferState.COMPLETED)
+        val saved = Uri.parse(requireNotNull(task.outputUri))
+        val name = DirectLinks.publishedName(task.name, task.id)
+        if (api >= 29 && Build.VERSION.SDK_INT >= 29) {
+            val root = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+            val id = ContentUris.parseId(saved)
+            require(id >= 0 && saved == ContentUris.withAppendedId(root, id)) { "Unexpected output URI" }
+            val owned = resolver.query(saved,
+                arrayOf(MediaStore.MediaColumns.DISPLAY_NAME, MediaStore.MediaColumns.RELATIVE_PATH,
+                    MediaStore.MediaColumns.OWNER_PACKAGE_NAME),
+                null, null, null)?.use { cursor ->
+                if (!cursor.moveToFirst()) false
+                else {
+                    require(cursor.getString(0) == name && cursor.getString(1) == relative &&
+                        cursor.getString(2) == context.packageName) { "Output is not owned by this task" }
+                    true
+                }
+            } ?: throw IOException("Cannot inspect output")
+            if (owned && resolver.delete(saved, null, null) != 1) throw IOException("Output delete failed")
+        } else {
+            val directory = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+                ?: throw IOException("App downloads unavailable")
+            val target = File(directory, name)
+            val expected = FileProvider.getUriForFile(context, context.packageName + ".files", target)
+            require(saved == expected && target.canonicalFile.parentFile == directory.canonicalFile) {
+                "Output is not owned by this task"
+            }
+            if (target.exists() && !target.delete()) throw IOException("Output delete failed")
+        }
+    }
 
     override suspend fun discardPending(task: DownloadTask) {
         if (api >= 29 && Build.VERSION.SDK_INT >= 29) task.outputUri?.let { value ->
