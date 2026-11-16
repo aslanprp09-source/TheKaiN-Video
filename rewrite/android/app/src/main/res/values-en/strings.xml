@@ -9,6 +9,13 @@
     <string name="resume">Resume</string>
     <string name="retry">Retry</string>
     <string name="open">Open file</string>
+    <string name="remove_download">Remove</string>
+    <string name="remove_download_title">Remove download?</string>
+    <string name="remove_download_message">Choose what to remove: %1$s. Deleting the device file cannot be undone.</string>
+    <string name="remove_record_only">Remove from list only</string>
+    <string name="remove_file_and_record">Delete device file and record</string>
+    <string name="remove_completed_success">Download removed.</string>
+    <string name="remove_completed_failed">Removal failed. The record remains; check whether the device file still exists.</string>
     <string name="downloads">Downloads</string>
     <string name="idle">Waiting for a link</string>
     <string name="submitting">Adding task…</string>
