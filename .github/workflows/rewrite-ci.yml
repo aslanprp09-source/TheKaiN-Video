@@ -175,10 +175,13 @@ jobs:
           gradle --no-daemon :app:installDebug :app:installDebugAndroidTest
           adb -s "$ANDROID_SERIAL" shell pm grant com.thekain.video.rebuild android.permission.POST_NOTIFICATIONS
           bash tools/emulator-ui-ready.sh "$RUNNER_TEMP/m4-device-evidence/ui-readiness"
-          gradle --no-daemon :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.notClass=com.thekain.video.ProcessRestartTest,com.thekain.video.NotificationDeniedTest,com.thekain.video.M5VisualTest
+          gradle --no-daemon :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.listener=com.thekain.video.UiFailureListener -Pandroid.testInstrumentationRunnerArguments.notClass=com.thekain.video.ProcessRestartTest,com.thekain.video.NotificationDeniedTest,com.thekain.video.M5VisualTest
       - name: Verify instrumentation results
         if: always()
-        run: python3 tools/report-tests.py app/build/outputs/androidTest-results/connected
+        run: python3 tools/report-tests.py app/build/outputs/androidTest-results/connected 41
+      - name: Collect UI state at failure before process restart
+        if: always() && steps.prepare-emulator.conclusion == 'success'
+        run: bash tools/collect-ui-failure-evidence.sh "$RUNNER_TEMP/m4-device-evidence"
       - name: Collect completed-removal dialog and pending-state evidence
         if: always() && steps.prepare-emulator.conclusion == 'success'
         run: |

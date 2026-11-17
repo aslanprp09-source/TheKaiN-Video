@@ -26,12 +26,15 @@ import com.thekain.video.domain.TransferState
 import com.thekain.video.presentation.*
 import org.junit.Assert.*
 import org.junit.Rule
+import org.junit.rules.RuleChain
 import org.junit.Test
 import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class M5ComposeTest {
-    @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
+    val compose = createAndroidComposeRule<ComponentActivity>()
+    @get:Rule val rules: RuleChain = RuleChain.outerRule(compose)
+        .around(UiWindowFailureRule { compose.activity })
     private lateinit var state: MutableState<ScreenState>
     private var parent = Page.HOME
     private var pasted = 0
@@ -56,6 +59,8 @@ class M5ComposeTest {
             }
             }
         }
+        compose.waitForIdle()
+        UiWindowEvidence.await(compose.activity, "compose-start")
     }
 
     @Test fun explicitPasteClearAndAccessibleActions() {
@@ -80,10 +85,12 @@ class M5ComposeTest {
         compose.onNodeWithTag("nav_downloads").performClick()
         compose.onNodeWithTag("task_search").assertIsDisplayed()
         compose.onNodeWithTag("settings_button").performClick()
+        UiWindowEvidence.await(compose.activity, "espresso-back-settings")
         Espresso.pressBack()
         compose.onNodeWithTag("task_search").assertIsDisplayed()
         compose.onNodeWithTag("nav_library").performClick()
         compose.onNodeWithTag("library_list").assertIsDisplayed()
+        UiWindowEvidence.await(compose.activity, "espresso-back-library")
         Espresso.pressBack()
         compose.onNodeWithTag("source_input").assertIsDisplayed()
     }
@@ -174,6 +181,7 @@ class M5ComposeTest {
         }
         compose.onNodeWithTag("download_button").assertIsDisplayed()
         val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+        UiWindowEvidence.await(compose.activity, "keyboard-cta-bounds")
         val cta = device.wait(Until.findObject(By.res("download_button")), 5000)!!.visibleBounds
         compose.runOnIdle {
             val view = compose.activity.window.decorView
