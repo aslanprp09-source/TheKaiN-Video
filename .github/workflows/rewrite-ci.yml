@@ -82,6 +82,9 @@ jobs:
           sudo apt-get install --yes --no-install-recommends ffmpeg libegl1 libopengl0 libxkbcommon0 fonts-dejavu-core
       - name: Install desktop dependencies
         run: python -m pip install -r rewrite/windows/requirements.txt
+      - name: Pin pure-Python extractor for isolated owned-fixture experiment
+        run: |
+          python -m pip install --force-reinstall --require-hashes --only-binary=:all: --no-deps -r rewrite/experiments/android_ytdlp/requirements.lock
       - name: Run engine and headless Qt tests
         env:
           QT_QPA_PLATFORM: offscreen
