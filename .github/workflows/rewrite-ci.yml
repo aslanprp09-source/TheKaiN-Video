@@ -17,7 +17,12 @@ on:
       verify_artifact:
         type: boolean
         default: false
-        description: Only verify original signed run 69 artifact after independent review (no build/signing)
+        description: Only verify a pinned signed artifact after independent review (no build/signing)
+      verification_target:
+        type: choice
+        default: original69
+        options: [original69, qa89]
+        description: Fixed artifact profile; historical original69 remains the default
       bypass_preflight_comment:
         type: string
         default: ''
@@ -31,6 +36,9 @@ jobs:
     steps:
       - name: Reject conflicting or unaudited verifier mode
         if: inputs.verify_artifact && (inputs.build_packages || inputs.sign_android || !inputs.bypass_preflight_comment)
+        run: exit 1
+      - name: Reject unknown verification target
+        if: inputs.verify_artifact && inputs.verification_target != 'original69' && inputs.verification_target != 'qa89'
         run: exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -337,7 +345,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
   android-independent-verifier:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/rebuild-2026-11-11' && inputs.verify_artifact && !inputs.build_packages && !inputs.sign_android
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/rebuild-2026-11-11' && inputs.verify_artifact && !inputs.build_packages && !inputs.sign_android && inputs.verification_target != 'qa89'
     needs: ci-policy
     permissions:
       contents: read
@@ -370,3 +378,14 @@ jobs:
           path: ${{ runner.temp }}/thekain-independent-verification/
           if-no-files-found: error
           retention-days: 7
+
+  android-qa89-independent-verifier:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/rebuild-2026-11-11' && inputs.verify_artifact && !inputs.build_packages && !inputs.sign_android && inputs.verification_target == 'qa89'
+    needs: ci-policy
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    uses: ./.github/workflows/rewrite-verify-qa89.yml
+    with:
+      bypass_preflight_comment: ${{ inputs.bypass_preflight_comment }}

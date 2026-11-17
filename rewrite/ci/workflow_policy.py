@@ -8,9 +8,12 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 CI_WORKFLOW = '.github/workflows/rewrite-ci.yml'
 PACKAGE_WORKFLOW = '.github/workflows/rewrite-packaging.yml'
+QA89_WORKFLOW = '.github/workflows/rewrite-verify-qa89.yml'
 SIGN_CONDITION = "inputs.build_packages && inputs.sign_android && needs.experimental-packages.outputs.signing-authorized == 'true' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/rebuild-2026-11-11' && !inputs.verify_artifact"
 BUILD_CONDITION = "github.event_name == 'workflow_dispatch' && inputs.build_packages && !inputs.verify_artifact"
-VERIFY_CONDITION = "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/rebuild-2026-11-11' && inputs.verify_artifact && !inputs.build_packages && !inputs.sign_android"
+VERIFY_BASE = "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/rebuild-2026-11-11' && inputs.verify_artifact && !inputs.build_packages && !inputs.sign_android"
+VERIFY_CONDITION = VERIFY_BASE + " && inputs.verification_target != 'qa89'"
+QA89_CONDITION = VERIFY_BASE + " && inputs.verification_target == 'qa89'"
 REQUIRED_CHECKS = {'ci-policy', 'windows-tests', 'android-debug', 'android-device-tests'}
 PUBLIC_OUTPUTS = {
     'signing-authorized': '${{ jobs.signing-policy.outputs.authorized }}',
@@ -69,7 +72,7 @@ def check(documents, lock):
             require(events.get('pull_request') == {'branches': ['rebuild-2026-11-11']},
                     'Required PR checks must run for PRs targeting rebuild branch')
         for event in ('workflow_dispatch', 'workflow_call'):
-            if event in events:
+            if event in events and filename != QA89_WORKFLOW:
                 setting = events[event].get('inputs', {}).get('sign_android', {})
                 require(setting.get('type') == 'boolean' and setting.get('default') == 'false', 'Signing must default off')
         require('secrets' not in events.get('workflow_call', {}), 'Reusable builds must not accept signing secrets')
@@ -85,15 +88,18 @@ def check(documents, lock):
             require('continue-on-error' not in job, 'Failed jobs must fail the workflow')
             permissions = job.get('permissions', {})
             allowed_permissions = ('contents', 'actions', 'pull-requests') if (
-                filename == CI_WORKFLOW and job_id == 'android-independent-verifier') else ('contents', 'actions')
+                filename == CI_WORKFLOW and job_id in ('android-independent-verifier', 'android-qa89-independent-verifier')
+                or filename == QA89_WORKFLOW and job_id == 'verify') else ('contents', 'actions')
             require(isinstance(permissions, dict) and all(k in allowed_permissions and v == 'read'
                 for k, v in permissions.items()), 'Write, OIDC or broad token permissions forbidden')
             require('secrets' not in job, 'Broad secret forwarding forbidden')
             if 'environment' in job:
                 require(filename == CI_WORKFLOW and job_id == 'android-signed-internal-qa', 'Unreviewed protected environment consumer')
             if 'uses' in job:
-                require(filename.endswith('rewrite-ci.yml') and job_id == 'experimental-packages' and
-                    job['uses'] == './.github/workflows/rewrite-packaging.yml', 'Unreviewed reusable workflow')
+                require(filename == CI_WORKFLOW and (
+                    job_id == 'experimental-packages' and job['uses'] == './' + PACKAGE_WORKFLOW or
+                    job_id == 'android-qa89-independent-verifier' and job['uses'] == './' + QA89_WORKFLOW),
+                    'Unreviewed reusable workflow')
             for step in job.get('steps', []):
                 require('continue-on-error' not in step, 'Failed steps must not be accepted')
                 if 'uses' in step:
@@ -106,6 +112,20 @@ def check(documents, lock):
                         require(step.get('with', {}).get('persist-credentials') == 'false', 'Persisted checkout credentials forbidden')
     require(seen == set(lock['actions']), 'Action inventory and workflow usage differ')
     ci = documents[CI_WORKFLOW]
+    target = ci['on'].get('workflow_dispatch', {}).get('inputs', {}).get('verification_target', {})
+    require(target.get('type') == 'choice' and target.get('default') == 'original69' and
+            target.get('options') == ['original69', 'qa89'], 'Only fixed verifier profiles are permitted')
+    require(any(s.get('if') == "inputs.verify_artifact && inputs.verification_target != 'original69' && inputs.verification_target != 'qa89'"
+                and s.get('run') == 'exit 1' for s in ci['jobs']['ci-policy']['steps']),
+            'Unknown verifier target must fail closed')
+    require(ci['jobs'].get('android-qa89-independent-verifier') == {
+        'if': QA89_CONDITION, 'needs': 'ci-policy',
+        'permissions': {'contents': 'read', 'actions': 'read', 'pull-requests': 'read'},
+        'uses': './' + QA89_WORKFLOW,
+        'with': {'bypass_preflight_comment': '${{ inputs.bypass_preflight_comment }}'}},
+        'QA89 caller must be manual, reviewed-policy gated and forward only the public preflight ID')
+    qa89_errors = check_qa89(documents.get(QA89_WORKFLOW, {}), lock)
+    errors.extend(qa89_errors)
     verifier_input = ci['on'].get('workflow_dispatch', {}).get('inputs', {}).get('verify_artifact', {})
     require(verifier_input.get('type') == 'boolean' and verifier_input.get('default') == 'false',
             'Independent verifier must default off')
@@ -207,6 +227,54 @@ def check(documents, lock):
     require(sign_env.get('ANDROID_SIGNING_CERT_SHA256') == '${{ vars.ANDROID_SIGNING_CERT_SHA256 }}', 'Expected public certificate required')
     upload = by_id.get('upload-signed', {})
     require('if' not in upload and upload.get('with', {}).get('path') == '${{ runner.temp }}/thekain-signed-output/', 'Failed or broader signing output must not be uploaded')
+    return errors
+
+
+def check_qa89(data, lock):
+    errors = []
+    def require(value, message):
+        if not value: errors.append('QA89: ' + message)
+    require(set(data) == {'name', 'on', 'permissions', 'jobs'}, 'workflow-wide context forbidden')
+    require(data.get('on') == {event: {'inputs': {'bypass_preflight_comment': {
+        'required': 'true', 'type': 'string'}}} for event in ('workflow_call', 'workflow_dispatch')},
+        'only manual/call public preflight input allowed')
+    require(set(data.get('jobs', {})) == {'verify'}, 'only read-only verification job allowed')
+    job = data.get('jobs', {}).get('verify', {})
+    require(set(job) == {'if', 'permissions', 'runs-on', 'timeout-minutes', 'steps'} and
+            job.get('if') == "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/rebuild-2026-11-11'" and
+            job.get('permissions') == {'contents': 'read', 'actions': 'read', 'pull-requests': 'read'} and
+            job.get('runs-on') == 'ubuntu-24.04' and job.get('timeout-minutes') == '10',
+            'fresh hosted runner, fixed branch, no Environment/build/cache/write permissions')
+    steps = job.get('steps', [])
+    require([s.get('id') for s in steps] == ['checkout', 'setup-python', 'setup-java', 'policy', 'verify', 'upload-report'],
+            'step boundary changed')
+    expected_actions = {'checkout': 'actions/checkout', 'setup-python': 'actions/setup-python',
+                        'setup-java': 'actions/setup-java', 'upload-report': 'actions/upload-artifact'}
+    expected_with = {
+        'checkout': {'persist-credentials': 'false', 'ref': '${{ github.sha }}'},
+        'setup-python': {'python-version': '3.11.18'},
+        'setup-java': {'distribution': 'temurin', 'java-version': '17'},
+        'upload-report': {'name': 'M6-Android-QA89-independent-verification',
+            'path': '${{ runner.temp }}/thekain-qa89-verification/', 'if-no-files-found': 'error', 'retention-days': '7'}}
+    for step in steps:
+        ident = step.get('id')
+        if ident in expected_actions:
+            action = expected_actions[ident]
+            require(step.get('uses') == action + '@' + lock['actions'][action]['commit'] and
+                    step.get('with') == expected_with[ident] and
+                    set(step) <= {'id', 'name', 'uses', 'with', 'if'} and
+                    (step.get('if') == 'always()' if ident == 'upload-report' else 'if' not in step),
+                    'action/cache/upload boundary changed')
+        elif ident == 'policy':
+            require(set(step) <= {'id', 'name', 'run'} and step.get('run') ==
+                'python -m pip install --require-hashes --only-binary=:all: --no-deps -r rewrite/ci/requirements.lock\npython rewrite/ci/workflow_policy.py\n',
+                'policy cannot execute builds/signing fixtures or receive credentials')
+        elif ident == 'verify':
+            require(set(step) <= {'id', 'name', 'run', 'env'} and step.get('run') ==
+                'python3 rewrite/ci/android_qa89_verifier.py --output "$RUNNER_TEMP/thekain-qa89-verification"' and
+                step.get('env') == {'GH_TOKEN': '${{ github.token }}',
+                    'BYPASS_PREFLIGHT_COMMENT_ID': '${{ inputs.bypass_preflight_comment }}'},
+                'only fixed verifier gets the temporary read-only API token')
     return errors
 
 

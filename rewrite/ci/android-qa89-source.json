@@ -1,0 +1,26 @@
+{
+  "repository": "aslanprp09-source/TheKaiN-Video",
+  "repository_id": 1445635588,
+  "run_id": 44031800034,
+  "run_number": 89,
+  "branch": "rebuild-2026-11-11",
+  "source_commit": "2b969ed9928758c11a19382026fa35d21f52c5eb",
+  "artifact_id": 14306540310,
+  "artifact_name": "M6-Android-signed-INTERNAL-QA",
+  "zip_bytes": 13641154,
+  "zip_sha256": "f0c73413ffdffeea516c9475e905ca2dbce47cb52e7a8fbd4808083791ae13f7",
+  "certificate_sha256": "2e8fbb21adb81873d257ff685e904b710f7e63df4c9ea207c6bf2c0b27cb973e",
+  "files": {
+    "TheKaiN-0.1.0-m6-signed-internal-qa.apk": {
+      "bytes": 7328853,
+      "sha256": "3aa6f5078a7d019eb4e217447866c9f7e1d47f7f37941bee8e6a7f5ce784439e"
+    },
+    "TheKaiN-0.1.0-m6-signed-internal-qa.aab": {
+      "bytes": 6943860,
+      "sha256": "f5c696ca07e152859fbca4668b7c76a97232c19bbb864f6d9f3ac4197748f01d"
+    }
+  },
+  "version_code": 3,
+  "file_pin_origin": "APK/AAB values supplied by external audit; fail closed unless original pinned ZIP and actual files match. No PASS is asserted before official execution.",
+  "audit_document_sha256": "5cda98d10cbab29dd0eaadd84bf18288e04d0f1ea150b36b78014207622bba39"
+}

@@ -1,9 +1,10 @@
 {
   "schema": 1,
-  "reviewed_date": "2026-11-12",
+  "reviewed_date": "2026-11-17",
   "workflows": [
     ".github/workflows/rewrite-ci.yml",
-    ".github/workflows/rewrite-packaging.yml"
+    ".github/workflows/rewrite-packaging.yml",
+    ".github/workflows/rewrite-verify-qa89.yml"
   ],
   "actions": {
     "actions/checkout": {
