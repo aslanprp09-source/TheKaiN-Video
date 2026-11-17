@@ -7,8 +7,8 @@
     {
       "id": "ci-signing-protection",
       "status": "PASS",
-      "reason": "Protected internal QA run 43574136079 passed on reviewed rebuild commit c1b8752d8eb4dfa065704edfa8b9c891168764cf after separate release-signing approval by KaiN1One; future runs still require their own policy checks and environment approval",
-      "evidence": "rewrite/release/evidence/android-signing-run-69.json"
+      "reason": "Protected run89 on reviewed rebuild commit 2b969ed9928758c11a19382026fa35d21f52c5eb passed after separate KaiN1One release-signing approval; future runs require fresh policy checks and Environment approval",
+      "evidence": "rewrite/release/evidence/android-qa-run-89.json"
     },
     {
       "id": "windows11-clean",
@@ -25,20 +25,36 @@
     {
       "id": "android-signing",
       "status": "PASS",
-      "reason": "Owner-confirmed permanent PKCS12 key and restored backups, Environment secrets and expected public certificate were used successfully by the protected APK/AAB signer in run 43574136079; signatures were verified inside Actions for signed internal QA",
-      "evidence": "rewrite/release/evidence/android-signing-run-69.json"
+      "reason": "Run89 versionCode3 used the expected permanent certificate and passed official APK/AAB checks inside the protected signer; separate downloaded-artifact review is a different gate",
+      "evidence": "rewrite/release/evidence/android-qa-run-89.json"
+    },
+    {
+      "id": "android-original-69-artifact-review",
+      "status": "PASS",
+      "scope": {
+        "source_run_id": 43574136079,
+        "artifact_id": 14105834067,
+        "version_code": 2
+      },
+      "reason": "Separately reviewed hosted verifier run80 passed review, provenance, original ZIP/files, official tools and APK/AAB certificate checks for original run69 only; not transferable to current run89",
+      "evidence": "rewrite/release/evidence/android-verification-run-80.json"
     },
     {
       "id": "android-signed-artifact-review",
       "status": "BLOCKED",
-      "reason": "Independent download, ZIP digest recomputation, manifest/source checks and APK/AAB signature/certificate re-verification of artifact 14105834067 remain pending; Cloud artifact download was blocked by network policy",
-      "evidence": "rewrite/release/evidence/android-signing-run-69.json"
+      "reason": "Current run89/versionCode3 signing-CI checks passed, but separate independent official verification of its downloaded APK remains NOT_RUN; run80 PASS applies only to original run69/versionCode2",
+      "evidence": "rewrite/release/evidence/android-qa-run-89.json",
+      "scope": {
+        "source_run_id": 44031800034,
+        "artifact_id": 14306540310,
+        "version_code": 3
+      }
     },
     {
       "id": "android-physical-10plus",
       "status": "BLOCKED",
-      "reason": "No recorded physical-device matrix",
-      "evidence": null
+      "reason": "Owner reports success on Samsung Galaxy S24 Ultra Android17/One UI9 in the context of QA89; detailed case protocol, installed APK hash and full physical-device matrix remain incomplete",
+      "evidence": "rewrite/release/evidence/android-qa-run-89.json"
     },
     {
       "id": "android-16k-runtime",
@@ -55,7 +71,7 @@
     {
       "id": "staging-retention",
       "status": "BLOCKED",
-      "reason": "Automatic Android staging cleanup and retention policy remain unimplemented",
+      "reason": "PR23 completed-task removal includes targeted staging cleanup; general automatic retention and cleanup after failed/abandoned transfers remain unimplemented",
       "evidence": null
     },
     {

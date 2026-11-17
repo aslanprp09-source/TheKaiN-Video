@@ -1,6 +1,6 @@
 # M6 — reproducible experimental packages and release gates
 
-Issue [#6](https://github.com/aslanprp09-source/TheKaiN-Video/issues/6), base `rebuild-2026-11-11` after M5 merge `7f09a29`. No publishing, tag creation or changes to archival branches/releases. **Production release remains BLOCKED.** The machine-readable [gate record](../release/qa-gates.json) deliberately separates missing evidence from automated success.
+Issue [#6](https://github.com/aslanprp09-source/TheKaiN-Video/issues/6), base `rebuild-2026-11-11`. Updated 17 November 2026 against signed QA source `2b969ed9928758c11a19382026fa35d21f52c5eb` (run #89). No publishing, tag creation or changes to archival branches/releases. **Production release remains BLOCKED.** The machine-readable [gate record](../release/qa-gates.json) separates evidence by source run/artifact/version; an old artifact PASS cannot certify a newer APK. See [audit reconciliation](QA_AUDIT_RECONCILIATION_2026-11-17.md).
 
 ## Outputs and identity
 
@@ -10,7 +10,7 @@ Python and dynamically loaded Qt are included. A dedicated console `TheKaiNExtra
 
 FFmpeg/FFprobe are **external PATH prerequisites**, excluded from the installer. The application already disables download when these verification tools are missing. For the reproducible QA baseline, `prepare-tools.ps1` obtains Gyan's upstream-linked FFmpeg 9.0.2 essentials build and Inno Setup 7.1.1 only after matching pinned SHA-256 values in [tools.json](../release/windows/tools.json). FFmpeg is a GPL-enabled CI tool, not a redistributed component here. Installing the app alone does not satisfy this prerequisite; no player/site/runtime functionality is inferred from that install.
 
-Android: `com.thekain.video.rebuild`, versionCode **2**, versionName **0.1.0-m6**, minSdk 26, target/compile SDK 35. Default release APK/AAB are unsigned, non-debuggable internal review artifacts. An unsigned APK is not installable. Existing debug APK remains a separate testing output. An optional protected job creates **signed internal QA** output, never a public/production release. Debug and release share the rebuild applicationId: signatures may prevent replacement; do not uninstall a user's build/data to bypass that check.
+Android: `com.thekain.video.rebuild`, versionCode **3**, versionName **0.1.0-m6**, minSdk 26, target/compile SDK 35. Run #69 was versionCode **2**; run #89 is the signed versionCode **3** update candidate. The existing filenames keep versionName M6, so identify a build by run/source/versionCode/hash rather than filename alone. Default release APK/AAB are unsigned, non-debuggable internal review artifacts. An unsigned APK is not installable. Existing debug APK remains a separate testing output. An optional protected job creates **signed internal QA** output, never a public/production release. Debug and release share the rebuild applicationId: signatures may prevent replacement; do not uninstall a user's build/data to bypass that check. Follow the [Samsung update/deletion checklist](ANDROID_INTERNAL_QA_UPDATE_V3.md).
 
 Every artifact directory contains `manifest.json` and `SHA256SUMS`, recording the full source commit, channel, sizes and SHA-256 of actual files. Reports do not hash themselves. Verify from the artifact directory with `sha256sum -c SHA256SUMS`, or `Get-FileHash` on Windows. `inspection.json` independently checks APK identity, absence/presence of signatures, certificate digest, ZIP alignment and each native ELF's load alignment. AAB signatures are verified too. All these reports retain `production_ready: false`.
 
@@ -60,17 +60,19 @@ python3 ../release/manifest.py ../release/out/android-unsigned \
 
 `app/gradle.lockfile` pins resolved configurations, including test/build tools; normal builds do not write locks. To review an intentional dependency update: change direct pins, run `gradle --no-daemon :app:dependencies --write-locks`, inspect the diff, rebuild/test both variants, regenerate the inventory. Dependency locking pins versions, not downloaded bytes: actual runtime artifact hashes are in the generated inventory. New unreviewed license families fail `releaseNotices`.
 
-Manual CI without modifying main: **Clean rebuild → Run workflow → task branch → `build_packages=true`, `sign_android=false`**. The existing workflow calls the packaging workflow from the same commit; ordinary pushes do not package/sign. CLI:
+Manual CI without modifying main: **Clean rebuild → Run workflow → reviewed rebuild branch → `build_packages=true`, `sign_android=false`**. The existing workflow calls the packaging workflow from the same commit; ordinary pushes do not package/sign. CLI:
 
 ```sh
-gh workflow run rewrite-ci.yml --ref codex/issue-6-packaging -f build_packages=true -f sign_android=false
+gh workflow run rewrite-ci.yml --ref rebuild-2026-11-11 -f build_packages=true -f sign_android=false
 ```
 
 The original debug/JVM/emulator jobs still run. Packaging adds native Windows and Android release checks. The optional signing job being skipped is expected, not evidence of a signature.
 
 ## Android signing — protected internal QA PASS; public release BLOCKED
 
-Key setup and restored encrypted backups are owner-confirmed. After review/merge of PR #20, [protected run #69](https://github.com/aslanprp09-source/TheKaiN-Video/actions/runs/43574136079) passed on source `c1b8752d8eb4dfa065704edfa8b9c891168764cf`, with separate `release-signing` approval by KaiN1One. All nine jobs succeeded, including the real APK/AAB signer and its signature/certificate checks. The [evidence record](../release/evidence/android-signing-run-69.json) separates Actions verification from pending independent verification. `ci-signing-protection` and `android-signing` are PASS; `production_ready` and `automatic_publication` remain false.
+Key setup and restored encrypted backups are owner-confirmed. [Protected run #69](https://github.com/aslanprp09-source/TheKaiN-Video/actions/runs/43574136079) signed versionCode 2 on source `c1b8752d8eb4dfa065704edfa8b9c891168764cf`. Its [original evidence record](../release/evidence/android-signing-run-69.json) is a historical snapshot before independent verification; the later [run #80 verification record](../release/evidence/android-verification-run-80.json) supersedes that snapshot's pending verification status for this original artifact only.
+
+After reviewed PRs #23/#26/#27, [run #89](https://github.com/aslanprp09-source/TheKaiN-Video/actions/runs/44031800034) signed versionCode 3 on source `2b969ed9928758c11a19382026fa35d21f52c5eb` after a separate KaiN1One Environment approval. All required source checks, actual API26/29, packaging, rehearsal and the protected signer passed. Official SDK/JDK checks in that signer enforced the expected package/version and matching permanent certificate before upload. [Run #89 evidence](../release/evidence/android-qa-run-89.json) distinguishes signing-CI checks, external audit claims and owner feedback from separate independent official verification. `ci-signing-protection` and `android-signing` are PASS; `production_ready` and `automatic_publication` remain false.
 
 The [CI hardening requirements and owner runbook](CI_SIGNING_SECURITY.md) now govern this path. Actions use reviewed commit SHAs. Before a protected job can be scheduled, a read-only audit requires the current manual rebuild ref/commit, actual independent reviewers, no administrator/self-review bypass and an exact deployment branch allowlist. Missing/unreadable protection stays BLOCKED. No environment or user signing key is created by this task.
 
@@ -80,17 +82,17 @@ After owner configuration, explicitly choose `sign_android=true` on rebuild. The
 
 Windows Authenticode remains BLOCKED; unsigned installer/EXEs are labeled accordingly. No user-controlled Windows certificate/service has been supplied. SmartScreen reputation and clean-machine trust prompts need real Windows QA.
 
-## Next priorities after the first protected signing
+## Artifact review and remaining priorities
 
-The scoped [independent official-tools verifier](INDEPENDENT_ANDROID_VERIFICATION.md)
-provides a separate post-review execution path for the original run #69 ZIP.
-Implementation/fixture tests alone leave its real result NOT_RUN and the artifact
-review gate BLOCKED; record the actual hosted run/report before updating results.
+The scoped [independent official-tools verifier](INDEPENDENT_ANDROID_VERIFICATION.md) actually ran in [#80 / 43869853934](https://github.com/aslanprp09-source/TheKaiN-Video/actions/runs/43869853934): all seven real stages PASS for the **original run #69 ZIP/versionCode 2**. [Report artifact 14228005379](https://github.com/aslanprp09-source/TheKaiN-Video/actions/runs/43869853934/artifacts/14228005379) and [Issue #6 result](https://github.com/aslanprp09-source/TheKaiN-Video/issues/6#issuecomment-6916927501) record the actual download, digests, manifest and official APK/AAB verification. This is more than fixture success, but does not verify run #89. Historical verifier code/source pins remain unchanged.
 
-1. **Independent artifact review — BLOCKED.** Obtain `M6-Android-signed-INTERNAL-QA` from run #69 (artifact ID `14105834067`) through a trusted download path. Preserve a review copy before its recorded retention expiry. For the original downloaded ZIP, recompute SHA-256 and compare with `artifact.zip_sha256` in the evidence record; this is a ZIP digest, not a certificate fingerprint. Extract into a fresh directory, verify `SHA256SUMS`, check `manifest.json` source commit/channel and inspect the APK/AAB with the reviewed source's `inspect-android.py --signed`, SDK tools 35 and JDK 17. Supply the recorded public certificate SHA-256, use a fresh output directory and retain the resulting report. Verify package/version, both actual certificate digests and strict AAB integrity. No private key is needed. The prior Cloud download was blocked by network policy, so independent download/hash/signature checks have not been claimed.
-2. **Physical-device acceptance — BLOCKED.** After artifact review, test the signed APK on real devices in the matrix below, including Android 8–9 while minSdk remains 26. Record exact artifact/source/hash, device/OEM/OS/ABI and results. Cover clean installation, playback, notifications, background/force-stop/reboot recovery, permissions/storage, accessibility and upgrade/data preservation. A same-version reinstall is not upgrade evidence; a valid upgrade case needs a higher versionCode and the same signing identity. Emulator success does not close physical or 16 KiB runtime gates.
+1. **Original artifact component — PASS, scoped to #69.** The new `android-original-69-artifact-review` entry records run #80's actual seven-stage result with source run/artifact/version. It is not a general production gate and does not change the old evidence snapshot or verifier pins.
+2. **Current artifact review — BLOCKED, scoped to #89.** Run #89 artifact **14306540310** is 13,641,154 bytes; GitHub ZIP SHA-256 is `f0c73413ffdffeea516c9475e905ca2dbce47cb52e7a8fbd4808083791ae13f7`. Signing-CI official checks passed. A supplied external audit reports further ZIP/manifest/custom APK crypto/strict AAB checks; those statements are attributed in the evidence record, not rerun or adopted as an independent official-apksigner PASS. Separate verification of this **versionCode 3** APK by official `apksigner verify --verbose --print-certs` remains NOT_RUN. Use a trusted download, original ZIP hash, safe extraction, SHA256SUMS/manifest/source checks and official SDK35/JDK17 on a suitable verification host; retain tool logs and the exact run/artifact/hash. No private key or SDK installation on the owner's Windows machine is needed. If a new independent CI entry point is required, review it separately; do not repoint the historical verifier or substitute a new build.
+3. **Physical-device acceptance — BLOCKED with positive owner feedback.** In response to the run #89 update/deletion checklist, the owner reported **«Все работает.»** on Samsung Galaxy S24 Ultra / Android 17 / One UI 9.0; this is recorded in PR #27 and the run #89 evidence file. A detailed case protocol and installed APK hash were not separately supplied. Preserve that result without inventing per-case PASS or treating it as the whole matrix. Continue physical checks below, including Android 8–9: installation, playback, notifications, background/force-stop/reboot, permissions/storage, accessibility and upgrade/data preservation. A valid upgrade case needs a higher versionCode and the same signing identity. Emulator success does not close physical or 16 KiB runtime gates.
 
 The post-merge push run #68 initially had four UI failures in 29 tests (window focus, IME timeout and missing source input). Its failed job passed on a fresh runner in attempt 2 without code/assertion changes; run #69 also passed all 29 primary device tests. This observed instability remains a QA concern, not proof of an exclusively infrastructure cause. These historical CI results do not grant production release approval.
+
+Later run #86 failed four of 41 primary UI tests before signing. Reviewed PR #27 added emulator readiness and diagnostics; post-merge #88 and signed #89 passed, including 41/41 primary API35 tests, cold restart and visual phases. New logs show Awake before/after preparation, so they do not prove historical sleep as the precise cause. Keep failure history and [readiness notes](ANDROID_CI_UI_READINESS.md); do not classify old #86 as a current failure on #89. Issue #15 (async Qt failure-fixture cleanup) remains OPEN and distinct from this Android fix.
 
 ## QA record to complete before release
 
@@ -107,10 +109,10 @@ For each run record exact commit, manifest/hash, OS/device/OEM/ABI, fixture/perm
 | Privacy | No cookies/accounts/telemetry; redacted typed diagnostics | Inspect actual logs, notifications, backups/queue files and network capture with signed URL |
 | Accessibility | Windows Qt keyboard/200% tests, Android 48 dp/IME/130%/360–600 dp tests | Windows 100/150/200% real keyboard/screen reader; TalkBack, 200% font, gestures, hardware keyboard |
 | Installer and uninstall | Disposable hosted Windows installation, frozen pipeline/GUI and uninstall | Snapshot of clean Windows 11 x64 without Python, media tools explicitly supplied; Start menu, reopen, rollback, paths with Cyrillic, data preserved |
-| Android signatures / 16 KiB | Protected owner-key APK/AAB signature checks passed in run #69; ELF/ZIP prerequisites checked in Actions | Independent downloaded-artifact verification, upgrade continuity, real 16 KiB runtime/device |
+| Android signatures / 16 KiB | Protected checks #69/#89; independent official #80 PASS only for #69; ELF/ZIP prerequisites | Independent official downloaded #89 APK verification, detailed upgrade continuity, real 16 KiB runtime/device |
 | Storage retention / background | Recovery staging deliberately retained; one Android pipeline | Cleanup implementation/retention agreement; OEM idle/battery/foreground notification checks |
 
-Physical matrix — **all currently BLOCKED**, not attempted in this cloud:
+Physical matrix — **release coverage remains BLOCKED**; one positive owner report from Samsung is recorded separately. No physical device was operated by this Cloud task:
 
 | Targets | Required coverage |
 |---|---|
