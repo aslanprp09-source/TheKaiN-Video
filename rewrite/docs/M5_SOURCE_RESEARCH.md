@@ -2,6 +2,8 @@
 
 Checked 12 November 2026. This is a technical/distribution assessment, not legal advice or a claim that a commercial site's downloads are authorized. No upstream binary was executed or bundled during this investigation.
 
+Follow-up after PR #23: [17 November Android source options](ANDROID_SOURCE_OPTIONS_2026-11-17.md) records fresh stable/source pins, the owner's device observations, modern runtime-package provenance, and the proposed isolated validation gates. No new adapter is enabled.
+
 ## Evidence and candidates
 
 | Candidate | Observed upstream evidence | Tradeoff |
