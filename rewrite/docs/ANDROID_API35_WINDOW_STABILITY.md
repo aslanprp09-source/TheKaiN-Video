@@ -15,3 +15,44 @@ Refs #6. После документационного PR28 run44043741467 сн�
 Локальный Cloud без emulator/KVM проверяет компиляцию instrumentation, shell syntax и CI/report negative tests; не сообщает device PASS. Конкретные CI IDs/counts и результаты фиксируются в PR после выполнения. Пока три независимых прогона не завершены, статус стабильности — **NOT_VERIFIED**.
 
 После exact-head независимого KaiN1One review и обязательного CI — обычный merge в rebuild, без bypass/force-push/main/publication. Этот PR не запускает подпись, не меняет release-signing и не закрывает физическую/OEM/16KiB/production QA.
+
+## Дополнение: отказ в отдельной notification-denied фазе CI105
+
+Run `44073494913`, job `134005395987`: primary suite **41/41 PASS**, затем
+`NotificationDeniedTest.verifiedTransferWithoutNotificationPermission` отказал
+перед `m4-downloads-navigation`: Activity PAUSED, hasWindowFocus=false,
+activeWindowPackage=`com.thekain.video.rebuild.test`, keyguard=false. Это новый
+реальный отказ полного API35 job; успешный primary suite не делает весь job PASS.
+Прототип PR31 остаётся draft, отказ не скрывается retry.
+
+В исходниках AndroidX test core 1.6.1 (`ActivityScenario.recreate` и
+`InstrumentationActivityInvoker`) подтверждено: recreate запоминает lifecycle
+state на входе и затем восстанавливает его; возврат в STARTED запускает собственную
+EmptyFloatingActivity test-пакета. До recreate наш тест ждал только запись COMPLETED
+в БД, что не является доказательством RESUMED/окна. Наблюдение согласуется с
+сохранённым PAUSED на входе; точный компонент верхнего окна в исходном CI105
+не установлен, поэтому это не выдаётся за доказанный системный/permission баг.
+Источники: официальный `https://dl.google.com/dl/android/maven2/androidx/test/core/1.6.1/core-1.6.1-sources.jar`;
+версия зависимости не меняется.
+
+Исправление требует прежнюю строгую готовность **до recreate и после него**, а
+также явно проверяет `scenario.state == RESUMED` с обеих сторон. Lifecycle не
+принудительно переключается, диалог не закрывается, permission не выдаётся и
+тест не повторяется. Все исходные assertions/timeouts и 41 тест сохранены.
+Проверки data/URI/work/request count после recreation остаются обязательными.
+
+Найден также пробел выгрузки диагностики: старый collector работал до cold
+restart, поэтому новые файлы поздней notification-denied фазы не попадали в
+артефакт. Теперь collector дополнительно запускается **always после всех фаз**,
+до upload; M4 capture по-прежнему выполняется внутри живого ActivityScenario
+до teardown. Listener добавлен и к прямым adb instrumentation phases. Полные
+state/XML/PNG/dumpsys, созданные в момент отказа, извлекаются без замены их
+скриншотом последующего успешного UI. Сам отказ сбора не подменяет исходный test
+result. Исходный ZIP CI105 недоступен локальному downloader (HTTP403); новое
+содержимое этого архива не заявляется просмотренным.
+
+Статус этого исправления **NOT_VERIFIED**, пока не завершатся три независимых
+полных API35 запуска на одном новом HEAD: 41/41, notification-denied, cold
+restart и 42 renderer PNGs. Одного retry недостаточно; каждый новый отказ
+сохраняется и анализируется. Приложение, APK89 и его реальный verifier102 PASS
+не изменяются. production_ready=false, automatic_publication=false.

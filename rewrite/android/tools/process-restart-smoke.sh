@@ -8,7 +8,7 @@ package=com.thekain.video.rebuild
 runner="$package.test/androidx.test.runner.AndroidJUnitRunner"
 run_phase() {
     local phase="$1" method="$2" klass="${3:-ProcessRestartTest}" output="$artifacts/process-$1.txt"
-    adb -s "$serial" shell am instrument -w -e class "com.thekain.video.$klass#$method" -e process_phase "$phase" "$runner" > "$output"
+    adb -s "$serial" shell am instrument -w -e listener com.thekain.video.UiFailureListener -e class "com.thekain.video.$klass#$method" -e process_phase "$phase" "$runner" > "$output"
     python3 - "$output" <<'PY'
 import pathlib,sys
 s=pathlib.Path(sys.argv[1]).read_text()
