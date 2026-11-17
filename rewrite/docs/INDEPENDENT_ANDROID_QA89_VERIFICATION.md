@@ -10,7 +10,7 @@ Refs #6. **Реальный результат пока NOT_RUN.** Code/fixture 
 
 ## Проверки и отчёт
 
-1. Общий проверенный механизм review/no-bypass требует текущий rebuild tip, merged PR с точным KaiN1One approval и все 4 успешных проверки последнего PR CI, свежий неизменённый owner no-bypass proof, ту же public ruleset revision. Скрытые management-поля не подменяются пустыми списками; management credential не передаётся в Actions.
+1. Общий проверенный механизм review/no-bypass требует текущий rebuild tip, merged PR с точным KaiN1One approval и все 4 успешных проверки последнего PR CI, свежий неизменённый owner no-bypass proof, ту же public ruleset revision. Дополнительно review timestamp не может предшествовать committer timestamp текущего reviewed HEAD: старое одобрение не признаётся новым по одному отображаемому статусу. Скрытые management-поля не подменяются пустыми списками; management credential не передаётся в Actions.
 2. Скачивается **оригинальный ZIP** с bounded size и безопасным HTTPS redirect без Authorization на storage. SHA-256 и размер сверяются до открытия; архив не пересоздаётся. Ожидается ровно 5 root regular files, нет duplicates/traversal/links/encryption/неподдержанной compression; explicit expansion/metadata limits и полный CRC read.
 3. Пересчитываются APK/AAB/inspection bytes/hash, проверяются source/channel/records в manifest.json и canonical SHA256SUMS. Inspection должен указывать version3/signed/non-debuggable, но сам по себе не считается криптографической проверкой.
 4. Официальный `aapt dump badging` проверяет **реальный бинарный APK manifest**: package/version3/versionName/minSdk26/target35/non-debuggable.

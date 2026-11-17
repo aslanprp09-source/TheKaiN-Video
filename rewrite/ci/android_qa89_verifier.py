@@ -79,6 +79,17 @@ def apk_manifest(apk, tools, output):
             'debuggable': False}
 
 
+def reviewed_execution(api, pin, env):
+    proof = original.reviewed_execution(api, pin, env)
+    head = api.json('/commits/' + proof['reviewed_head'])
+    reviews = api.pages(f'/pulls/{proof["pr"]}/reviews')
+    review = next((r for r in reviews if r.get('id') == proof['review_id']), {})
+    submitted = datetime.fromisoformat(original.canonical_timestamp(review.get('submitted_at', '')))
+    committed = datetime.fromisoformat(original.canonical_timestamp(head['commit']['committer']['date']))
+    require(submitted >= committed, 'REVIEW_PREDATES_CURRENT_HEAD')
+    return {**proof, 'review_submitted_at': submitted.isoformat(), 'head_committed_at': committed.isoformat()}
+
+
 def execute(pin, api, env, tools, java, output):
     output.mkdir(parents=True, exist_ok=False)
     report = {'schema': 1, 'scope': 'independent-official-tools-run-89', 'source': pin,
@@ -95,7 +106,7 @@ def execute(pin, api, env, tools, java, output):
                 nonlocal stage
                 stage = name
                 report['checks'][name] = {'status': 'PASS', 'details': operation()}
-            check('review', lambda: original.reviewed_execution(api, pin, env))
+            check('review', lambda: reviewed_execution(api, pin, env))
             check('provenance', lambda: original.provenance(api, pin, datetime.now(timezone.utc)))
             archive = temp / 'original.zip'
             def download():

@@ -16,6 +16,17 @@ from test_android_artifact_verifier import FakeAPI, ENV
 from workflow_policy import check, load, ROOT
 
 
+class FreshReviewAPI(FakeAPI):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.review['submitted_at'] = '2026-11-17T01:00:00Z'
+
+    def json(self, path):
+        if path.startswith('/commits/'):
+            return {'commit': {'committer': {'date': '2026-11-17T00:00:00Z'}}}
+        return super().json(path)
+
+
 class QA89VerifierTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -107,11 +118,19 @@ class QA89VerifierTest(unittest.TestCase):
              patch.object(qa, 'apk_manifest', return_value={'version_code': 3}), \
              patch.object(original, 'verify_apk', return_value={}), \
              patch.object(original, 'verify_aab', return_value={}):
-            report = qa.execute(self.pin, FakeAPI(self.pin, archive), ENV, self.root, self.root, self.root / 'report')
+            report = qa.execute(self.pin, FreshReviewAPI(self.pin, archive), ENV, self.root, self.root, self.root / 'report')
         self.assertEqual(report['overall_status'], 'PASS', report)
         self.assertEqual(report['scope'], 'independent-official-tools-run-89')
         self.assertFalse(report['production_ready'])
         self.assertFalse(report['automatic_publication'])
+
+    def test_review_predating_new_head_cannot_authorize_artifact_download(self):
+        api = FreshReviewAPI(self.pin, self.archive())
+        api.review['submitted_at'] = '2026-11-16T23:00:00Z'
+        report = qa.execute(self.pin, api, ENV, self.root, self.root, self.root / 'stale-report')
+        self.assertEqual(report['checks']['review']['error_code'], 'REVIEW_PREDATES_CURRENT_HEAD')
+        self.assertFalse(api.downloaded)
+        self.assertEqual(report['checks']['apk']['status'], 'NOT_RUN')
 
     def test_real_official_aapt_decodes_version3_and_rejects_version2(self):
         sdk = Path(os.environ.get('ANDROID_HOME', '/missing'))
