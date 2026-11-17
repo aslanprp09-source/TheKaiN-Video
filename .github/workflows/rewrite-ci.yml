@@ -166,6 +166,7 @@ jobs:
         run: |
           gradle --no-daemon :app:installDebug :app:installDebugAndroidTest
           adb -s "$ANDROID_SERIAL" shell pm grant com.thekain.video.rebuild android.permission.POST_NOTIFICATIONS
+          bash tools/emulator-ui-ready.sh "$RUNNER_TEMP/m4-device-evidence/ui-readiness"
           gradle --no-daemon :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.notClass=com.thekain.video.ProcessRestartTest,com.thekain.video.NotificationDeniedTest,com.thekain.video.M5VisualTest
       - name: Verify instrumentation results
         if: always()
