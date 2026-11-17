@@ -1,0 +1,413 @@
+{
+  "schema": 1,
+  "scope": "read-only-android-runtime-intake; metadata/source observations only",
+  "observed_on": "2026-11-17",
+  "repository_base": "598dfa5974f720e4029c71d83807fadc6a7b891b",
+  "status": "BLOCKED_NOT_RUN",
+  "native_payload_downloaded": false,
+  "native_code_executed": false,
+  "android_runtime_built": false,
+  "android_runtime_tested": false,
+  "packaged_in_app": false,
+  "production_ready": false,
+  "automatic_publication": false,
+  "cpython": {
+    "repository": "python/cpython",
+    "candidate_tag": "v3.14.8",
+    "tag_object": "992560c2cc62d47b308cec662feb485456847931",
+    "source_commit": "8e6e75d9102e39bed2a2b279203a396741180f12",
+    "github_tag_verification": {
+      "verified": false,
+      "reason": "unsigned",
+      "signature": null,
+      "payload": null,
+      "verified_at": null
+    },
+    "source_observations": [
+      {
+        "path": "Android/android.py",
+        "bytes": 36924,
+        "sha256": "baa5cbdfd96c6bd0e16f8dc052a3693cc58b98bdb61610c48d8f9d4fe21b767e",
+        "url": "https://raw.githubusercontent.com/python/cpython/8e6e75d9102e39bed2a2b279203a396741180f12/Android/android.py"
+      },
+      {
+        "path": "Android/android-env.sh",
+        "bytes": 3454,
+        "sha256": "6ee7c012abb9cf6383c24eec6ff582472bbbe6c4da618084e7f0e205f84f36ee",
+        "url": "https://raw.githubusercontent.com/python/cpython/8e6e75d9102e39bed2a2b279203a396741180f12/Android/android-env.sh"
+      },
+      {
+        "path": "Android/README.md",
+        "bytes": 5822,
+        "sha256": "8456f28a5c7681382a2beab7938b3a50c53e7535cb1daed58e469906a19c56b9",
+        "url": "https://raw.githubusercontent.com/python/cpython/8e6e75d9102e39bed2a2b279203a396741180f12/Android/README.md"
+      },
+      {
+        "path": "Lib/subprocess.py",
+        "bytes": 90748,
+        "sha256": "7fa4af83422024a19e64a80937f6c8094244c3397372a495b348dfbe44a5dd72",
+        "url": "https://raw.githubusercontent.com/python/cpython/8e6e75d9102e39bed2a2b279203a396741180f12/Lib/subprocess.py"
+      },
+      {
+        "path": "Doc/using/android.rst",
+        "bytes": 3464,
+        "sha256": "8954bec01b5175d601a694b67a7474906728fe0fbeb240214c942b46d873880a",
+        "url": "https://raw.githubusercontent.com/python/cpython/8e6e75d9102e39bed2a2b279203a396741180f12/Doc/using/android.rst"
+      },
+      {
+        "path": "LICENSE",
+        "bytes": 13804,
+        "sha256": "b0e25a78cffb43f4d92de8b61ccfa1f1f98ecbc22330b54b5251e7b6ba010231",
+        "url": "https://raw.githubusercontent.com/python/cpython/8e6e75d9102e39bed2a2b279203a396741180f12/LICENSE"
+      }
+    ],
+    "source_defaults": {
+      "minimum_api": 24,
+      "ndk": "27.3.13750724",
+      "max_page_size_linker_flag": 16384,
+      "proves_actual_elf_or_16k_runtime": false,
+      "embedding": "libpython through JNI; host subprocess launcher is not an Android integration",
+      "subprocess_predicate_explicitly_disables_android": false
+    }
+  },
+  "native_dependency_repository": "beeware/cpython-android-source-deps",
+  "abi_scope": [
+    "aarch64-linux-android",
+    "x86_64-linux-android"
+  ],
+  "other_abis_status": "NOT_REVIEWED; scope is not a shipping ABI decision",
+  "native_dependencies": [
+    {
+      "tag": "bzip2-1.0.8-3",
+      "release_id": 223091851,
+      "published_at": "2025-06-04T14:17:59Z",
+      "recipe_commit": "dcea166d40d573e963a35435e48b047afe243c2d",
+      "release_url": "https://github.com/beeware/cpython-android-source-deps/releases/tag/bzip2-1.0.8-3",
+      "recipe_sources": [
+        {
+          "path": "bzip2/build.sh",
+          "bytes": 684,
+          "sha256": "647552982d6a89ccf7eed4c1277cd559c5b47541e385a91249690cb9b1a0f8fb",
+          "url": "https://raw.githubusercontent.com/beeware/cpython-android-source-deps/dcea166d40d573e963a35435e48b047afe243c2d/bzip2/build.sh"
+        },
+        {
+          "path": "bzip2/symlink.patch",
+          "bytes": 827,
+          "sha256": "14ed34ba151d75a25736253dd1e8f7b782a43a8defa3cc6733fe80952f5d6eba",
+          "url": "https://raw.githubusercontent.com/beeware/cpython-android-source-deps/dcea166d40d573e963a35435e48b047afe243c2d/bzip2/symlink.patch"
+        }
+      ],
+      "selected_assets": [
+        {
+          "id": 260917698,
+          "name": "bzip2-1.0.8-3-aarch64-linux-android.tar.gz",
+          "bytes": 197400,
+          "github_reported_digest": "sha256:2385f46e173d525f079946957c007000a8ad11d8496ba66bae99129183d74bd9",
+          "local_sha256": null,
+          "archive_contents_checked": false,
+          "elf_checked": false,
+          "build_provenance_verified": false
+        },
+        {
+          "id": 260917691,
+          "name": "bzip2-1.0.8-3-x86_64-linux-android.tar.gz",
+          "bytes": 206675,
+          "github_reported_digest": "sha256:1b79e8b78037e8905947d474cc1adc098c815a8a0e46c0a93c3251ca9fdcaded",
+          "local_sha256": null,
+          "archive_contents_checked": false,
+          "elf_checked": false,
+          "build_provenance_verified": false
+        }
+      ],
+      "license_source_status": "NOT_READ",
+      "license_observation": {
+        "status": "NOT_READ",
+        "attempted_url": "https://sourceware.org/git/?p=bzip2.git;a=blob_plain;f=LICENSE;hb=bzip2-1.0.8",
+        "reason": "source unavailable from this workspace (URLError); no license inference"
+      },
+      "packaged_notices_and_transitive_license_review": "NOT_RUN"
+    },
+    {
+      "tag": "libffi-3.4.4-3",
+      "release_id": 178091594,
+      "published_at": "2024-10-02T20:40:08Z",
+      "recipe_commit": "65d87e392d69198f3dd1ed2feb3b5fcea1b029a6",
+      "release_url": "https://github.com/beeware/cpython-android-source-deps/releases/tag/libffi-3.4.4-3",
+      "recipe_sources": [
+        {
+          "path": "libffi/build.sh",
+          "bytes": 695,
+          "sha256": "423b7a5467027c53b488a7e1bad8a2bcc0d7118cc57f0c88efaeae2861f6c0ec",
+          "url": "https://raw.githubusercontent.com/beeware/cpython-android-source-deps/65d87e392d69198f3dd1ed2feb3b5fcea1b029a6/libffi/build.sh"
+        },
+        {
+          "path": "libffi/long_double.patch",
+          "bytes": 3524,
+          "sha256": "01d6deff864f80f955c2c80b2768a78fa803a76628b3463d161a239cbca6ad43",
+          "url": "https://raw.githubusercontent.com/beeware/cpython-android-source-deps/65d87e392d69198f3dd1ed2feb3b5fcea1b029a6/libffi/long_double.patch"
+        },
+        {
+          "path": "libffi/open_temp_exec_file.patch",
+          "bytes": 1234,
+          "sha256": "20570753cecbf39d73889a9be3cff1f56e9053a06049dee8ea9e7b0292b4f724",
+          "url": "https://raw.githubusercontent.com/beeware/cpython-android-source-deps/65d87e392d69198f3dd1ed2feb3b5fcea1b029a6/libffi/open_temp_exec_file.patch"
+        }
+      ],
+      "selected_assets": [
+        {
+          "id": 196476383,
+          "name": "libffi-3.4.4-3-aarch64-linux-android.tar.gz",
+          "bytes": 42455,
+          "github_reported_digest": null,
+          "local_sha256": null,
+          "archive_contents_checked": false,
+          "elf_checked": false,
+          "build_provenance_verified": false
+        },
+        {
+          "id": 196476378,
+          "name": "libffi-3.4.4-3-x86_64-linux-android.tar.gz",
+          "bytes": 43710,
+          "github_reported_digest": null,
+          "local_sha256": null,
+          "archive_contents_checked": false,
+          "elf_checked": false,
+          "build_provenance_verified": false
+        }
+      ],
+      "license_source_status": "UPSTREAM_VERSIONED_LICENSE_READ",
+      "license_observation": {
+        "url": "https://raw.githubusercontent.com/libffi/libffi/v3.4.4/LICENSE",
+        "bytes": 1132,
+        "sha256": "2c9c2acb9743e6b007b91350475308aee44691d96aa20eacef8e199988c8c388"
+      },
+      "packaged_notices_and_transitive_license_review": "NOT_RUN"
+    },
+    {
+      "tag": "openssl-3.5.9-0",
+      "release_id": 399237466,
+      "published_at": "2026-09-29T14:36:19Z",
+      "recipe_commit": "5521f2c16ee87dd7f9d081421351f675fac2ee45",
+      "release_url": "https://github.com/beeware/cpython-android-source-deps/releases/tag/openssl-3.5.9-0",
+      "recipe_sources": [
+        {
+          "path": "openssl/at_secure.patch",
+          "bytes": 626,
+          "sha256": "12f302bf923a90cb0f0ed73a425952d84d02e5461aab6a043f3a30cb19be8dcf",
+          "url": "https://raw.githubusercontent.com/beeware/cpython-android-source-deps/5521f2c16ee87dd7f9d081421351f675fac2ee45/openssl/at_secure.patch"
+        },
+        {
+          "path": "openssl/build.sh",
+          "bytes": 1150,
+          "sha256": "5d4439241e82a085fa601eaa4e4158274170eb9ebcf7628c0e91b501ade80fb5",
+          "url": "https://raw.githubusercontent.com/beeware/cpython-android-source-deps/5521f2c16ee87dd7f9d081421351f675fac2ee45/openssl/build.sh"
+        },
+        {
+          "path": "openssl/configuration.patch",
+          "bytes": 743,
+          "sha256": "541f1360edbcbd3463f931174fe63e287513a2d728a4be9ebaaa77343bf8732e",
+          "url": "https://raw.githubusercontent.com/beeware/cpython-android-source-deps/5521f2c16ee87dd7f9d081421351f675fac2ee45/openssl/configuration.patch"
+        },
+        {
+          "path": "openssl/soname-1.patch",
+          "bytes": 1211,
+          "sha256": "c332dedfc1799615fdc6da9969bd3cac2b346a12e6cc76cb201c816ca3ffaf8b",
+          "url": "https://raw.githubusercontent.com/beeware/cpython-android-source-deps/5521f2c16ee87dd7f9d081421351f675fac2ee45/openssl/soname-1.patch"
+        },
+        {
+          "path": "openssl/soname-3.patch",
+          "bytes": 1059,
+          "sha256": "fca14d7d5e81d811f793ceae1c27e35367edf91b4b0cdf76b6d54bc084205e2d",
+          "url": "https://raw.githubusercontent.com/beeware/cpython-android-source-deps/5521f2c16ee87dd7f9d081421351f675fac2ee45/openssl/soname-3.patch"
+        }
+      ],
+      "selected_assets": [
+        {
+          "id": 598438116,
+          "name": "openssl-3.5.9-0-aarch64-linux-android.tar.gz",
+          "bytes": 6335516,
+          "github_reported_digest": "sha256:bf115f29963d577e20a1595dac13baec7ccd559bf8a05f37659ba6b735a8778b",
+          "local_sha256": null,
+          "archive_contents_checked": false,
+          "elf_checked": false,
+          "build_provenance_verified": false
+        },
+        {
+          "id": 598437983,
+          "name": "openssl-3.5.9-0-x86_64-linux-android.tar.gz",
+          "bytes": 6419205,
+          "github_reported_digest": "sha256:11fe72e251fccb5d81fc43a67096a4ce540e09ddf3a8a587dede199774c89141",
+          "local_sha256": null,
+          "archive_contents_checked": false,
+          "elf_checked": false,
+          "build_provenance_verified": false
+        }
+      ],
+      "license_source_status": "UPSTREAM_VERSIONED_LICENSE_READ",
+      "license_observation": {
+        "url": "https://raw.githubusercontent.com/openssl/openssl/openssl-3.5.9/LICENSE.txt",
+        "bytes": 10175,
+        "sha256": "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a"
+      },
+      "packaged_notices_and_transitive_license_review": "NOT_RUN"
+    },
+    {
+      "tag": "sqlite-3.53.4-0",
+      "release_id": 365727558,
+      "published_at": "2026-08-05T18:16:02Z",
+      "recipe_commit": "5521f2c16ee87dd7f9d081421351f675fac2ee45",
+      "release_url": "https://github.com/beeware/cpython-android-source-deps/releases/tag/sqlite-3.53.4-0",
+      "recipe_sources": [
+        {
+          "path": "sqlite/build.sh",
+          "bytes": 1482,
+          "sha256": "84e7992f13728783cea288c42e030e6f4aa8b4a08f36bfa4a3b7ddc2dd102610",
+          "url": "https://raw.githubusercontent.com/beeware/cpython-android-source-deps/5521f2c16ee87dd7f9d081421351f675fac2ee45/sqlite/build.sh"
+        },
+        {
+          "path": "sqlite/soname.patch",
+          "bytes": 1844,
+          "sha256": "bfb8e7341fd354415c48bf498de32353729425b34cd4162f218ba60aca0d5bbc",
+          "url": "https://raw.githubusercontent.com/beeware/cpython-android-source-deps/5521f2c16ee87dd7f9d081421351f675fac2ee45/sqlite/soname.patch"
+        }
+      ],
+      "selected_assets": [
+        {
+          "id": 502939233,
+          "name": "sqlite-3.53.4-0-aarch64-linux-android.tar.gz",
+          "bytes": 1718864,
+          "github_reported_digest": "sha256:11dfa2e8360b3022fb5da98743273bee09559cb546bbd00398e1578fefb3b3db",
+          "local_sha256": null,
+          "archive_contents_checked": false,
+          "elf_checked": false,
+          "build_provenance_verified": false
+        },
+        {
+          "id": 502939199,
+          "name": "sqlite-3.53.4-0-x86_64-linux-android.tar.gz",
+          "bytes": 1739875,
+          "github_reported_digest": "sha256:e44e304d8a75bf2ca7903f844367828cd9931076e4fe175c1eb38bf7dcdc6783",
+          "local_sha256": null,
+          "archive_contents_checked": false,
+          "elf_checked": false,
+          "build_provenance_verified": false
+        }
+      ],
+      "license_source_status": "UPSTREAM_VERSIONED_LICENSE_READ",
+      "license_observation": {
+        "url": "https://raw.githubusercontent.com/sqlite/sqlite/version-3.53.4/LICENSE.md",
+        "bytes": 3850,
+        "sha256": "ee6af51062b30d532991face5164136ae6f84e265ecf8abe89dc69dac45ca1e7"
+      },
+      "packaged_notices_and_transitive_license_review": "NOT_RUN"
+    },
+    {
+      "tag": "xz-5.4.6-1",
+      "release_id": 178091607,
+      "published_at": "2024-10-02T20:40:14Z",
+      "recipe_commit": "65d87e392d69198f3dd1ed2feb3b5fcea1b029a6",
+      "release_url": "https://github.com/beeware/cpython-android-source-deps/releases/tag/xz-5.4.6-1",
+      "recipe_sources": [
+        {
+          "path": "xz/build.sh",
+          "bytes": 579,
+          "sha256": "756201fa5989494581c67e489e7cf47e1d86d8285dc3be0262425240fb662e40",
+          "url": "https://raw.githubusercontent.com/beeware/cpython-android-source-deps/65d87e392d69198f3dd1ed2feb3b5fcea1b029a6/xz/build.sh"
+        }
+      ],
+      "selected_assets": [
+        {
+          "id": 196476391,
+          "name": "xz-5.4.6-1-aarch64-linux-android.tar.gz",
+          "bytes": 651211,
+          "github_reported_digest": null,
+          "local_sha256": null,
+          "archive_contents_checked": false,
+          "elf_checked": false,
+          "build_provenance_verified": false
+        },
+        {
+          "id": 196476387,
+          "name": "xz-5.4.6-1-x86_64-linux-android.tar.gz",
+          "bytes": 644168,
+          "github_reported_digest": null,
+          "local_sha256": null,
+          "archive_contents_checked": false,
+          "elf_checked": false,
+          "build_provenance_verified": false
+        }
+      ],
+      "license_source_status": "UPSTREAM_VERSIONED_LICENSE_READ",
+      "license_observation": {
+        "url": "https://raw.githubusercontent.com/tukaani-project/xz/v5.4.6/COPYING",
+        "bytes": 3347,
+        "sha256": "29a1e305b2e34eefe5d4602d00cde1d528b71c5d9f2eec5106972cf6ddb6f73f"
+      },
+      "packaged_notices_and_transitive_license_review": "NOT_RUN"
+    },
+    {
+      "tag": "zstd-1.5.7-2",
+      "release_id": 305028883,
+      "published_at": "2026-04-03T12:01:50Z",
+      "recipe_commit": "f4c94a0fbc359d17993547b66f0627d436f8897b",
+      "release_url": "https://github.com/beeware/cpython-android-source-deps/releases/tag/zstd-1.5.7-2",
+      "recipe_sources": [
+        {
+          "path": "zstd/build.sh",
+          "bytes": 1101,
+          "sha256": "287496ac978c1ee9da75dbc281cca60fca72415af1325339b1c9ffe69c0a61b5",
+          "url": "https://raw.githubusercontent.com/beeware/cpython-android-source-deps/f4c94a0fbc359d17993547b66f0627d436f8897b/zstd/build.sh"
+        }
+      ],
+      "selected_assets": [
+        {
+          "id": 387847676,
+          "name": "zstd-1.5.7-2-aarch64-linux-android.tar.gz",
+          "bytes": 490959,
+          "github_reported_digest": "sha256:c3ae98fbe54b0cef9601d9dc120ed692d79609087e6926c70d8fc30face07fe7",
+          "local_sha256": null,
+          "archive_contents_checked": false,
+          "elf_checked": false,
+          "build_provenance_verified": false
+        },
+        {
+          "id": 387847662,
+          "name": "zstd-1.5.7-2-x86_64-linux-android.tar.gz",
+          "bytes": 523517,
+          "github_reported_digest": "sha256:162e5c9d9542f83f16c6aea2c8b49f94f39196675be4eb22cb8d9a04fb2175fe",
+          "local_sha256": null,
+          "archive_contents_checked": false,
+          "elf_checked": false,
+          "build_provenance_verified": false
+        }
+      ],
+      "license_source_status": "UPSTREAM_VERSIONED_LICENSE_READ_VIA_HTTPS",
+      "license_observation": {
+        "url": "https://raw.githubusercontent.com/facebook/zstd/v1.5.7/LICENSE",
+        "bytes": 1549,
+        "sha256": "7055266497633c9025b777c78eb7235af13922117480ed5c674677adc381c9d8"
+      },
+      "packaged_notices_and_transitive_license_review": "NOT_RUN"
+    }
+  ],
+  "findings": [
+    "CPython helper downloads and unpacks native archives without an explicit digest check in the reviewed function",
+    "Selected component recipes download source archives without an explicit digest check before extraction/build",
+    "Four selected GitHub asset digests are null (libffi and xz, both inspected ABI entries); null is not a verified hash",
+    "No archive payload, ELF, source-to-binary build receipt, attestations or packaged notices was verified",
+    "OpenSSL at_secure patch changes Android secure-environment detection and needs application-specific security review; upstream comment is not TheKaiN signoff",
+    "libffi has Android/x86_64 ABI and trampoline-related patches; SONAME patches and full dependency closure require review",
+    "XZ COPYING distinguishes public-domain liblzma from LGPL/GPL scripts and build inputs; do not label the entire prefix public domain",
+    "Source linker 16KiB flag is not a 16KiB device execution result"
+  ],
+  "remaining_checks": {
+    "source_archives_and_patches": "BLOCKED: fixed source hashes, verified origin, complete patch/toolchain/dependency closure and clean build receipts required",
+    "native_archives": "NOT_RUN",
+    "packaged_licenses": "NOT_RUN",
+    "tls_ca_roots": "NOT_RUN",
+    "jni_isolation_and_cancellation": "NOT_RUN",
+    "api26_29_35": "NOT_RUN for runtime; existing app tests are separate",
+    "runtime_16k": "NOT_RUN",
+    "ejs_js_engine_and_live_sites": "NOT_RUN"
+  }
+}
