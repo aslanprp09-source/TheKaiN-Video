@@ -370,10 +370,16 @@ class M4InstrumentationTest {
         var id: String? = null
         try {
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                var activity: MainActivity? = null
+                scenario.onActivity { activity = it }
+                try {
                 val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+                UiWindowEvidence.await(requireNotNull(activity), "m4-source-input")
                 val input = device.wait(Until.findObject(By.res("source_input")), 10_000) ?: error("Source input is absent")
                 input.text = source
+                UiWindowEvidence.await(requireNotNull(activity), "m4-analyze")
                 device.wait(Until.findObject(By.res("analyze_button")), 10_000)!!.click()
+                UiWindowEvidence.await(requireNotNull(activity), "m4-download")
                 device.wait(Until.findObject(By.res("download_button")), 15_000)!!.click()
 
                 if (retryFailure) {
@@ -395,6 +401,7 @@ class M4InstrumentationTest {
                 }
                 val output = graph.repository.get(id!!).outputUri
                 scenario.recreate()
+                scenario.onActivity { activity = it }
                 assertEquals(1, graph.repository.all().count { it.id == id })
                 assertEquals(output, graph.repository.get(id!!).outputUri)
                 scenario.onActivity { activity ->
@@ -410,6 +417,7 @@ class M4InstrumentationTest {
                     }
                 }
                 device.waitForIdle(3000)
+                UiWindowEvidence.await(requireNotNull(activity), "m4-downloads-navigation")
                 device.wait(Until.findObject(By.res("nav_downloads")), 10_000)!!.click()
                 assertTrue("Downloads navigation did not complete", device.wait(Until.hasObject(By.res("task_search")), 10_000))
                 if (!device.wait(Until.hasObject(By.res("task_$id")), 10_000)) {
@@ -421,6 +429,10 @@ class M4InstrumentationTest {
                 assertEquals(if (retryFailure) 2 else 1, graph.repository.get(id!!).attempt)
                 withTimeout(30_000) {
                     while (androidx.work.WorkManager.getInstance(context).getWorkInfosForUniqueWork("download-$id").get().any { !it.state.isFinished }) delay(50)
+                }
+                } catch (failure: Throwable) {
+                    UiWindowEvidence.capture("m4-activity-transfer-retry-$retryFailure", activity)
+                    throw failure
                 }
             }
         } finally {
