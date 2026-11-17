@@ -1,9 +1,27 @@
 # Independent verification of the original signed run #69 artifact
 
 Refs #6. Implementation and fixture tests do **not** constitute verification of
-the real artifact. Until a separately reviewed hosted execution finishes, the
-official independent apksigner result is **NOT_RUN**. The existing
-`android-signed-artifact-review` gate remains BLOCKED. No gate is changed here.
+the real artifact. The separately reviewed hosted execution **#80 / 43869853934
+finished SUCCESS**, verifying the original run #69/versionCode 2 artifact with
+official tools. The scoped `android-original-69-artifact-review` component is
+PASS; current `android-signed-artifact-review` remains BLOCKED for run #89/versionCode 3.
+Neither the old artifact's PASS nor signing-CI success is a separate independent
+official-apksigner verification of the new APK. Source pins/code remain unchanged.
+
+## Recorded real result
+
+[Run #80](https://github.com/aslanprp09-source/TheKaiN-Video/actions/runs/43869853934),
+attempt 1, verifier commit `6eefc9b75803dc9a36ee8e06e27f7576dbfdac3e`,
+job `133308087760`: stdout explicitly reports all seven stages PASS (review,
+provenance, ZIP, contents, tools, APK, AAB). It downloaded original artifact
+`14105834067`, checked its pinned original bytes/digests and manifest, then used
+official SDK35/JDK17 tools. [Report artifact 14228005379](https://github.com/aslanprp09-source/TheKaiN-Video/actions/runs/43869853934/artifacts/14228005379)
+and [Issue #6 result](https://github.com/aslanprp09-source/TheKaiN-Video/issues/6#issuecomment-6916927501)
+contain the report/log references. See [scoped evidence](../release/evidence/android-verification-run-80.json).
+This documentation update rechecked GitHub run/job output and metadata; it does
+not claim a new local archive download or tool execution. Retain the initial
+failed execution below. Remaining instructions describe the reviewed path and
+any future rerun, not a request to repeat an already completed check.
 
 First real execution after PR #22, [run #77 / 43863660113](https://github.com/aslanprp09-source/TheKaiN-Video/actions/runs/43863660113),
 failed at the review-policy stage with `NO_BYPASS_RULESET_REQUIRED`, before source
@@ -51,7 +69,7 @@ the actual dispatch response and resulting run; an HTTP error is NOT_RUN.
    administrator bypass. Read the new rebuild HEAD. This verifier requires the
    current tip to be a merge commit associated with a merged PR into rebuild,
    with KaiN1One's latest review APPROVED on that PR's exact final head, independent
-   from its author. For this initial execution, run immediately on this PR's
+   from its author. For any future execution, dispatch from that reviewed
    merged tip. Squash/rebase or later unrelated tips must still satisfy these
    API checks; never bypass a rejected review check.
 3. After review/merge, perform the **mandatory external no-bypass preflight**
@@ -91,7 +109,8 @@ the actual dispatch response and resulting run; an HTTP error is NOT_RUN.
    explicit mode. Conflicting `verify_artifact` plus build/signing inputs fail
    policy. Ordinary push/PR/manual CI keeps all four required checks.
 5. If the dispatch endpoint refuses the branch workflow, record the response
-   without credentials and leave official verification NOT_RUN. Do not modify
+   without credentials and mark that new attempt NOT_RUN; preserve run #80's
+   historical PASS for its exact original artifact. Do not modify
    main, publish, rebuild run #69 or use another source as a substitute. Resolve
    any alternative entry point through a separately reviewed rebuild-only change.
 

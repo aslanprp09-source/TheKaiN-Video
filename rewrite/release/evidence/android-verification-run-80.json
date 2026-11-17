@@ -1,0 +1,78 @@
+{
+  "schema": 1,
+  "scope": "independent-official-verification-of-original-run-69-only",
+  "recorded_on": "2026-11-17",
+  "source": {
+    "run_id": 43574136079,
+    "run_number": 69,
+    "source_commit": "c1b8752d8eb4dfa065704edfa8b9c891168764cf",
+    "artifact_id": 14105834067,
+    "version_code": 2,
+    "zip_bytes": 13614516,
+    "zip_sha256": "3e78443334f1b1b39b7ec95ee79e3598857670f48f3906b9a0d60457296a7546",
+    "files": {
+      "TheKaiN-0.1.0-m6-signed-internal-qa.apk": {
+        "bytes": 7308373,
+        "sha256": "ad8d5d38ec46a188ccb8d98de3a3f52af5aa72b6d57e0f368903fdc940ce42db"
+      },
+      "TheKaiN-0.1.0-m6-signed-internal-qa.aab": {
+        "bytes": 6929941,
+        "sha256": "ec6038b123793b2d59276466c786993cc5625f081f10a5d7d97b15708fb180c4"
+      },
+      "SHA256SUMS": {
+        "bytes": 294,
+        "sha256": "28ef3ac93fd34ebd8533d6d8014100c3b1a478efe8fc1e21d4d8c6f6fec09e90"
+      },
+      "inspection.json": {
+        "bytes": 1103,
+        "sha256": "98f22d6ea0f165ac8735866f71589a1de90baf6ab5efd283e33f32ab528aa385"
+      },
+      "manifest.json": {
+        "bytes": 716,
+        "sha256": "dd78acfe770e374b2bd74a5b5b4def10d6789b0598cfb7ff059170da3a996913"
+      }
+    }
+  },
+  "verification": {
+    "status": "PASS",
+    "run_id": 43869853934,
+    "run_number": 80,
+    "attempt": 1,
+    "verifier_commit": "6eefc9b75803dc9a36ee8e06e27f7576dbfdac3e",
+    "job_id": 133308087760,
+    "url": "https://github.com/aslanprp09-source/TheKaiN-Video/actions/runs/43869853934",
+    "checks": {
+      "review": "PASS",
+      "provenance": "PASS",
+      "zip": "PASS",
+      "contents": "PASS",
+      "tools": "PASS",
+      "apk": "PASS",
+      "aab": "PASS"
+    },
+    "tools": {
+      "android_build_tools": "35.0.0",
+      "jdk": "Temurin 17.0.21+9"
+    },
+    "certificate_sha256": "2e8fbb21adb81873d257ff685e904b710f7e63df4c9ea207c6bf2c0b27cb973e",
+    "evidence_origin": "Live GitHub completed-run/job stdout and previously recorded Issue 6 result; not a new local archive recomputation"
+  },
+  "report_artifact": {
+    "id": 14228005379,
+    "bytes": 7139,
+    "github_zip_sha256": "036ac93dcd6c0324d6b9e1cbb917de52e6c3d9be9100e4debbf506f2b7e7b590",
+    "expires_at": "2026-11-23T12:49:03Z",
+    "url": "https://github.com/aslanprp09-source/TheKaiN-Video/actions/runs/43869853934/artifacts/14228005379"
+  },
+  "result_comment_url": "https://github.com/aslanprp09-source/TheKaiN-Video/issues/6#issuecomment-6916927501",
+  "failed_predecessor": {
+    "run_id": 43863660113,
+    "error_code": "NO_BYPASS_RULESET_REQUIRED",
+    "before_source_download_and_tools": true
+  },
+  "historical_snapshot": "rewrite/release/evidence/android-signing-run-69.json",
+  "applies_to_run_89": false,
+  "physical_device_matrix": "BLOCKED",
+  "production_ready": false,
+  "automatic_publication": false
+}
