@@ -400,8 +400,15 @@ class M4InstrumentationTest {
                     }
                 }
                 val output = graph.repository.get(id!!).outputUri
+                // ActivityScenario.recreate restores its entry lifecycle state. Calling it
+                // during a transient PAUSED state can deliberately restore STARTED using
+                // the test package's EmptyFloatingActivity, leaving UI Automator unfocused.
+                UiWindowEvidence.await(requireNotNull(activity), "m4-before-recreate")
+                assertEquals(androidx.lifecycle.Lifecycle.State.RESUMED, scenario.state)
                 scenario.recreate()
                 scenario.onActivity { activity = it }
+                UiWindowEvidence.await(requireNotNull(activity), "m4-after-recreate")
+                assertEquals(androidx.lifecycle.Lifecycle.State.RESUMED, scenario.state)
                 assertEquals(1, graph.repository.all().count { it.id == id })
                 assertEquals(output, graph.repository.get(id!!).outputUri)
                 scenario.onActivity { activity ->

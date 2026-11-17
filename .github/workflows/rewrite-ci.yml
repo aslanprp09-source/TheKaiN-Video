@@ -206,6 +206,9 @@ jobs:
         run: |
           python3 -m pip install pillow==11.3.0
           python3 tools/visual-report.py "$RUNNER_TEMP/m5-visual-evidence"
+      - name: Collect UI state from every instrumentation phase
+        if: always() && steps.prepare-emulator.conclusion == 'success'
+        run: bash tools/collect-ui-failure-evidence.sh "$RUNNER_TEMP/m4-device-evidence"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
