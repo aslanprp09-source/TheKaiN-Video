@@ -50,13 +50,13 @@ class AndroidSignatureTest(unittest.TestCase):
         with zipfile.ZipFile(self.apk, 'w') as archive:
             archive.writestr('assets/third_party/inventory.json', json.dumps({'components': ['owned']}))
 
-    def inspect(self, fingerprint=None):
+    def inspect(self, fingerprint=None, version_code='3'):
         real_run = inspection.run
         def tools(arguments):
             name = Path(arguments[0]).name
             # Isolate JAR verification from Android SDK availability in the policy unit job.
             if name == 'aapt':
-                text = "package: name='com.thekain.video.rebuild' versionCode='2' versionName='0.1.0-m6'"
+                text = f"package: name='com.thekain.video.rebuild' versionCode='{version_code}' versionName='0.1.0-m6'"
             elif name == 'apksigner':
                 text = 'Signer #1 certificate SHA-256 digest: ' + self.fingerprint
             elif name == 'zipalign':
@@ -69,7 +69,13 @@ class AndroidSignatureTest(unittest.TestCase):
                                       fingerprint if fingerprint is not None else self.fingerprint)
 
     def test_expected_self_signed_certificate_is_valid_without_ignoring_strict_errors(self):
-        self.assertTrue(self.inspect()['signed'])
+        result = self.inspect()
+        self.assertTrue(result['signed'])
+        self.assertEqual(3, result['version_code'])
+
+    def test_previous_apk_version_cannot_be_accepted_as_new_qa_build(self):
+        with self.assertRaisesRegex(ValueError, 'Unexpected release identity'):
+            self.inspect(version_code='2')
 
     def test_unsigned_entry_appended_to_signed_bundle_is_rejected(self):
         with zipfile.ZipFile(self.aab, 'a') as archive:

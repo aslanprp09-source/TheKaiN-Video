@@ -1,0 +1,87 @@
+{
+  "schema": 1,
+  "scope": "signed-internal-qa-run-89-and-owner-feedback",
+  "recorded_on": "2026-11-17",
+  "source_commit": "2b969ed9928758c11a19382026fa35d21f52c5eb",
+  "branch": "rebuild-2026-11-11",
+  "run": {
+    "id": 44031800034,
+    "number": 89,
+    "attempt": 1,
+    "conclusion": "success",
+    "url": "https://github.com/aslanprp09-source/TheKaiN-Video/actions/runs/44031800034"
+  },
+  "identity": {
+    "application_id": "com.thekain.video.rebuild",
+    "version_code": 3,
+    "version_name": "0.1.0-m6",
+    "min_sdk": 26,
+    "target_sdk": 35,
+    "debuggable": false
+  },
+  "deployment_approval": {
+    "environment": "release-signing",
+    "environment_id": 27164601720,
+    "reviewer": "KaiN1One",
+    "state": "approved",
+    "evidence_url": "https://api.github.com/repos/aslanprp09-source/TheKaiN-Video/actions/runs/44031800034/approvals",
+    "reviewer_id": 355790290
+  },
+  "protected_signer": {
+    "job_id": 133868341872,
+    "conclusion": "success",
+    "official_tools_verification": "PASS_IN_SIGNING_CI",
+    "certificate_sha256": "2e8fbb21adb81873d257ff685e904b710f7e63df4c9ea207c6bf2c0b27cb973e",
+    "certificate_origin": "Public expected certificate in signing job log; reviewed helper enforces APK/AAB equality before upload",
+    "evidence_url": "https://github.com/aslanprp09-source/TheKaiN-Video/actions/runs/44031800034/job/133868341872"
+  },
+  "artifact": {
+    "id": 14306540310,
+    "name": "M6-Android-signed-INTERNAL-QA",
+    "zip_bytes": 13641154,
+    "zip_sha256": "f0c73413ffdffeea516c9475e905ca2dbce47cb52e7a8fbd4808083791ae13f7",
+    "digest_source": "GitHub artifact metadata and upload log; not locally recomputed",
+    "expires_at": "2026-11-24T06:42:54Z",
+    "url": "https://github.com/aslanprp09-source/TheKaiN-Video/actions/runs/44031800034/artifacts/14306540310"
+  },
+  "independent_official_tools_verification": {
+    "status": "NOT_RUN",
+    "reason": "Run80 verifies only original run69/version2; no separate official apksigner execution on downloaded run89 APK recorded"
+  },
+  "independent_local_archive_verification": {
+    "status": "BLOCKED",
+    "reason": "Workspace artifact storage download denied; browser file access unavailable; no local archive or signed-file hash recomputation claimed"
+  },
+  "external_audit": {
+    "filename": "TheKaiN_Project_Audit_2026-11-17.md",
+    "document_sha256": "5cda98d10cbab29dd0eaadd84bf18288e04d0f1ea150b36b78014207622bba39",
+    "status": "EXTERNALLY_REPORTED_NOT_REEXECUTED",
+    "claimed_files": {
+      "apk": {
+        "bytes": 7328853,
+        "sha256": "3aa6f5078a7d019eb4e217447866c9f7e1d47f7f37941bee8e6a7f5ce784439e"
+      },
+      "aab": {
+        "bytes": 6943860,
+        "sha256": "f5c696ca07e152859fbca4668b7c76a97232c19bbb864f6d9f3ac4197748f01d"
+      }
+    },
+    "claim_boundary": "Audit reports ZIP/manifest checks, custom APK crypto and strict jarsigner; these were not rerun by this task and do not establish independent official-apksigner PASS"
+  },
+  "owner_feedback": {
+    "status": "OWNER_REPORTED_SUCCESS",
+    "quote": "Все работает.",
+    "context": "Response to signed QA89 update and completed-removal checklist",
+    "device": "Samsung Galaxy S24 Ultra",
+    "os": "Android 17 / One UI 9.0",
+    "installed_apk_hash": null,
+    "per_case_protocol": null,
+    "evidence_url": "https://github.com/aslanprp09-source/TheKaiN-Video/pull/27",
+    "boundary": "Positive owner feedback; not a detailed physical-device matrix or independently confirmed upgrade/data-preservation protocol"
+  },
+  "runtime_16k_device": "NOT_RUN",
+  "physical_device_matrix": "BLOCKED",
+  "production_ready": false,
+  "automatic_publication": false,
+  "identity_origin": "Signing-CI inspector enforces package/version/debuggable; minSdk/targetSdk are reviewed Gradle values, not an independently decoded APK manifest"
+}
