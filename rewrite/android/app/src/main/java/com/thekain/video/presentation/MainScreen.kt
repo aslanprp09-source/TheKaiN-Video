@@ -47,13 +47,15 @@ import kotlinx.coroutines.withContext
 import java.util.Locale
 
 data class ScreenState(val home: HomeState = HomeState(), val tasks: List<DownloadTask> = emptyList(),
-                       val page: Page = Page.HOME, val settings: UiSettings = UiSettings(), val notificationsEnabled: Boolean = true)
+                       val page: Page = Page.HOME, val settings: UiSettings = UiSettings(), val notificationsEnabled: Boolean = true,
+                       val removing: Set<String> = emptySet())
 data class UiActions(
     val edit: (String) -> Unit = {}, val analyze: () -> Unit = {}, val cancelAnalysis: () -> Unit = {},
     val select: (String) -> Unit = {}, val download: () -> Unit = {}, val confirmRepeat: () -> Unit = {},
     val dismissRepeat: () -> Unit = {}, val paste: () -> Unit = {}, val navigate: (Page) -> Unit = {},
     val action: (String, String) -> Unit = { _, _ -> }, val open: (DownloadTask) -> Unit = {},
-    val back: () -> Unit = {}, val theme: (ThemeMode) -> Unit = {}, val language: (String) -> Unit = {}, val notifications: () -> Unit = {})
+    val back: () -> Unit = {}, val theme: (ThemeMode) -> Unit = {}, val language: (String) -> Unit = {},
+    val notifications: () -> Unit = {}, val removeCompleted: (String, Boolean) -> Unit = { _, _ -> })
 
 @Composable fun MainScreen(state: ScreenState, actions: UiActions, snackbar: SnackbarHostState = remember { SnackbarHostState() }) {
     val density = LocalDensity.current
@@ -115,8 +117,8 @@ data class UiActions(
             Box(Modifier.widthIn(max = 840.dp).fillMaxSize()) {
                 when (state.page) {
                     Page.HOME -> Home(state, actions, urlFocus)
-                    Page.DOWNLOADS -> Downloads(state.tasks, actions)
-                    Page.LIBRARY -> Library(state.tasks, actions)
+                Page.DOWNLOADS -> Downloads(state.tasks, actions, state.removing)
+                Page.LIBRARY -> Library(state.tasks, actions, state.removing)
                     Page.SETTINGS -> Settings(state, actions)
                 }
             }
@@ -276,7 +278,7 @@ data class UiActions(
     }
 }
 
-@Composable private fun Downloads(tasks: List<DownloadTask>, actions: UiActions) {
+@Composable private fun Downloads(tasks: List<DownloadTask>, actions: UiActions, removing: Set<String>) {
     var query by rememberSaveable { mutableStateOf("") }
     var filter by rememberSaveable { mutableIntStateOf(0) }
     Column(Modifier.fillMaxSize()) {
@@ -295,12 +297,13 @@ data class UiActions(
         } }.sortedByDescending { it.createdAt }
         LazyColumn(Modifier.fillMaxSize().testTag("tasks_list"), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             if (visible.isEmpty()) item { EmptyState(R.drawable.ic_downloads, if (tasks.isEmpty()) R.string.downloads_empty_title else R.string.no_results, R.string.downloads_empty_text) }
-            items(visible, key = { it.id }) { task -> TaskCard(task, actions) }
+            items(visible, key = { it.id }) { task -> TaskCard(task, actions, removing = task.id in removing) }
         }
     }
 }
 
-@Composable private fun TaskCard(task: DownloadTask, actions: UiActions, library: Boolean = false) {
+@Composable private fun TaskCard(task: DownloadTask, actions: UiActions, library: Boolean = false, removing: Boolean = false) {
+    var confirmRemoval by remember(task.id) { mutableStateOf(false) }
     Card(Modifier.fillMaxWidth().testTag("task_${task.id}"), shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(task.name, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
@@ -320,7 +323,8 @@ data class UiActions(
             task.error?.let { Text(stringResource(it.label()), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error) }
             if (task.state == TransferState.DOWNLOADING && !task.resumable) Text(stringResource(R.string.pause_unavailable), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (task.state == TransferState.COMPLETED) OutlinedButton(onClick = { actions.open(task) }, modifier = Modifier.heightIn(min = 48.dp).testTag("open_${task.id}")) { Text(stringResource(R.string.open)) }
+                if (task.state == TransferState.COMPLETED) OutlinedButton(enabled = !removing, onClick = { actions.open(task) }, modifier = Modifier.heightIn(min = 48.dp).testTag("open_${task.id}")) { Text(stringResource(R.string.open)) }
+                if (task.state == TransferState.COMPLETED) OutlinedButton(enabled = !removing, onClick = { confirmRemoval = true }, modifier = Modifier.heightIn(min = 48.dp).testTag("remove_${task.id}")) { Text(stringResource(if (removing) R.string.remove_in_progress else R.string.remove_download)) }
                 if (task.state == TransferState.DOWNLOADING && task.resumable && task.bytes > 0) TaskButton(R.string.pause, task, "pause", actions)
                 if (task.state == TransferState.PAUSED) TaskButton(R.string.resume, task, "resume", actions)
                 if (task.state == TransferState.FAILED) TaskButton(R.string.retry, task, "retry", actions)
@@ -328,18 +332,39 @@ data class UiActions(
             }
         }
     }
+    if (confirmRemoval && !removing && task.state == TransferState.COMPLETED) AlertDialog(
+        onDismissRequest = { confirmRemoval = false },
+        title = { Text(stringResource(R.string.remove_download_title)) },
+        text = { Text(stringResource(R.string.remove_download_message, task.name)) },
+        confirmButton = {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Button(onClick = { confirmRemoval = false; actions.removeCompleted(task.id, true) },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("remove_file_${task.id}")) {
+                    Text(stringResource(R.string.remove_file_and_record))
+                }
+                OutlinedButton(onClick = { confirmRemoval = false; actions.removeCompleted(task.id, false) },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("remove_record_${task.id}")) {
+                    Text(stringResource(R.string.remove_record_only))
+                }
+                TextButton(onClick = { confirmRemoval = false },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("remove_cancel_${task.id}")) {
+                    Text(stringResource(R.string.cancel))
+                }
+            }
+        }
+    )
 }
 
 @Composable private fun TaskButton(label: Int, task: DownloadTask, kind: String, actions: UiActions) {
     OutlinedButton(onClick = { actions.action(task.id, kind) }, modifier = Modifier.heightIn(min = 48.dp).testTag("${kind}_${task.id}")) { Text(stringResource(label)) }
 }
 
-@Composable private fun Library(tasks: List<DownloadTask>, actions: UiActions) {
+@Composable private fun Library(tasks: List<DownloadTask>, actions: UiActions, removing: Set<String>) {
     val completed = tasks.filter { it.state == TransferState.COMPLETED }.sortedByDescending { it.updatedAt }
     LazyVerticalGrid(GridCells.Adaptive(264.dp), Modifier.fillMaxSize().testTag("library_list"), contentPadding = PaddingValues(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item(span = { GridItemSpan(maxLineSpan) }) { Text(stringResource(R.string.library_description), color = MaterialTheme.colorScheme.onSurfaceVariant) }
         if (completed.isEmpty()) item(span = { GridItemSpan(maxLineSpan) }) { EmptyState(R.drawable.ic_library, R.string.library_empty_title, R.string.library_empty_text) }
-        items(completed, key = { it.id }) { task -> TaskCard(task, actions, library = true) }
+        items(completed, key = { it.id }) { task -> TaskCard(task, actions, library = true, removing = task.id in removing) }
     }
 }
 

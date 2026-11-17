@@ -1,6 +1,7 @@
 package com.thekain.video
 
 import android.app.Application
+import android.app.NotificationManager
 import android.content.Context
 import androidx.room.Room
 import androidx.work.*
@@ -40,6 +41,11 @@ class AppGraph(val context: Context) {
     val repository = DownloadRepository(db)
     val verifier = MediaVerifier(context)
     val publisher = MediaPublisher(context, verifier)
+    private val remover = CompletedDownloadRemover(repository::find, repository::removeCompleted,
+        publisher::deleteCompletedOutput, CompletedStaging(File(context.filesDir, "transfers"))::delete) { task ->
+        val notificationId = (task.id.hashCode() and 0x0fffffff) or 0x10000000
+        context.getSystemService(NotificationManager::class.java).cancel(notificationId)
+    }
     // Dependency boundary for owned TLS fixtures; production always uses system trust.
     @Volatile var connections: Connections = systemConnections
     val sourceAnalyzer = SourceAnalyzer { input -> HttpsSourceAnalyzer(connections).analyze(input) }
@@ -73,6 +79,13 @@ class AppGraph(val context: Context) {
             } catch (_: Exception) { /* Room remains authoritative; no raw URL diagnostics. */ }
         }
     }
+
+    /** Keep the database record when deleting the real output fails. No active work may be removed. */
+    suspend fun removeCompleted(id: String, removeFile: Boolean): RemovalOutcome =
+        withContext(Dispatchers.IO) { remover.remove(id, removeFile) }
+
+    suspend fun notifyTerminalIfPresent(id: String, notify: (DownloadTask) -> Unit) =
+        remover.notifyIfPresent(id, notify)
 
     suspend fun schedule(id: String, replace: Boolean = false) {
         val task = repository.get(id)

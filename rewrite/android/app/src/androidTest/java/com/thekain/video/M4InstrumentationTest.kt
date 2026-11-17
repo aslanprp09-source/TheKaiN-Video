@@ -100,6 +100,55 @@ class M4InstrumentationTest {
         assertFalse(permissions.any { it in setOf("android.permission.WRITE_EXTERNAL_STORAGE", "android.permission.MANAGE_EXTERNAL_STORAGE", "android.permission.READ_EXTERNAL_STORAGE", "android.permission.READ_MEDIA_VIDEO", "android.permission.READ_MEDIA_AUDIO") })
     }
 
+    @Test fun removingCompletedEntryOnlyKeepsDeviceFile() = runBlocking<Unit> {
+        server.enqueue(response())
+        val task = create("/remove-list-only.mp4")
+        assertEquals(EngineResult.COMPLETED, engine().run(task.id))
+        val done = repo.get(task.id)
+        val uri = Uri.parse(done.outputUri)
+        outputs += uri // The test owns the remaining device file after removing the row.
+        assertTrue(repo.removeCompleted(task.id))
+        assertFalse(repo.all().any { it.id == task.id })
+        assertEquals(body.size, context.contentResolver.openInputStream(uri)!!.use { it.readBytes().size })
+    }
+
+    @Test fun removalDeletesOnlyExactCompletedOwnedOutput() = runBlocking<Unit> {
+        server.enqueue(response()); server.enqueue(response())
+        val task = create("/remove-file.mp4")
+        val otherTask = create("/other-file.mp4")
+        assertEquals(EngineResult.COMPLETED, engine().run(task.id))
+        assertEquals(EngineResult.COMPLETED, engine().run(otherTask.id))
+        val done = repo.get(task.id)
+        val other = repo.get(otherTask.id)
+        val uri = Uri.parse(done.outputUri)
+        try {
+            publisher.deleteCompletedOutput(done.copy(outputUri = other.outputUri))
+            fail("A different owned task's output must be rejected")
+        } catch (_: IllegalArgumentException) { }
+        context.contentResolver.openInputStream(uri)!!.use { assertTrue(it.read() >= 0) }
+        context.contentResolver.openInputStream(Uri.parse(other.outputUri))!!.use { assertTrue(it.read() >= 0) }
+        publisher.deleteCompletedOutput(done)
+        assertTrue(repo.removeCompleted(task.id))
+        context.contentResolver.query(uri, arrayOf(MediaStore.MediaColumns._ID), null, null, null)!!.use {
+            assertFalse(it.moveToFirst())
+        }
+        assertFalse(repo.removeCompleted(task.id))
+    }
+
+    @Test fun completedRemovalSupportsLegacyAppPrivateFileProviderPath() = runBlocking<Unit> {
+        val legacy = MediaPublisher(context, verifier, api = 28)
+        server.enqueue(response())
+        val task = create("/legacy-remove.mp4")
+        assertEquals(EngineResult.COMPLETED, engine(output = legacy).run(task.id))
+        val done = repo.get(task.id)
+        val directory = requireNotNull(context.getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS))
+        val file = File(directory, DirectLinks.publishedName(done.name, done.id))
+        assertTrue(file.isFile)
+        legacy.deleteCompletedOutput(done)
+        assertFalse(file.exists())
+        assertTrue(repo.removeCompleted(task.id))
+    }
+
     @Test fun unknownSizeStaysUnknownAndOnlyVerifiedOutputCompletes() = runBlocking<Unit> {
         server.enqueue(response(chunked = true))
         val task = create()

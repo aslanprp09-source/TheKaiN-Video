@@ -5,7 +5,12 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import com.thekain.video.TheKaiNApp
+import com.thekain.video.domain.RemovalOutcome
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 
 class MainViewModel(app: Application, private val saved: SavedStateHandle) : AndroidViewModel(app) {
@@ -16,6 +21,10 @@ class MainViewModel(app: Application, private val saved: SavedStateHandle) : And
     val page = saved.getStateFlow("page", Page.HOME.name)
     private val messages = MutableSharedFlow<Boolean>(extraBufferCapacity = 1)
     val accepted = messages.asSharedFlow()
+    private val removalEvents = Channel<RemovalOutcome>(Channel.BUFFERED)
+    val removals = removalEvents.receiveAsFlow()
+    private val mutableRemoving = MutableStateFlow<Set<String>>(emptySet())
+    val removing = mutableRemoving.asStateFlow()
     init {
         viewModelScope.launch {
             graph.submission.collect { value ->
@@ -35,4 +44,18 @@ class MainViewModel(app: Application, private val saved: SavedStateHandle) : And
     }
     fun back() { saved["page"] = if (page.value == Page.SETTINGS.name) saved.get<String>("settings_parent") ?: Page.HOME.name else Page.HOME.name }
     fun action(id: String, kind: String) = graph.action(id, kind)
+    @Synchronized fun removeCompleted(id: String, removeFile: Boolean) {
+        if (id in mutableRemoving.value) return
+        mutableRemoving.update { it + id }
+        viewModelScope.launch {
+            try {
+                val result = withContext(Dispatchers.IO) { graph.removeCompleted(id, removeFile) }
+                removalEvents.send(result)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } finally {
+                mutableRemoving.update { it - id }
+            }
+        }
+    }
 }
