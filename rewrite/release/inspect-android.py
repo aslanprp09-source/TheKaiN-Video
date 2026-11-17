@@ -48,7 +48,7 @@ def inspect(apk, aab, tools, signed, expected_certificate=None):
     if badging.returncode or 'application-debuggable' in badging.stdout:
         raise ValueError('Release manifest is invalid or debuggable')
     identity = re.search(r"package: name='([^']+)' versionCode='([^']+)' versionName='([^']+)'", badging.stdout)
-    if not identity or identity.groups() != ('com.thekain.video.rebuild', '2', '0.1.0-m6'):
+    if not identity or identity.groups() != ('com.thekain.video.rebuild', '3', '0.1.0-m6'):
         raise ValueError('Unexpected release identity')
     apk_check = run([tools / 'apksigner', 'verify', '--verbose', '--print-certs', apk])
     certificate = None
