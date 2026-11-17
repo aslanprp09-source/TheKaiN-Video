@@ -17,5 +17,8 @@ for path in files:
             message = message.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
             print('::error title=Android fixture test::' + message)
 print(f'::notice title=Android test report::{count} tests, {failed} failures/errors, {skipped} skipped')
-if not count or failed or count == skipped:
+expected = int(sys.argv[2]) if len(sys.argv) > 2 else None
+if expected is not None and (count != expected or skipped):
+    print(f'::error title=Android test inventory::Expected exactly {expected} executed tests without skips')
+if not count or failed or count == skipped or (expected is not None and (count != expected or skipped)):
     raise SystemExit(1)
