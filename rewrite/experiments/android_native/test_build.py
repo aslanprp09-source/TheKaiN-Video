@@ -16,6 +16,33 @@ from rewrite.experiments.android_native.delivery import PROFILE,verify_runtime_a
 
 
 class NativeIntakeTests(unittest.TestCase):
+    @unittest.skipUnless(sys.platform=='linux' and platform.machine()=='x86_64','Linux/x86_64 kernel reference test')
+    def test_native_kernel_blocks_sockets_and_rejects_allocation_above_address_space_limit(self):
+        source=r"""
+#include "runtime_kernel.h"
+#include <assert.h>
+#include <sys/mman.h>
+int main(void) {
+    RuntimeKernelLimits limits;
+    assert(configure_runtime_limits(64ULL*1024*1024,5,&limits)==0);
+    assert(limits.address==limits.before+64ULL*1024*1024 && limits.socket_denied);
+    for(int domain=0;domain<3;domain++) {
+        int families[]={AF_INET,AF_INET6,AF_UNIX};
+        assert(socket(families[domain],SOCK_STREAM,0)==-1 && errno==EPERM);
+    }
+    void *p=mmap(NULL,128UL*1024*1024,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS,-1,0);
+    assert(p==MAP_FAILED && errno==ENOMEM);
+    puts("KERNEL_BUDGET_PASS");
+}
+"""
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);(root/'test.c').write_text(source)
+            subprocess.run(['gcc','-std=gnu11','-Wall','-Wextra','-Werror','-I',str(Path(__file__).parent),
+                str(root/'test.c'),'-o',str(root/'probe')],check=True,capture_output=True,timeout=30)
+            result=subprocess.run([str(root/'probe')],capture_output=True,text=True,timeout=10)
+            self.assertEqual(result.returncode,0,result.stderr)
+            self.assertEqual(result.stdout.strip(),'KERNEL_BUDGET_PASS')
+
     def test_apk_missing_tampered_or_extra_python_assets_are_rejected_before_device(self):
         payload=b'# own Python package fixture\n';name='lib/python3.14/__phello__/__init__.py'
         raw=json.dumps({name:{'bytes':len(payload),'sha256':hashlib.sha256(payload).hexdigest()}}).encode()

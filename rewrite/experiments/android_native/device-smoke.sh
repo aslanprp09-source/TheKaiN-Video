@@ -16,13 +16,14 @@ cleanup() {
   adb -s "$ANDROID_SERIAL" logcat -b crash -d > "$evidence/crash.txt" 2>/dev/null || true
   adb -s "$ANDROID_SERIAL" shell dumpsys activity exit-info com.thekain.runtime.lab > "$evidence/exit-info.txt" 2>/dev/null || true
   if [ "$result" -ne 0 ]; then
+    if [ -f "$evidence/instrumentation.txt" ]; then tail -120 "$evidence/instrumentation.txt"; fi
     tail -120 "$evidence/crash.txt"
     tail -100 "$evidence/exit-info.txt"
     python3 - "$evidence/logcat.txt" <<'PY'
 from pathlib import Path
 import sys
 lines=Path(sys.argv[1]).read_text(errors='replace').splitlines()
-terms=('thekain.runtime.lab','lmkd','lowmemorykiller','python.stderr','AndroidRuntime','Fatal signal')
+terms=('thekain.runtime.lab','lmkd','lowmemorykiller','python.stderr','AndroidRuntime','Fatal signal','TheKaiNRuntime')
 for line in [s for s in lines if any(term in s for term in terms)][-120:]: print(line)
 PY
   fi
@@ -85,7 +86,31 @@ adb -s "$ANDROID_SERIAL" shell pidof system_server | tr -d '\r' > "$evidence/sys
 test -s "$evidence/system-server-before.txt"
 adb -s "$ANDROID_SERIAL" install -r -t "$delivery/lab.apk"
 adb -s "$ANDROID_SERIAL" install -r -t "$delivery/tests.apk"
-timeout 180 adb -s "$ANDROID_SERIAL" shell am instrument -w -e class com.thekain.runtime.lab.NativeLabTest com.thekain.runtime.lab.test/androidx.test.runner.AndroidJUnitRunner > "$evidence/instrumentation.txt"
+timeout 420 adb -s "$ANDROID_SERIAL" shell am instrument -w -e class com.thekain.runtime.lab.NativeLabTest,com.thekain.runtime.lab.RuntimeProcessTest com.thekain.runtime.lab.test/androidx.test.runner.AndroidJUnitRunner > "$evidence/instrumentation.txt" &
+driver=$!
+(
+  count=0
+  last_pid=""
+  while kill -0 "$driver" 2>/dev/null; do
+    pid=$(adb -s "$ANDROID_SERIAL" shell pidof com.thekain.runtime.lab:python_runtime 2>/dev/null | tr -d '\r')
+    case "$pid" in ''|*[!0-9]*) ;; *)
+      if [ "$count" -lt 32 ] && [ "$pid" != "$last_pid" ]; then
+        last_pid="$pid"
+        adb -s "$ANDROID_SERIAL" shell dumpsys meminfo "$pid" > "$evidence/meminfo-$count-$pid.txt" 2>/dev/null || true
+        count=$((count+1))
+      fi ;;
+    esac
+    sleep 0.25
+  done
+) &
+sampler=$!
+result=0
+wait "$driver" || result=$?
+kill "$sampler" 2>/dev/null || true
+wait "$sampler" 2>/dev/null || true
+adb -s "$ANDROID_SERIAL" exec-out run-as com.thekain.runtime.lab cat files/process-evidence.jsonl > "$evidence/process-evidence.jsonl"
+python3 rewrite/experiments/android_native/process_report.py --evidence "$evidence" --api "$api" --pages "$pages"
+test "$result" = 0
 adb -s "$ANDROID_SERIAL" shell pidof system_server | tr -d '\r' > "$evidence/system-server-after.txt"
 cmp "$evidence/system-server-before.txt" "$evidence/system-server-after.txt"
 adb -s "$ANDROID_SERIAL" logcat -b crash -d > "$evidence/crash.txt"
@@ -98,7 +123,7 @@ python3 - "$evidence/instrumentation.txt" "$api" "$pages" <<'PY'
 from pathlib import Path
 import re,sys,json
 text=Path(sys.argv[1]).read_text();print(text)
-assert re.search(r'^OK \(4 tests?\)\s*$',text,re.M), 'All four native tests must execute successfully'
+assert re.search(r'^OK \(23 tests?\)\s*$',text,re.M), 'All 23 native/process tests must execute successfully'
 assert not any(s in text for s in ('FAILURES!!!','shortMsg=','INSTRUMENTATION_FAILED')), 'Native instrumentation failed'
-print('::notice::'+json.dumps({'native_JNI_smoke':'PASS','api':int(sys.argv[2]),'actual_page_size':int(sys.argv[3]),'tests':4,'production_ready':False}))
+print('::notice::'+json.dumps({'native_JNI_smoke':'PASS','api':int(sys.argv[2]),'actual_page_size':int(sys.argv[3]),'tests':23,'production_ready':False}))
 PY
