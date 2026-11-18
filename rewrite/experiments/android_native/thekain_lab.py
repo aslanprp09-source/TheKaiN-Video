@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import ssl
 import sys
+import sysconfig
 
 from spike import MAX_OUTPUT, SpikeError, normalize, origin
 
@@ -30,7 +31,8 @@ def dispatch(raw):
         if request.get('op')=='probe':
             result={'status':'PASS','python':list(sys.version_info[:3]),'platform':sys.platform,
                     'openssl':ssl.OPENSSL_VERSION,'page_size':os.sysconf('SC_PAGE_SIZE'),
-                    'installed_native_extensions':os.path.dirname(ssl._ssl.__file__)==sys._thekain_native_directory}
+                    'installed_native_extensions':os.path.dirname(ssl._ssl.__file__)==sys._thekain_native_directory,
+                    'mimalloc':int(sysconfig.get_config_var('WITH_MIMALLOC'))}
         elif request.get('op')=='analyze':
             import yt_dlp
             from yt_dlp.version import __version__

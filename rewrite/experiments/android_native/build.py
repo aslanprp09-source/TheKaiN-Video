@@ -148,6 +148,7 @@ def elf_report(path, machine, readelf):
 
 
 def build(work, abis, source_cache=None, ndk_archive=None):
+    require(PROFILE['mimalloc'] is False, 'UNREVIEWED_ALLOCATOR')
     work.mkdir(parents=True,exist_ok=False); (work/'tmp').mkdir()
     sources = {n:fetch_source(n,work,source_cache) for n in PROFILE['sources']}
     ndk = acquire_ndk(work, ndk_archive)
@@ -174,7 +175,7 @@ def build(work, abis, source_cache=None, ndk_archive=None):
         ssl = work/('openssl-'+abi);ssl.mkdir();sslprefix=ssl/'prefix'
         target_env = clean_env(work,tools)
         target_env.update(ANDROID_NDK_ROOT=str(ndk),CC=pin['triplet']+'26-clang',AR='llvm-ar',RANLIB='llvm-ranlib',
-                          CFLAGS='-O2 -fPIC',LDFLAGS='-Wl,-z,max-page-size=16384')
+                          CFLAGS='-O2 -fPIC',LDFLAGS='-Wl,--no-rosegment -Wl,-z,max-page-size=16384')
         run(['perl',sources['openssl']/'Configure',pin['openssl'],'-D__ANDROID_API__=26',
              'no-shared','no-tests','no-module','no-apps','no-asm','--prefix='+str(sslprefix)],ssl,target_env,work/(abi+'-openssl.log'))
         run(['make','-j4'],ssl,target_env,work/(abi+'-openssl.log'))
@@ -183,11 +184,11 @@ def build(work, abis, source_cache=None, ndk_archive=None):
         (target/'Modules').mkdir()
         (target/'Modules/Setup.local').write_text('*disabled*\n'+'\n'.join(DISABLED)+'\n')
         target_env.update(CFLAGS='-O2 -fPIC -D__BIONIC_NO_PAGE_SIZE_MACRO',
-            LDFLAGS='-Wl,-z,max-page-size=16384 -Wl,--no-undefined -Wl,--exclude-libs,ALL -lm -ldl',
+            LDFLAGS='-Wl,--no-rosegment -Wl,-z,max-page-size=16384 -Wl,--no-undefined -Wl,--exclude-libs,ALL -lm -ldl',
             PKG_CONFIG_LIBDIR=str(sslprefix/'lib/pkgconfig'))
         run([sources['cpython']/'configure','--host='+pin['triplet'],'--build=x86_64-pc-linux-gnu',
              '--with-build-python='+str(host/'python'),'--prefix='+str(prefix),'--enable-shared',
-             '--without-static-libpython','--without-ensurepip','--disable-test-modules',
+             '--without-static-libpython','--without-ensurepip','--disable-test-modules','--without-mimalloc',
              '--with-openssl='+str(sslprefix),'--with-openssl-rpath=no'],target,target_env,work/(abi+'-python.log'))
         run(['make','-j4'],target,target_env,work/(abi+'-python.log'))
         run(['make','install','COMPILEALL_OPTS=-j1'],target,target_env,work/(abi+'-python.log'))
@@ -220,7 +221,7 @@ def build(work, abis, source_cache=None, ndk_archive=None):
         # Own JNI C only; no imported bootstrap that changes ART signal handling.
         run([tools/(pin['triplet']+'26-clang'),'-shared','-fPIC','-O2','-I'+str(prefix/'include/python3.14'),
              ROOT/'jni.c','-L'+str(prefix/'lib'),'-lpython3.14','-llog','-lm','-ldl',
-             '-Wl,-z,max-page-size=16384','-Wl,--no-undefined','-o',native/'libthekain_lab.so'],work,target_env,work/(abi+'-jni.log'))
+             '-Wl,--no-rosegment','-Wl,-z,max-page-size=16384','-Wl,--no-undefined','-o',native/'libthekain_lab.so'],work,target_env,work/(abi+'-jni.log'))
         observed['libthekain_lab.so'] = elf_report(native/'libthekain_lab.so',pin['machine'],tools/'llvm-readelf')
         observed['libthekain_lab.so']['packaged_name'] = 'libthekain_lab.so'
         files = {str(p.relative_to(dest)):{'bytes':p.stat().st_size,'sha256':digest(p)}

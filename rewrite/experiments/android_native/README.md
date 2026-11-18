@@ -32,7 +32,11 @@ This inventory precedes lab packaging. It is not a completed legal review for
 product distribution. The broader PR33 runtime intake stays historically
 `BLOCKED_NOT_RUN`; this experiment deliberately uses a smaller dependency set.
 `_ctypes`, SQLite, bz2, lzma, zstd, Tk, readline/curses, dbm, UUID and decimal
-extensions are disabled. No libffi, JS/EJS runtime, FFmpeg, cookies or browser
+extensions are disabled. The optional mimalloc allocator is disabled using
+CPython's `--without-mimalloc`: its direct `SYS_open` call is blocked by API26
+app seccomp. The normal GIL build uses CPython's standard allocator instead;
+Android protection is never relaxed. The JNI probe checks `WITH_MIMALLOC=0`.
+No libffi, JS/EJS runtime, FFmpeg, cookies or browser
 integration is included. OpenSSL uses no external providers/modules.
 
 ## Build and execution boundary
@@ -47,7 +51,8 @@ No signing credentials are forwarded to these jobs.
 
 Both x86_64 and arm64-v8a are compiled for API 26. Each packaged ELF is checked
 for ABI, PT_LOAD alignment of at least 16384, expected system dependencies and
-absence of RPATH/RUNPATH. Native modules are renamed `libpyext_*.so` and installed
+absence of RPATH/RUNPATH. `--no-rosegment` follows upstream Android linker
+flags for usable backtraces on older Android. Native modules are renamed `libpyext_*.so` and installed
 by Android's package manager. A fixed import finder loads them from
 `ApplicationInfo.nativeLibraryDir`; no executable code is copied into writable
 app data. Only hash-verified Python/data assets go into private app storage.
@@ -95,7 +100,8 @@ The existing `rewrite-ci.yml` has a **default-off** manual
 signing or historical-verifier modes. Two jobs build both ABIs once, then feed
 only that run's artifact ID to four hosted x86_64 emulator jobs: API26/4KiB,
 API29/4KiB, API35/4KiB and API35/16KiB. The script asserts actual SDK, ABI and
-kernel page size and requires all four JNI tests to pass, with no skip/fallback.
+page size (API26 reads `AT_PAGESZ`, which works without shell `getconf`)
+and requires all four JNI tests to pass, with no skip/fallback.
 Failure logs are retained; APKs expire after one day. An emulator timeout stops
 only this lab application. ARM64 execution and physical-device testing remain
 `NOT_RUN` until separately performed. Do not install this lab over the product.

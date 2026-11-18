@@ -2,6 +2,7 @@
   "schema": 1,
   "scope": "isolated-source-built-JNI-lab; not a product runtime",
   "api": 26,
+  "mimalloc": false,
   "ndk": {
     "version": "27.3.13750724",
     "url": "https://dl.google.com/android/repository/android-ndk-r27d-linux.zip",

@@ -54,6 +54,7 @@ public class NativeLabTest {
         assertEquals("[3,14,8]",report.getJSONArray("python").toString());
         assertEquals("android",report.getString("platform"));
         assertTrue(report.getBoolean("installed_native_extensions"));
+        assertEquals(0,report.getInt("mimalloc"));
         assertTrue(report.getString("openssl").startsWith("OpenSSL 3.5.9"));
         assertEquals(Os.sysconf(OsConstants._SC_PAGESIZE),report.getLong("page_size"));
     }
