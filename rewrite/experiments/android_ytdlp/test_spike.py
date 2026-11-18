@@ -77,6 +77,7 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(str(caught.exception), 'OUT_OF_SCOPE_URL')
 
 
+@unittest.skipUnless(sys.platform.startswith('linux'),'Host reference lifecycle experiment requires Linux')
 class LifecycleTests(unittest.TestCase):
     def command(self, code): return [sys.executable, '-I', '-c', code]
 
@@ -145,6 +146,7 @@ class LifecycleTests(unittest.TestCase):
                 self.assertFalse(marker.exists())
 
 
+@unittest.skipUnless(sys.platform.startswith('linux'),'Host reference TLS/worker experiment requires Linux')
 class OwnedHttpsTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
