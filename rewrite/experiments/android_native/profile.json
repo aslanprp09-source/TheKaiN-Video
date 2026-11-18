@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "scope": "isolated-source-built-JNI-lab; not a product runtime",
+  "api": 26,
+  "mimalloc": false,
+  "ndk": {
+    "version": "27.3.13750724",
+    "url": "https://dl.google.com/android/repository/android-ndk-r27d-linux.zip",
+    "bytes": 663956036,
+    "official_sha1": "22105e410cf29afcf163760cc95522b9fb981121",
+    "sha256": "601246087a682d1944e1e16dd85bc6e49560fe8b6d61255be2829178c8ed15d9"
+  },
+  "sources": {
+    "cpython": {"url": "https://github.com/python/cpython.git", "commit": "8e6e75d9102e39bed2a2b279203a396741180f12", "version": "3.14.8", "license": "PSF license and bundled notices; full inventory copied"},
+    "openssl": {"url": "https://github.com/openssl/openssl.git", "commit": "45e844fa2a14ec92d146bd8f5778ac130b6625fb", "version": "3.5.9", "license": "Apache-2.0"}
+  },
+  "abis": {
+    "x86_64": {"triplet": "x86_64-linux-android", "openssl": "android-x86_64", "machine": 62},
+    "arm64-v8a": {"triplet": "aarch64-linux-android", "openssl": "android-arm64", "machine": 183}
+  },
+  "production_ready": false,
+  "automatic_publication": false
+}

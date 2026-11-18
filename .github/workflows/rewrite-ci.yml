@@ -27,13 +27,109 @@ on:
         type: string
         default: ''
         description: Public Issue 6 comment ID from the fresh owner no-bypass API audit (verifier only)
+      native_runtime_lab:
+        type: boolean
+        default: false
+        description: Explicit source-built JNI lab only; no product integration or release signing
 permissions:
   contents: read
 jobs:
+  native-runtime-build:
+    if: github.event_name == 'workflow_dispatch' && inputs.native_runtime_lab && !inputs.build_packages && !inputs.sign_android && !inputs.verify_artifact
+    needs: ci-policy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    outputs:
+      artifact-id: ${{ steps.upload-lab.outputs.artifact-id }}
+    steps:
+      - id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - id: setup-python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with:
+          python-version: '3.11.18'
+      - id: setup-java
+        uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78
+        with:
+          distribution: temurin
+          java-version: '17'
+      - id: setup-gradle
+        uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c
+        with:
+          gradle-version: '8.11.1'
+          cache-disabled: true
+      - id: source-build
+        run: python3 rewrite/experiments/android_native/build.py --work "$RUNNER_TEMP/native-lab"
+      - id: assemble-lab
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-35' 'build-tools;35.0.0'
+          gradle --no-daemon -p rewrite/experiments/android_native/android :app:assembleDebug :app:assembleDebugAndroidTest -PlabRuntimeDir="$RUNNER_TEMP/native-lab/package"
+          python3 rewrite/experiments/android_native/delivery.py pack --work "$RUNNER_TEMP/native-lab" --output "$RUNNER_TEMP/native-lab-delivery"
+      - id: upload-lab
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: TheKaiN-native-lab-INTERNAL-TEST
+          path: ${{ runner.temp }}/native-lab-delivery/
+          if-no-files-found: error
+          retention-days: 1
+      - id: build-diagnostics
+        if: failure()
+        run: python3 rewrite/experiments/android_native/diagnostics.py --work "$RUNNER_TEMP/native-lab"
+  native-runtime-device-tests:
+    if: github.event_name == 'workflow_dispatch' && inputs.native_runtime_lab && !inputs.build_packages && !inputs.sign_android && !inputs.verify_artifact
+    needs: native-runtime-build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {api: 26, image: google_apis, pages: 4096}
+          - {api: 29, image: google_apis, pages: 4096}
+          - {api: 35, image: google_apis, pages: 4096}
+          - {api: 36, image: google_apis_ps16k, pages: 16384}
+    steps:
+      - id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - id: setup-java
+        uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78
+        with:
+          distribution: temurin
+          java-version: '17'
+      - id: download-lab
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          artifact-ids: ${{ needs.native-runtime-build.outputs.artifact-id }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/native-lab-delivery
+      - id: native-smoke
+        run: bash rewrite/experiments/android_native/device-smoke.sh '${{ matrix.api }}' '${{ matrix.image }}' '${{ matrix.pages }}' "$RUNNER_TEMP/native-lab-delivery" "$RUNNER_TEMP/native-lab-evidence"
+      - id: upload-evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: native-lab-API${{ matrix.api }}-${{ matrix.pages }}
+          path: ${{ runner.temp }}/native-lab-evidence/
+          if-no-files-found: error
+          retention-days: 7
   ci-policy:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
+      - name: Reject conflicting native lab mode
+        if: inputs.native_runtime_lab && (inputs.build_packages || inputs.sign_android || inputs.verify_artifact)
+        run: exit 1
       - name: Reject conflicting or unaudited verifier mode
         if: inputs.verify_artifact && (inputs.build_packages || inputs.sign_android || !inputs.bypass_preflight_comment)
         run: exit 1

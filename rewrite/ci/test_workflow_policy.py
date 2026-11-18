@@ -14,6 +14,30 @@ class WorkflowPolicyTest(unittest.TestCase):
     def test_committed_workflows_meet_the_policy(self):
         self.assertEqual(check(self.docs, self.lock), [])
 
+    def test_native_lab_cannot_gain_signing_inputs_foreign_artifacts_or_skip_real_devices(self):
+        for variant in ('default-on', 'automatic', 'conflict', 'environment', 'token', 'write',
+                        'extra-command', 'skip', 'cache', 'artifact', 'run', 'matrix', 'ref', 'upload'):
+            self.setUp()
+            ci = self.docs['.github/workflows/rewrite-ci.yml']
+            build = ci['jobs']['native-runtime-build']
+            device = ci['jobs']['native-runtime-device-tests']
+            steps = {s['id']: s for s in build['steps'] + device['steps']}
+            if variant == 'default-on': ci['on']['workflow_dispatch']['inputs']['native_runtime_lab']['default'] = 'true'
+            if variant == 'automatic': build['if'] = 'true'
+            if variant == 'conflict': ci['jobs']['ci-policy']['steps'] = [s for s in ci['jobs']['ci-policy']['steps'] if 'native_runtime_lab' not in s.get('if', '')]
+            if variant == 'environment': build['environment'] = 'release-signing'
+            if variant == 'token': steps['source-build']['env'] = {'GH_TOKEN': '${{ github.token }}'}
+            if variant == 'write': device['permissions']['contents'] = 'write'
+            if variant == 'extra-command': steps['source-build']['run'] += ' --abis x86_64'
+            if variant == 'skip': steps['native-smoke']['if'] = 'false'
+            if variant == 'cache': steps['setup-gradle']['with']['cache-disabled'] = 'false'
+            if variant == 'artifact': steps['download-lab']['with']['artifact-ids'] = '${{ inputs.artifact }}'
+            if variant == 'run': steps['download-lab']['with']['run-id'] = '${{ inputs.run }}'
+            if variant == 'matrix': device['strategy']['matrix']['include'].pop()
+            if variant == 'ref': steps['checkout']['with']['ref'] = 'main'
+            if variant == 'upload': steps['upload-lab']['with']['path'] = '${{ runner.temp }}/'
+            with self.subTest(variant=variant): self.assertTrue(check(self.docs, self.lock))
+
     def test_floating_or_unreviewed_sha_and_action_are_rejected(self):
         name = '.github/workflows/rewrite-ci.yml'
         for uses in ('actions/checkout@v7', 'actions/checkout@' + 'f' * 40, 'unknown/action@' + 'a' * 40,

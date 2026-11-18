@@ -14,6 +14,7 @@ BUILD_CONDITION = "github.event_name == 'workflow_dispatch' && inputs.build_pack
 VERIFY_BASE = "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/rebuild-2026-11-11' && inputs.verify_artifact && !inputs.build_packages && !inputs.sign_android"
 VERIFY_CONDITION = VERIFY_BASE + " && inputs.verification_target != 'qa89'"
 QA89_CONDITION = VERIFY_BASE + " && inputs.verification_target == 'qa89'"
+NATIVE_CONDITION = "github.event_name == 'workflow_dispatch' && inputs.native_runtime_lab && !inputs.build_packages && !inputs.sign_android && !inputs.verify_artifact"
 REQUIRED_CHECKS = {'ci-policy', 'windows-tests', 'android-debug', 'android-device-tests'}
 PUBLIC_OUTPUTS = {
     'signing-authorized': '${{ jobs.signing-policy.outputs.authorized }}',
@@ -126,6 +127,7 @@ def check(documents, lock):
         'QA89 caller must be manual, reviewed-policy gated and forward only the public preflight ID')
     qa89_errors = check_qa89(documents.get(QA89_WORKFLOW, {}), lock)
     errors.extend(qa89_errors)
+    errors.extend(check_native_lab(ci, lock))
     verifier_input = ci['on'].get('workflow_dispatch', {}).get('inputs', {}).get('verify_artifact', {})
     require(verifier_input.get('type') == 'boolean' and verifier_input.get('default') == 'false',
             'Independent verifier must default off')
@@ -227,6 +229,70 @@ def check(documents, lock):
     require(sign_env.get('ANDROID_SIGNING_CERT_SHA256') == '${{ vars.ANDROID_SIGNING_CERT_SHA256 }}', 'Expected public certificate required')
     upload = by_id.get('upload-signed', {})
     require('if' not in upload and upload.get('with', {}).get('path') == '${{ runner.temp }}/thekain-signed-output/', 'Failed or broader signing output must not be uploaded')
+    return errors
+
+
+def check_native_lab(ci, lock):
+    errors = []
+    def require(value, message):
+        if not value: errors.append('Native lab: ' + message)
+    setting = ci['on'].get('workflow_dispatch', {}).get('inputs', {}).get('native_runtime_lab', {})
+    require(setting.get('type') == 'boolean' and setting.get('default') == 'false', 'must default off')
+    require(any(s.get('if') == 'inputs.native_runtime_lab && (inputs.build_packages || inputs.sign_android || inputs.verify_artifact)'
+                and s.get('run') == 'exit 1' for s in ci['jobs']['ci-policy']['steps']), 'conflicting modes must fail')
+    build = ci['jobs'].get('native-runtime-build', {})
+    device = ci['jobs'].get('native-runtime-device-tests', {})
+    common = {'if', 'needs', 'runs-on', 'timeout-minutes', 'permissions', 'steps'}
+    require(set(build) == common | {'outputs'} and set(device) == common | {'strategy'},
+            'no Environment, inherited credentials, defaults, services or extra fields')
+    for job, needs, permissions, timeout in (
+            (build, 'ci-policy', {'contents': 'read'}, '60'),
+            (device, 'native-runtime-build', {'contents': 'read', 'actions': 'read'}, '25')):
+        require(job.get('if') == NATIVE_CONDITION and job.get('needs') == needs and
+                job.get('permissions') == permissions and job.get('runs-on') == 'ubuntu-24.04' and
+                job.get('timeout-minutes') == timeout, 'isolated default-off hosted read-only jobs required')
+    require(build.get('outputs') == {'artifact-id': '${{ steps.upload-lab.outputs.artifact-id }}'}, 'only same-run lab artifact output')
+    require(device.get('strategy') == {'fail-fast': 'false', 'matrix': {'include': [
+        {'api': '26', 'image': 'google_apis', 'pages': '4096'},
+        {'api': '29', 'image': 'google_apis', 'pages': '4096'},
+        {'api': '35', 'image': 'google_apis', 'pages': '4096'},
+        {'api': '36', 'image': 'google_apis_ps16k', 'pages': '16384'}]}}, 'all four real API/page-size targets required')
+    action_specs = {
+        'checkout': ('actions/checkout', {'persist-credentials': 'false', 'ref': '${{ github.sha }}'}),
+        'setup-python': ('actions/setup-python', {'python-version': '3.11.18'}),
+        'setup-java': ('actions/setup-java', {'distribution': 'temurin', 'java-version': '17'}),
+        'setup-gradle': ('gradle/actions/setup-gradle', {'gradle-version': '8.11.1', 'cache-disabled': 'true'}),
+        'upload-lab': ('actions/upload-artifact', {'name': 'TheKaiN-native-lab-INTERNAL-TEST',
+            'path': '${{ runner.temp }}/native-lab-delivery/', 'if-no-files-found': 'error', 'retention-days': '1'}),
+        'download-lab': ('actions/download-artifact', {'artifact-ids': '${{ needs.native-runtime-build.outputs.artifact-id }}',
+            'merge-multiple': 'true', 'path': '${{ runner.temp }}/native-lab-delivery'}),
+        'upload-evidence': ('actions/upload-artifact', {'name': 'native-lab-API${{ matrix.api }}-${{ matrix.pages }}',
+            'path': '${{ runner.temp }}/native-lab-evidence/', 'if-no-files-found': 'error', 'retention-days': '7'}),
+    }
+    commands = {
+        'source-build': 'python3 rewrite/experiments/android_native/build.py --work "$RUNNER_TEMP/native-lab"',
+        'assemble-lab': '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \'platforms;android-35\' \'build-tools;35.0.0\'\n'
+            'gradle --no-daemon -p rewrite/experiments/android_native/android :app:assembleDebug :app:assembleDebugAndroidTest -PlabRuntimeDir="$RUNNER_TEMP/native-lab/package"\n'
+            'python3 rewrite/experiments/android_native/delivery.py pack --work "$RUNNER_TEMP/native-lab" --output "$RUNNER_TEMP/native-lab-delivery"\n',
+        'build-diagnostics': 'python3 rewrite/experiments/android_native/diagnostics.py --work "$RUNNER_TEMP/native-lab"',
+        'native-smoke': "bash rewrite/experiments/android_native/device-smoke.sh '${{ matrix.api }}' '${{ matrix.image }}' '${{ matrix.pages }}' "
+            '"$RUNNER_TEMP/native-lab-delivery" "$RUNNER_TEMP/native-lab-evidence"',
+    }
+    for job, ids in ((build, ['checkout', 'setup-python', 'setup-java', 'setup-gradle', 'source-build', 'assemble-lab', 'upload-lab', 'build-diagnostics']),
+                     (device, ['checkout', 'setup-java', 'download-lab', 'native-smoke', 'upload-evidence'])):
+        require([s.get('id') for s in job.get('steps', [])] == ids, 'step boundary changed')
+        for step in job.get('steps', []):
+            ident = step.get('id')
+            require(set(step) <= {'id', 'uses', 'with', 'run', 'if'}, 'no token/env/shell forwarding or extra step fields')
+            if ident in action_specs:
+                action, options = action_specs[ident]
+                require(step.get('uses') == action + '@' + lock['actions'][action]['commit'] and
+                        step.get('with') == options and 'run' not in step, 'fixed action/input/upload boundary changed')
+            else:
+                require(ident in commands and step.get('run') == commands.get(ident) and
+                        'uses' not in step and 'with' not in step, 'only reviewed fixed commands permitted')
+            expected_if = {'upload-evidence': 'always()', 'build-diagnostics': 'failure()'}.get(ident)
+            require(step.get('if') == expected_if, 'checks may not be skipped or failures hidden')
     return errors
 
 
