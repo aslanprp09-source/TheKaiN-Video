@@ -8,7 +8,10 @@ import re
 import shutil
 import subprocess
 import zipfile
-from build import PROFILE,digest,require
+if __package__:
+    from .build import PROFILE,digest,require
+else:
+    from build import PROFILE,digest,require
 
 
 def tools(): return Path(os.environ['ANDROID_HOME'])/'build-tools/35.0.0'
@@ -19,6 +22,26 @@ def certificate(apk):
     matches=re.findall(r'^Signer #\d+ certificate SHA-256 digest: ([0-9a-f]+)$',text,re.M)
     require(len(matches)==1,'LAB_APK_SIGNER_COUNT')
     return matches[0]
+
+
+def verify_runtime_assets(archive,report):
+    require(set(report['asset_inventory_sha256'])==set(PROFILE['abis']), 'LAB_ASSET_ABI_SET')
+    expected=set()
+    for abi,sha in report['asset_inventory_sha256'].items():
+        raw=archive.read('assets/inventory-'+abi+'.json')
+        require(hashlib.sha256(raw).hexdigest()==sha, 'LAB_INVENTORY_DIGEST')
+        inventory=json.loads(raw)
+        require(len(inventory)==report['abis'][abi]['asset_files'], 'LAB_ASSET_COUNT')
+        total=0
+        for name,item in inventory.items():
+            require(not name.startswith('/') and '..' not in Path(name).parts and '\\' not in name, 'LAB_ASSET_PATH')
+            path=f'assets/runtime/{abi}/{name}';expected.add(path)
+            require(path in archive.namelist(), 'LAB_ASSET_MISSING')
+            raw=archive.read(path);total+=len(raw)
+            require(len(raw)==item['bytes'] and hashlib.sha256(raw).hexdigest()==item['sha256'], 'LAB_ASSET_BYTES_CHANGED')
+        require(total==report['abis'][abi]['asset_bytes'], 'LAB_ASSET_TOTAL')
+    actual={n for n in archive.namelist() if n.startswith('assets/runtime/') and not n.endswith('/')}
+    require(actual==expected, 'LAB_UNEXPECTED_ASSET_SET')
 
 
 def verify(folder):
@@ -36,6 +59,7 @@ def verify(folder):
         require(re.findall(r"^targetSdkVersion:'(\d+)'",text,re.M)==['35'],'LAB_TARGET_SDK')
     subprocess.run([str(tools()/'zipalign'),'-c','-P','16','4',str(folder/'lab.apk')],check=True)
     with zipfile.ZipFile(folder/'lab.apk') as archive:
+        verify_runtime_assets(archive,report)
         for name,item in report['license_notices'].items():
             require('/' not in name and '\\' not in name, 'LAB_NOTICE_PATH')
             require(hashlib.sha256(archive.read('assets/legal/'+name)).hexdigest()==item['sha256'], 'LAB_NOTICE_BYTES_CHANGED')
@@ -59,6 +83,7 @@ def pack(work,output):
     shutil.copy2(project/'androidTest/debug/app-debug-androidTest.apk',output/'tests.apk')
     report=json.loads((work/'package/build-report.json').read_text())
     report['repository_commit']=os.environ['GITHUB_SHA']
+    report['asset_inventory_sha256']={abi:digest(work/'package/assets'/('inventory-'+abi+'.json')) for abi in PROFILE['abis']}
     report['apk_sha256']={name:digest(output/name) for name in ('lab.apk','tests.apk')}
     report['debug_certificate_sha256']=certificate(output/'lab.apk')
     (output/'build-report.json').write_text(json.dumps(report,indent=2)+'\n')

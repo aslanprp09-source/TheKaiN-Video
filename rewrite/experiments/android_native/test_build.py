@@ -1,4 +1,7 @@
 import errno
+import hashlib
+import io
+import json
 import platform
 from pathlib import Path
 import struct
@@ -6,11 +9,31 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 
 from rewrite.experiments.android_native.build import deny_build_network,elf_report
+from rewrite.experiments.android_native.delivery import PROFILE,verify_runtime_assets
 
 
 class NativeIntakeTests(unittest.TestCase):
+    def test_apk_missing_tampered_or_extra_python_assets_are_rejected_before_device(self):
+        payload=b'# own Python package fixture\n';name='lib/python3.14/__phello__/__init__.py'
+        raw=json.dumps({name:{'bytes':len(payload),'sha256':hashlib.sha256(payload).hexdigest()}}).encode()
+        report={'asset_inventory_sha256':{abi:hashlib.sha256(raw).hexdigest() for abi in PROFILE['abis']},
+                'abis':{abi:{'asset_files':1,'asset_bytes':len(payload)} for abi in PROFILE['abis']}}
+        for variant in ('valid','missing','changed','extra'):
+            with self.subTest(variant=variant):
+                stream=io.BytesIO()
+                with zipfile.ZipFile(stream,'w') as z:
+                    for abi in PROFILE['abis']:
+                        z.writestr('assets/inventory-'+abi+'.json',raw)
+                        if variant!='missing':z.writestr(f'assets/runtime/{abi}/{name}',payload if variant!='changed' else b'tampered')
+                    if variant=='extra':z.writestr('assets/runtime/x86_64/unlisted.py',b'unlisted')
+                with zipfile.ZipFile(stream) as z:
+                    if variant=='valid':verify_runtime_assets(z,report)
+                    else:
+                        with self.assertRaises(RuntimeError):verify_runtime_assets(z,report)
+
     @unittest.skipUnless(sys.platform=='linux' and platform.machine()=='x86_64','Linux/x86_64 source-build fence only')
     def test_build_child_cannot_open_inet_or_unix_sockets(self):
         code=('import socket,errno\nfor domain in (socket.AF_INET,socket.AF_INET6,socket.AF_UNIX):\n'

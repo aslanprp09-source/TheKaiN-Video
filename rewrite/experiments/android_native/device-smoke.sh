@@ -13,6 +13,8 @@ export PATH="$ANDROID_HOME/platform-tools:$PATH"
 cleanup() {
   result=$?
   adb -s "$ANDROID_SERIAL" logcat -d > "$evidence/logcat.txt" 2>/dev/null || true
+  adb -s "$ANDROID_SERIAL" logcat -b crash -d > "$evidence/crash.txt" 2>/dev/null || true
+  if [ "$result" -ne 0 ]; then tail -120 "$evidence/crash.txt"; fi
   adb -s "$ANDROID_SERIAL" shell am force-stop com.thekain.runtime.lab >/dev/null 2>&1 || true
   exit "$result"
 }
@@ -34,7 +36,21 @@ for attempt in $(seq 1 180); do
 done
 test "$(adb -s "$ANDROID_SERIAL" shell getprop sys.boot_completed | tr -d '\r')" = 1
 adb -s "$ANDROID_SERIAL" shell getprop ro.build.version.sdk | tr -d '\r' > "$evidence/api.txt"
-adb -s "$ANDROID_SERIAL" shell getconf PAGE_SIZE | tr -d '\r' > "$evidence/page-size.txt"
+if [ "$api" = 26 ]; then
+  # API26 has no shell getconf. Read actual AT_PAGESZ from the 64-bit process auxv.
+  adb -s "$ANDROID_SERIAL" exec-out cat /proc/self/auxv > "$evidence/auxv.bin"
+  python3 - "$evidence/auxv.bin" > "$evidence/page-size.txt" <<'PY'
+import struct,sys
+from pathlib import Path
+raw=Path(sys.argv[1]).read_bytes()
+assert len(raw)%16==0 and len(raw)<16384, 'Invalid 64-bit auxv'
+values=[v for key,v in struct.iter_unpack('<QQ',raw) if key==6]
+assert len(values)==1, 'AT_PAGESZ missing or duplicated'
+print(values[0])
+PY
+else
+  adb -s "$ANDROID_SERIAL" shell getconf PAGE_SIZE | tr -d '\r' > "$evidence/page-size.txt"
+fi
 adb -s "$ANDROID_SERIAL" shell getprop ro.product.cpu.abi | tr -d '\r' > "$evidence/abi.txt"
 test "$(cat "$evidence/api.txt")" = "$api"
 test "$(cat "$evidence/page-size.txt")" = "$pages"

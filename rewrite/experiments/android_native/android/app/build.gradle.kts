@@ -23,6 +23,10 @@ android {
         jniLibs.useLegacyPackaging = true
         jniLibs.keepDebugSymbols.add("**/*.so")
     }
+    androidResources {
+        // AAPT's default <dir>_* exclusion drops Python packages such as __phello__.
+        ignoreAssetsPattern = "thekain-lab-dont-ignore-anything"
+    }
 }
 dependencyLocking { lockAllConfigurations() }
 dependencies {

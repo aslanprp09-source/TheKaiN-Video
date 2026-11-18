@@ -24,10 +24,10 @@ import static org.junit.Assert.*;
 /** Executes source-built Android ELF through JNI; all HTTPS data/certificates are owned. */
 @RunWith(AndroidJUnit4.class)
 public class NativeLabTest {
-    private static Context context;
-    private static MockWebServer server;
-    private static String url;
-    @BeforeClass public static void setup() throws Exception {
+    private Context context;
+    private MockWebServer server;
+    private String url;
+    @Before public void setup() throws Exception {
         context=InstrumentationRegistry.getInstrumentation().getTargetContext();
         File home=NativeRuntime.prepare(context);
         File fixtures=new File(home,"fixtures");assertTrue(fixtures.mkdirs() || fixtures.isDirectory());
@@ -46,7 +46,7 @@ public class NativeLabTest {
         server.start(InetAddress.getByName("127.0.0.1"),0);
         url="https://127.0.0.1:"+server.getPort()+"/video";
     }
-    @AfterClass public static void cleanup() throws Exception { if(server!=null) server.shutdown(); }
+    @After public void cleanup() throws Exception { if(server!=null) server.shutdown(); }
 
     @Test public void sourceBuiltInterpreterAndTlsLoadOnActualPageSize() throws Exception {
         JSONObject report=NativeRuntime.dispatch(context,new JSONObject().put("op","probe"));
