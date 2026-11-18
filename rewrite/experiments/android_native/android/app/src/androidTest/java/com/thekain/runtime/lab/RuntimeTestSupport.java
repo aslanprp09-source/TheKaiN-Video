@@ -39,6 +39,16 @@ public abstract class RuntimeTestSupport {
             }
         });
         server.start(InetAddress.getByName("127.0.0.1"),0);url="https://127.0.0.1:"+server.getPort()+"/video";
+        // Establish fixture readiness before the timed worker operation, without an HTTP request.
+        HandshakeCertificates trust=new HandshakeCertificates.Builder().addTrustedCertificate(cert.certificate()).build();
+        try(java.net.Socket tcp=new java.net.Socket()) {
+            tcp.connect(new java.net.InetSocketAddress("127.0.0.1",server.getPort()),5000);
+            try(javax.net.ssl.SSLSocket tls=(javax.net.ssl.SSLSocket)trust.sslSocketFactory()
+                    .createSocket(tcp,"127.0.0.1",server.getPort(),true)) {
+                tls.setSoTimeout(5000);javax.net.ssl.SSLParameters parameters=tls.getSSLParameters();
+                parameters.setEndpointIdentificationAlgorithm("HTTPS");tls.setSSLParameters(parameters);tls.startHandshake();
+            }
+        }
         runtime=new NativeRuntime(context);healthyMain();
     }
     private static String repeat(int count) { char[] chars=new char[count];java.util.Arrays.fill(chars,'x');return new String(chars); }
@@ -67,7 +77,11 @@ public abstract class RuntimeTestSupport {
         assertTrue("Main Looper must remain responsive",tick.await(2,TimeUnit.SECONDS));
     }
     void assertFresh(NativeRuntime.Outcome before) throws Exception {
-        NativeRuntime.Outcome after=probe();assertNotEquals(before.result.id,after.result.id);
+        NativeRuntime.Outcome after=run(RuntimeRequest.ANALYZE,url,RuntimeRequest.CA_OWN);
+        assertEquals(RuntimeResult.OK,after.result.error);assertEquals(1,after.result.pythonCalls);
+        assertEquals(1,after.result.formats);assertFalse(after.result.downloadEnabled);
+        assertFalse(after.result.eligible);assertWorkerRetired(after);
+        assertNotEquals(before.result.id,after.result.id);
         assertNotEquals(before.instance,after.instance);
     }
 }

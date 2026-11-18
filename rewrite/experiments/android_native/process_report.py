@@ -9,6 +9,8 @@ def summarize(records):
     assert len({r['id'] for r in records}) == len(records), 'Duplicate operation result'
     assert len({r['parent_pid'] for r in records}) == 1, 'Main process changed'
     assert all(r['death_confirmed'] for r in records), 'Unconfirmed worker cleanup'
+    assert all(r['retire_to_exit_ms'] >= 0 for r in records), 'Missing cleanup latency'
+    assert all(r['cancel_to_exit_ms'] >= 0 for r in records if r['error']==1), 'Missing cancellation latency'
     assert {0,1,2,4,5,7,8,9,10,11,14} <= {r['error'] for r in records}, 'Missing fault coverage'
     started=[r for r in records if r['worker_pid']]
     assert all(r['worker_pid'] != r['parent_pid'] and r['start_ticks'] > 0 for r in started), 'Python shared main PID'
@@ -26,7 +28,9 @@ def summarize(records):
         'memory_fault_rss_limit_bytes':memory[0]['rss_limit'],
         'max_sampled_rss_overshoot_bytes':max(max(0,r['peak_rss_bytes']-r['rss_limit']) for r in records),
         'timeout_elapsed_ms':[r['elapsed_ms'] for r in records if r['error']==2],
-        'cancel_elapsed_ms':[r['elapsed_ms'] for r in records if r['error']==1],
+        'canceled_operation_elapsed_ms':[r['elapsed_ms'] for r in records if r['error']==1],
+        'cancel_to_exit_ms':[r['cancel_to_exit_ms'] for r in records if r['error']==1],
+        'max_retire_to_exit_ms':max(r['retire_to_exit_ms'] for r in records),
         'death_confirmed':True,'source':'parent /proc RSS polling + child kernel getrlimit, not Python counters',
         'production_ready':False,'arm64_execution':'NOT_RUN'}
 
@@ -37,7 +41,15 @@ def main():
     parser.add_argument('--api',type=int,required=True);parser.add_argument('--pages',type=int,required=True)
     args=parser.parse_args()
     records=[json.loads(line) for line in (args.evidence/'process-evidence.jsonl').read_text().splitlines()]
-    report=summarize(records);report.update(api=args.api,page_size=args.pages)
+    try:
+        report=summarize(records)
+    except AssertionError:
+        keys=('operation','error','elapsed_ms','requests','payload_bytes','samples','death_confirmed')
+        # Fixed parent-owned counters only; never fixture URLs, certificates or keys.
+        print('::notice::'+json.dumps({'failed_resource_evidence':[
+            {key:r.get(key) for key in keys} for r in records[:128] if r.get('error')!=0]}))
+        raise
+    report.update(api=args.api,page_size=args.pages)
     report['meminfo_snapshots']=sum('MEMINFO in pid' in p.read_text(errors='replace') for p in args.evidence.glob('meminfo-*.txt'))
     assert report['meminfo_snapshots']>0,'No independent dumpsys meminfo snapshot'
     (args.evidence/'resource-report.json').write_text(json.dumps(report,indent=2)+'\n')

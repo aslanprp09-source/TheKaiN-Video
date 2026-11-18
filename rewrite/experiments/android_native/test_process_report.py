@@ -11,12 +11,15 @@ class ProcessEvidenceTest(unittest.TestCase):
                 'parent_pid':100,'worker_pid':200+index,'start_ticks':900+index,'death_confirmed':True,
                 'requests':0,'payload_bytes':0,'virtual_before':1000,'virtual_headroom':64*1024*1024,
                 'rlimit_as':1000+64*1024*1024,'rlimit_cpu':5,'kernel_socket_denied':True,
-                'samples':3,'peak_rss_bytes':10000,'rss_limit':20000,'elapsed_ms':6000})
+                'samples':3,'peak_rss_bytes':10000,'rss_limit':20000,'elapsed_ms':6000,
+                'retire_to_exit_ms':10,'cancel_to_exit_ms':10 if error==1 else -1})
         self.assertEqual(summarize(records)['operations'],11)
         for key,value in (('worker_pid',100),('death_confirmed',False),('samples',0),
                           ('rlimit_as',1),('requests',13),('payload_bytes',2*1024*1024+2),
-                          ('kernel_socket_denied',False)):
+                          ('kernel_socket_denied',False),('retire_to_exit_ms',-1)):
             with self.subTest(field=key):
                 invalid=copy.deepcopy(records);invalid[0][key]=value
                 with self.assertRaises(AssertionError):summarize(invalid)
         with self.assertRaises(AssertionError):summarize(records[:-1])
+        invalid=copy.deepcopy(records);invalid[1]['cancel_to_exit_ms']=-1
+        with self.assertRaises(AssertionError):summarize(invalid)

@@ -58,8 +58,11 @@ public final class RuntimeService extends Service {
                 int code=e instanceof OutOfMemoryError?RuntimeResult.MEMORY_LIMIT:
                     "OUTPUT_LIMIT".equals(e.getMessage())?RuntimeResult.OUTPUT_LIMIT:RuntimeResult.NATIVE_FAILED;
                 callback.completed(new RuntimeResult(request.id,code));
-            } catch(Exception ignored) { }
-        } finally { die(); }
+            } catch(Exception ignored) { die(); }
+        }
+        // The supervisor first removes BIND_AUTO_CREATE, then kills/reaps this PID.
+        // Dying before unbind makes ActivityManager schedule crash-restart backoff.
+        // Remain quiescent after the single result; never reuse the interpreter.
     }
     @Override public IBinder onBind(Intent intent) { return binder; }
     @Override public boolean onUnbind(Intent intent) { die();return false; }

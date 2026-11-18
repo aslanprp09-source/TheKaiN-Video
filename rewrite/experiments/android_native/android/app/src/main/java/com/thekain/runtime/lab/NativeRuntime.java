@@ -34,6 +34,7 @@ public final class NativeRuntime implements AutoCloseable {
         private String instance="";
         private RuntimeResult candidate;
         private long cleanupDeadline,peakRss,samples,vmBefore,addressLimit,cpuLimit,networkBytes;
+        private long cancelAt=-1,retirementAt=-1;
         private int requests;
         private Operation(RuntimeRequest request,long submitted) { this.request=request;id=request.id;this.submitted=submitted; }
         public CompletableFuture<Outcome> completion() { return result.thenApplyAsync(value->value); }
@@ -41,7 +42,7 @@ public final class NativeRuntime implements AutoCloseable {
         public boolean cancel() {
             synchronized(NativeRuntime.this) {
                 if(finished || retiring)return false;
-                canceled.set(true);
+                if(!canceled.get()) { cancelAt=SystemClock.elapsedRealtime();canceled.set(true); }
             }
             supervisor.post(()->retire(this,RuntimeResult.CANCELED));return true;
         }
@@ -51,12 +52,16 @@ public final class NativeRuntime implements AutoCloseable {
         public final String instance;
         public final int workerPid,parentPid;
         public final long startTicks,elapsedMs,peakRssBytes,samples,virtualBefore,addressLimit,cpuLimit,networkBytes;
+        public final long cancelToExitMs,retireToExitMs;
         public final int requests;
         public final boolean deathConfirmed;
         private Outcome(Operation op,boolean dead) {
             result=op.candidate;instance=op.instance;workerPid=op.child==null?0:op.child.pid;
             parentPid=android.os.Process.myPid();startTicks=op.child==null?0:op.child.startTicks;
-            elapsedMs=SystemClock.elapsedRealtime()-op.submitted;peakRssBytes=op.peakRss;samples=op.samples;
+            long finished=SystemClock.elapsedRealtime();
+            elapsedMs=finished-op.submitted;peakRssBytes=op.peakRss;samples=op.samples;
+            cancelToExitMs=op.cancelAt<0?-1:finished-op.cancelAt;
+            retireToExitMs=op.retirementAt<0?-1:finished-op.retirementAt;
             virtualBefore=op.vmBefore;addressLimit=op.addressLimit;cpuLimit=op.cpuLimit;
             requests=op.requests;networkBytes=op.networkBytes;deathConfirmed=dead;
         }
@@ -208,6 +213,7 @@ public final class NativeRuntime implements AutoCloseable {
         synchronized(this) {
             if(!current(op) || op.retiring)return;
             op.retiring=true;
+            op.retirementAt=SystemClock.elapsedRealtime();
             if(op.canceled.get())error=RuntimeResult.CANCELED;
             else if(SystemClock.elapsedRealtime()>=op.request.deadline)error=RuntimeResult.TIMEOUT;
             if(error>=0)op.candidate=new RuntimeResult(op.id,error);
@@ -249,6 +255,7 @@ public final class NativeRuntime implements AutoCloseable {
             JSONObject j=new JSONObject().put("id",op.id).put("operation",op.request.operation).put("error",outcome.result.error)
                 .put("parent_pid",outcome.parentPid).put("worker_pid",outcome.workerPid).put("start_ticks",outcome.startTicks)
                 .put("elapsed_ms",outcome.elapsedMs).put("peak_rss_bytes",outcome.peakRssBytes).put("rss_limit",op.request.rssLimit)
+                .put("cancel_to_exit_ms",outcome.cancelToExitMs).put("retire_to_exit_ms",outcome.retireToExitMs)
                 .put("samples",outcome.samples).put("virtual_before",outcome.virtualBefore).put("rlimit_as",outcome.addressLimit)
                 .put("virtual_headroom",op.request.virtualHeadroom).put("rlimit_cpu",outcome.cpuLimit).put("kernel_socket_denied",outcome.addressLimit>0).put("requests",outcome.requests).put("payload_bytes",outcome.networkBytes)
                 .put("death_confirmed",outcome.deathConfirmed);

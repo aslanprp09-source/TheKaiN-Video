@@ -28,6 +28,9 @@ UID, exact `/proc` process name and start ticks establish the kill identity.
 The parent PID can never be a kill target. Binder death is monitored; the worker
 also links to its client's death. No `Py_Finalize` or reuse of interpreter state.
 
+The worker remains quiescent after returning its one result. The parent removes
+`BIND_AUTO_CREATE` before termination; early worker self-termination would make
+Android schedule crash-restart backoff and delay subsequent operations.
 Cancellation is accepted only before terminal retirement. A successful cancel
 request wins over a queued result. Late callbacks, mismatched IDs and malformed
 messages cannot complete a subsequent request. Deadline, close, death and errors
@@ -78,7 +81,8 @@ fresh restart, concurrent clients, close, stale/mismatched IPC, malformed Binder
 parcels, input/output bounds, Java request/body budgets, redirect refusal,
 direct network denial, parent PID/JNI guard and installed Service manifest.
 Every test checks the main process/Looper where relevant; no CPython mapping is
-permitted in the main process. A fresh probe checks Python invocation count=1.
+permitted in the main process. Recovery performs real owned-HTTPS yt-dlp analysis
+in a fresh process and checks Python invocation count=1.
 
 The existing default-off native workflow builds both ABIs from source and runs
 all 23 tests on real hosted x86_64 emulators API26/29/35 (4KiB) and API36 (16KiB,
@@ -92,7 +96,9 @@ SDK/ABI/page size, image fingerprint and system_server stability. The report
 validator requires fault coverage, confirmed death, distinct parent/child PID,
 real RSS samples, kernel limits and bounded network counters; incomplete or
 fabricated evidence fails CI. `resource-report.json` labels sampled success/fault
-RSS and termination latencies. These are emulator observations, not exact peak
+RSS and termination latencies. Cancellation-to-confirmed-exit and retirement-to-exit
+are measured separately from the entire operation's startup/analysis duration.
+These are emulator observations, not exact peak
 PSS, a leak diagnosis or a benchmark. No traces/heap dumps are needed to claim
 only this bounded flow. ARM64 is compiled/static-checked, never claimed executed.
 
