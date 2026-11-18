@@ -138,29 +138,33 @@ public final class NativeRuntime implements AutoCloseable {
             }
             @Override public void limits(String id,long before,long limit,long cpu) {
                 synchronized(NativeRuntime.this) {
-                    if(!sender(id) || op.retiring)return;
+                    if(!sender(id) || op.retiring || op.candidate!=null)return;
                     if(before<=0 || limit!=before+op.request.virtualHeadroom || cpu<=0 || cpu>64) {
-                        supervisor.post(()->retire(op,RuntimeResult.IPC_ERROR));return;
+                        op.candidate=new RuntimeResult(op.id,RuntimeResult.IPC_ERROR);
+                        supervisor.post(()->retire(op,-1));return;
                     }
                     op.vmBefore=before;op.addressLimit=limit;op.cpuLimit=cpu;
                 }
             }
             @Override public void network(String id,int requests,long bytes) {
                 synchronized(NativeRuntime.this) {
-                    if(!sender(id) || op.retiring)return;
+                    if(!sender(id) || op.retiring || op.candidate!=null)return;
                     if(requests<op.requests || requests>ChildNetworkGate.MAX_REQUESTS || bytes<op.networkBytes
                             || bytes>ChildNetworkGate.MAX_TOTAL+1) {
-                        supervisor.post(()->retire(op,RuntimeResult.IPC_ERROR));return;
+                        op.candidate=new RuntimeResult(op.id,RuntimeResult.IPC_ERROR);
+                        supervisor.post(()->retire(op,-1));return;
                     }
                     op.requests=requests;op.networkBytes=bytes;
                 }
             }
             @Override public void completed(RuntimeResult result) {
                 synchronized(NativeRuntime.this) {
-                    if(!current(op) || op.retiring)return;
-                    if(result==null || !sender(result.id)) { supervisor.post(()->retire(op,RuntimeResult.IPC_ERROR));return; }
-                    try { result.validate();op.candidate=result; }
-                    catch(RuntimeException e) { op.candidate=new RuntimeResult(op.id,RuntimeResult.IPC_ERROR); }
+                    if(!current(op) || op.retiring || op.candidate!=null)return;
+                    if(result==null || !sender(result.id))op.candidate=new RuntimeResult(op.id,RuntimeResult.IPC_ERROR);
+                    else {
+                        try { result.validate();op.candidate=result; }
+                        catch(RuntimeException e) { op.candidate=new RuntimeResult(op.id,RuntimeResult.IPC_ERROR); }
+                    }
                 }
                 supervisor.post(()->retire(op,-1));
             }

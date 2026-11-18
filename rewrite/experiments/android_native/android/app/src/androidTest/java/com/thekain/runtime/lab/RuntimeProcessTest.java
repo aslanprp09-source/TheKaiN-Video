@@ -39,8 +39,10 @@ public class RuntimeProcessTest extends RuntimeTestSupport {
         assertWorkerRetired(out);assertFresh(out);
     }
     @Test public void wrongOperationIdOverRealBinderIsRejectedAndWorkerIsReaped() throws Exception {
-        NativeRuntime.Outcome out=run(RuntimeRequest.BAD_REPLY,null,RuntimeRequest.CA_OWN);
-        assertEquals(RuntimeResult.IPC_ERROR,out.result.error);assertWorkerRetired(out);assertFresh(out);
+        for(int generation=0;generation<3;generation++) {
+            NativeRuntime.Outcome out=run(RuntimeRequest.BAD_REPLY,null,RuntimeRequest.CA_OWN);
+            assertEquals(RuntimeResult.IPC_ERROR,out.result.error);assertWorkerRetired(out);assertFresh(out);
+        }
     }
     @Test public void parallelRequestsCannotStealOrMultiplyAnActiveWorker() throws Exception {
         NativeRuntime.Operation first=runtime.submit(RuntimeRequest.HANG,null,RuntimeRequest.CA_OWN,30000);

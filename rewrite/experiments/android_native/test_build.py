@@ -2,6 +2,7 @@ import errno
 import hashlib
 import io
 import json
+import os
 import platform
 from pathlib import Path
 import struct
@@ -16,6 +17,37 @@ from rewrite.experiments.android_native.delivery import PROFILE,verify_runtime_a
 
 
 class NativeIntakeTests(unittest.TestCase):
+    @unittest.skipUnless(sys.platform=='linux','Hosted Android harness runs on Linux')
+    def test_meminfo_sampler_survives_absent_worker_between_operations(self):
+        with tempfile.TemporaryDirectory() as temp:
+            folder=Path(temp)
+            adb=folder/'adb'
+            adb.write_text('''#!/usr/bin/env bash
+set -eu
+if [ "$4" = pidof ]; then
+  n=0; if [ -f "$MEMINFO_TEST_STATE" ]; then n=$(cat "$MEMINFO_TEST_STATE"); fi
+  n=$((n+1)); echo "$n" > "$MEMINFO_TEST_STATE"
+  if [ "$n" -lt 3 ]; then exit 1; fi
+  echo 4321
+else
+  echo 'MEMINFO in pid 4321 [own test fixture, not a device measurement]'
+fi
+''')
+            adb.chmod(0o755)
+            env={**os.environ,'PATH':str(folder)+os.pathsep+os.environ['PATH'],
+                 'ANDROID_SERIAL':'emulator-test','MEMINFO_TEST_STATE':str(folder/'state')}
+            with subprocess.Popen(['sleep','2']) as driver:
+                with subprocess.Popen(['bash',str(Path(__file__).with_name('sample-meminfo.sh')),
+                                       str(driver.pid),str(folder)],env=env,stdout=subprocess.PIPE,
+                                      stderr=subprocess.PIPE,text=True) as sampler:
+                    driver.wait(timeout=3)
+                    stdout,stderr=sampler.communicate(timeout=3)
+                    self.assertEqual(sampler.returncode,0,stderr)
+            snapshots=list(folder.glob('meminfo-*.txt'))
+            self.assertEqual(len(snapshots),1)
+            self.assertIn('MEMINFO in pid 4321',snapshots[0].read_text())
+            self.assertGreaterEqual(int((folder/'state').read_text()),3)
+
     @unittest.skipUnless(sys.platform=='linux' and platform.machine()=='x86_64','Linux/x86_64 kernel reference test')
     def test_native_kernel_blocks_sockets_and_rejects_allocation_above_address_space_limit(self):
         source=r"""

@@ -88,21 +88,7 @@ adb -s "$ANDROID_SERIAL" install -r -t "$delivery/lab.apk"
 adb -s "$ANDROID_SERIAL" install -r -t "$delivery/tests.apk"
 timeout 420 adb -s "$ANDROID_SERIAL" shell am instrument -w -e class com.thekain.runtime.lab.NativeLabTest,com.thekain.runtime.lab.RuntimeProcessTest com.thekain.runtime.lab.test/androidx.test.runner.AndroidJUnitRunner > "$evidence/instrumentation.txt" &
 driver=$!
-(
-  count=0
-  last_pid=""
-  while kill -0 "$driver" 2>/dev/null; do
-    pid=$(adb -s "$ANDROID_SERIAL" shell pidof com.thekain.runtime.lab:python_runtime 2>/dev/null | tr -d '\r')
-    case "$pid" in ''|*[!0-9]*) ;; *)
-      if [ "$count" -lt 32 ] && [ "$pid" != "$last_pid" ]; then
-        last_pid="$pid"
-        adb -s "$ANDROID_SERIAL" shell dumpsys meminfo "$pid" > "$evidence/meminfo-$count-$pid.txt" 2>/dev/null || true
-        count=$((count+1))
-      fi ;;
-    esac
-    sleep 0.25
-  done
-) &
+bash rewrite/experiments/android_native/sample-meminfo.sh "$driver" "$evidence" &
 sampler=$!
 result=0
 wait "$driver" || result=$?
