@@ -30,7 +30,10 @@ also links to its client's death. No `Py_Finalize` or reuse of interpreter state
 
 The worker remains quiescent after returning its one result. The parent removes
 `BIND_AUTO_CREATE` before termination; early worker self-termination would make
-Android schedule crash-restart backoff and delay subsequent operations.
+Android schedule crash-restart backoff and delay subsequent operations. Service
+callbacks return normally rather than killing themselves. Cleanup waits for both
+kernel PID exit and disappearance of the worker/Service from Android's own state
+before allowing another request; PID death alone is not sufficient readiness.
 Cancellation is accepted only before terminal retirement. A successful cancel
 request wins over a queued result. Late callbacks, mismatched IDs and malformed
 messages cannot complete a subsequent request. Deadline, close, death and errors

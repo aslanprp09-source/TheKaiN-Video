@@ -28,7 +28,7 @@ public final class NativeRuntime implements AutoCloseable {
         private final long submitted;
         private final AtomicBoolean canceled=new AtomicBoolean();
         private ServiceConnection connection;
-        private boolean bound,retiring,finished;
+        private boolean bound,retiring,finished,pythonEntered;
         private IBinder binder;
         private ProcessIdentity child;
         private String instance="";
@@ -138,7 +138,7 @@ public final class NativeRuntime implements AutoCloseable {
             @Override public void phase(String id,int phase) {
                 synchronized(NativeRuntime.this) {
                     if(!sender(id) || op.retiring || op.canceled.get())return;
-                    if(phase==1)op.pythonStarted.complete(op.child.pid);
+                    if(phase==1) {op.pythonEntered=true;op.pythonStarted.complete(op.child.pid);}
                 }
             }
             @Override public void limits(String id,long before,long limit,long cpu) {
@@ -221,11 +221,16 @@ public final class NativeRuntime implements AutoCloseable {
         }
         findChild(op);
         if(op.bound) { try {context.unbindService(op.connection);}catch(RuntimeException ignored){}op.bound=false; }
+        // Explicitly cancel any pending record/restart of our exclusively leased Service.
+        try {context.stopService(new Intent(context,RuntimeService.class));}catch(RuntimeException ignored){}
         if(op.child!=null && !op.child.exited()) { try{op.child.killOwned();}catch(IOException|RuntimeException ignored){} }
         op.cleanupDeadline=SystemClock.elapsedRealtime()+CLEANUP_MS;reap(op);
     }
     private void reap(Operation op) {
-        boolean dead=op.child!=null?op.child.exited():!workerExists();
+        boolean kernelDead=op.child!=null?op.child.exited():!workerExists();
+        // A dead PID alone does not mean Android has retired its ServiceRecord.
+        // Rebinding during that handoff can inherit crash-restart backoff.
+        boolean dead=kernelDead && !workerExists();
         if(!dead && SystemClock.elapsedRealtime()<op.cleanupDeadline) {
             supervisor.postDelayed(()->reap(op),SAMPLE_MS);return;
         }
@@ -245,16 +250,26 @@ public final class NativeRuntime implements AutoCloseable {
     }
     private boolean workerExists() {
         ActivityManager manager=(ActivityManager)context.getSystemService(Context.ACTIVITY_SERVICE);
-        List<ActivityManager.RunningAppProcessInfo> list=manager.getRunningAppProcesses();
-        if(list==null)return true; // Fail closed when process death cannot be established.
-        for(ActivityManager.RunningAppProcessInfo p:list)if(p.uid==android.os.Process.myUid() && ProcessIdentity.NAME.equals(p.processName))return true;
-        return false;
+        try {
+            List<ActivityManager.RunningAppProcessInfo> list=manager.getRunningAppProcesses();
+            if(list==null)return true; // Fail closed when Android death cannot be established.
+            for(ActivityManager.RunningAppProcessInfo p:list)
+                if(p.uid==android.os.Process.myUid() && ProcessIdentity.NAME.equals(p.processName))return true;
+            // Since API26 this API intentionally exposes only our own package's services.
+            List<ActivityManager.RunningServiceInfo> services=manager.getRunningServices(100);
+            if(services==null)return true;
+            for(ActivityManager.RunningServiceInfo s:services)
+                if(s.uid==android.os.Process.myUid() && s.service!=null
+                    && RuntimeService.class.getName().equals(s.service.getClassName()))return true;
+            return false;
+        } catch(RuntimeException unavailable) { return true; }
     }
     private void record(Operation op,Outcome outcome) {
         try {
             JSONObject j=new JSONObject().put("id",op.id).put("operation",op.request.operation).put("error",outcome.result.error)
                 .put("parent_pid",outcome.parentPid).put("worker_pid",outcome.workerPid).put("start_ticks",outcome.startTicks)
                 .put("elapsed_ms",outcome.elapsedMs).put("peak_rss_bytes",outcome.peakRssBytes).put("rss_limit",op.request.rssLimit)
+                .put("python_entered",op.pythonEntered)
                 .put("cancel_to_exit_ms",outcome.cancelToExitMs).put("retire_to_exit_ms",outcome.retireToExitMs)
                 .put("samples",outcome.samples).put("virtual_before",outcome.virtualBefore).put("rlimit_as",outcome.addressLimit)
                 .put("virtual_headroom",op.request.virtualHeadroom).put("rlimit_cpu",outcome.cpuLimit).put("kernel_socket_denied",outcome.addressLimit>0).put("requests",outcome.requests).put("payload_bytes",outcome.networkBytes)

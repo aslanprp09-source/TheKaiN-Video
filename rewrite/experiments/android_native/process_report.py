@@ -41,14 +41,13 @@ def main():
     parser.add_argument('--api',type=int,required=True);parser.add_argument('--pages',type=int,required=True)
     args=parser.parse_args()
     records=[json.loads(line) for line in (args.evidence/'process-evidence.jsonl').read_text().splitlines()]
-    try:
-        report=summarize(records)
-    except AssertionError:
-        keys=('operation','error','elapsed_ms','requests','payload_bytes','samples','death_confirmed')
-        # Fixed parent-owned counters only; never fixture URLs, certificates or keys.
-        print('::notice::'+json.dumps({'failed_resource_evidence':[
-            {key:r.get(key) for key in keys} for r in records[:128] if r.get('error')!=0]}))
-        raise
+    keys=('operation','error','elapsed_ms','requests','payload_bytes','samples','death_confirmed',
+          'worker_pid','python_entered','virtual_before','cancel_to_exit_ms','retire_to_exit_ms')
+    # Include all fault diagnostics even when the record schema is valid but JUnit fails.
+    # Fixed parent counters only; never fixture URLs, certificates or keys.
+    print('::notice::'+json.dumps({'fault_operation_evidence':[
+        {key:r.get(key) for key in keys} for r in records[:128] if r.get('error')!=0]}))
+    report=summarize(records)
     report.update(api=args.api,page_size=args.pages)
     report['meminfo_snapshots']=sum('MEMINFO in pid' in p.read_text(errors='replace') for p in args.evidence.glob('meminfo-*.txt'))
     assert report['meminfo_snapshots']>0,'No independent dumpsys meminfo snapshot'

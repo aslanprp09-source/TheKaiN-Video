@@ -65,6 +65,13 @@ public final class RuntimeService extends Service {
         // Remain quiescent after the single result; never reuse the interpreter.
     }
     @Override public IBinder onBind(Intent intent) { return binder; }
-    @Override public boolean onUnbind(Intent intent) { die();return false; }
-    @Override public void onDestroy() { die();super.onDestroy(); }
+    // Let ActivityThread acknowledge normal Service teardown to ActivityManager.
+    // The parent owns SIGKILL, including a Python thread that ignores interruption.
+    @Override public boolean onUnbind(Intent intent) { return false; }
+    @Override public void onDestroy() {
+        worker.shutdownNow();super.onDestroy();
+        // ActivityThread sends serviceDoneExecuting after this callback returns.
+        // A queued main-loop exit also retires an unused/malformed raw binding.
+        new Handler(Looper.getMainLooper()).post(RuntimeService::die);
+    }
 }
