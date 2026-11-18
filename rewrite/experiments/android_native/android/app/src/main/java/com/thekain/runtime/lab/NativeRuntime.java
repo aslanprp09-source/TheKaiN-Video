@@ -25,7 +25,7 @@ public final class NativeRuntime implements AutoCloseable {
         private final CompletableFuture<Outcome> result=new CompletableFuture<>();
         private final CompletableFuture<Integer> pythonStarted=new CompletableFuture<>();
         private final RuntimeRequest request;
-        private final long submitted=SystemClock.elapsedRealtime();
+        private final long submitted;
         private final AtomicBoolean canceled=new AtomicBoolean();
         private ServiceConnection connection;
         private boolean bound,retiring,finished;
@@ -35,7 +35,7 @@ public final class NativeRuntime implements AutoCloseable {
         private RuntimeResult candidate;
         private long cleanupDeadline,peakRss,samples,vmBefore,addressLimit,cpuLimit,networkBytes;
         private int requests;
-        private Operation(RuntimeRequest request) { this.request=request;id=request.id; }
+        private Operation(RuntimeRequest request,long submitted) { this.request=request;id=request.id;this.submitted=submitted; }
         public CompletableFuture<Outcome> completion() { return result.thenApplyAsync(value->value); }
         public CompletableFuture<Integer> whenPythonStarted() { return pythonStarted.thenApplyAsync(value->value); }
         public boolean cancel() {
@@ -69,16 +69,17 @@ public final class NativeRuntime implements AutoCloseable {
         return submit(operation,url,ca,timeoutMs,RuntimeRequest.MAX_RSS,RuntimeRequest.MAX_HEADROOM);
     }
     public synchronized Operation submit(int operation,String url,int ca,long timeoutMs,long rss,long headroom) {
+        long submitted=SystemClock.elapsedRealtime();
         String id=UUID.randomUUID().toString();RuntimeRequest request;
         try {
             if(timeoutMs<100 || timeoutMs>MAX_DEADLINE_MS)throw new IllegalArgumentException();
-            request=new RuntimeRequest(id,operation,url,ca,SystemClock.elapsedRealtime()+timeoutMs,rss,headroom);
+            request=new RuntimeRequest(id,operation,url,ca,submitted+timeoutMs,rss,headroom);
         } catch(RuntimeException e) {
             request=new RuntimeRequest(id,RuntimeRequest.PROBE,null,RuntimeRequest.CA_OWN,
                 SystemClock.elapsedRealtime()+100,RuntimeRequest.MAX_RSS,RuntimeRequest.MAX_HEADROOM);
-            Operation op=new Operation(request);completeImmediate(op,RuntimeResult.INVALID_REQUEST);return op;
+            Operation op=new Operation(request,submitted);completeImmediate(op,RuntimeResult.INVALID_REQUEST);return op;
         }
-        Operation op=new Operation(request);
+        Operation op=new Operation(request,submitted);
         if(closed || active!=null || !GLOBAL_BUSY.compareAndSet(false,true)) { completeImmediate(op,RuntimeResult.BUSY);return op; }
         active=op;supervisor.post(()->bind(op));return op;
     }
@@ -229,6 +230,7 @@ public final class NativeRuntime implements AutoCloseable {
             Outcome outcome=new Outcome(op,dead);record(op,outcome);
             op.pythonStarted.completeExceptionally(new IllegalStateException("NOT_STARTED"));
             op.result.complete(outcome);
+            if(closed)thread.quitSafely();
         }
     }
     private boolean workerExists() {
@@ -253,8 +255,9 @@ public final class NativeRuntime implements AutoCloseable {
         } catch(Exception e) { android.util.Log.e("TheKaiNRuntime","EVIDENCE_WRITE_FAILED"); }
     }
     @Override public synchronized void close() {
-        closed=true;if(active!=null && !active.finished)active.cancel();
-        // Do not stop the supervisor until outstanding death/cleanup observation finishes.
-        supervisor.postDelayed(()->thread.quitSafely(),CLEANUP_MS+1000);
+        closed=true;
+        // Cleanup completion owns shutdown; a delayed bind must not outlive a fixed quit timer.
+        if(active!=null && !active.finished)active.cancel();
+        else supervisor.post(thread::quitSafely);
     }
 }
