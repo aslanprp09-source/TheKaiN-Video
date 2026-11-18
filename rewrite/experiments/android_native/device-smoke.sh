@@ -14,7 +14,18 @@ cleanup() {
   result=$?
   adb -s "$ANDROID_SERIAL" logcat -d > "$evidence/logcat.txt" 2>/dev/null || true
   adb -s "$ANDROID_SERIAL" logcat -b crash -d > "$evidence/crash.txt" 2>/dev/null || true
-  if [ "$result" -ne 0 ]; then tail -120 "$evidence/crash.txt"; fi
+  adb -s "$ANDROID_SERIAL" shell dumpsys activity exit-info com.thekain.runtime.lab > "$evidence/exit-info.txt" 2>/dev/null || true
+  if [ "$result" -ne 0 ]; then
+    tail -120 "$evidence/crash.txt"
+    tail -100 "$evidence/exit-info.txt"
+    python3 - "$evidence/logcat.txt" <<'PY'
+from pathlib import Path
+import sys
+lines=Path(sys.argv[1]).read_text(errors='replace').splitlines()
+terms=('thekain.runtime.lab','lmkd','lowmemorykiller','python.stderr','AndroidRuntime','Fatal signal')
+for line in [s for s in lines if any(term in s for term in terms)][-120:]: print(line)
+PY
+  fi
   adb -s "$ANDROID_SERIAL" shell am force-stop com.thekain.runtime.lab >/dev/null 2>&1 || true
   exit "$result"
 }
