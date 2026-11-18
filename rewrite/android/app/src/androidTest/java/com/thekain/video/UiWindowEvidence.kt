@@ -59,9 +59,38 @@ internal object UiWindowEvidence {
             }
             SystemClock.sleep(100) // Instrumentation thread only, never the UI thread.
         }
+        val blocker = blockingWindowSummary()
         capture("not-ready-$label", activity)
-        throw AssertionError("Expected RESUMED, focused, visible unlocked app window before $label:\n$last")
+        throw AssertionError("Expected RESUMED, focused, visible unlocked app window before $label:\n$last$blocker")
     }
+
+    /** Preserve the actual system blocker in JUnit XML even if the app is later removed. */
+    private fun blockingWindowSummary(): String = runCatching {
+        val active = instrumentation.uiAutomation.rootInActiveWindow
+        val nodes = java.util.ArrayDeque<android.view.accessibility.AccessibilityNodeInfo>()
+        if (active != null) nodes.add(active)
+        val lines = mutableListOf<String>()
+        var visited = 0
+        while (nodes.isNotEmpty() && visited++ < 32) {
+            val node = nodes.removeFirst()
+            val system = node.packageName?.toString() in setOf("android", "com.android.systemui")
+            if (system) lines.add("blockingNode=${node.viewIdResourceName}: ${node.text?.take(160)} ${node.contentDescription?.take(160)}")
+            for (index in 0 until minOf(node.childCount, 16)) node.getChild(index)?.let(nodes::add)
+        }
+        val descriptor = instrumentation.uiAutomation.executeShellCommand("timeout 2 dumpsys window windows")
+        val dump = ParcelFileDescriptor.AutoCloseInputStream(descriptor).use { input ->
+            val output = java.io.ByteArrayOutputStream()
+            val buffer = ByteArray(8192)
+            while (output.size() < 512 * 1024) {
+                val count = input.read(buffer, 0, minOf(buffer.size, 512 * 1024 - output.size()))
+                if (count < 0) break
+                output.write(buffer, 0, count)
+            }
+            output.toString("UTF-8")
+        }
+        lines.addAll(dump.lineSequence().filter { "mCurrentFocus=" in it || "mFocusedApp=" in it }.take(8))
+        lines.joinToString("\n", postfix = "\n").take(6000)
+    }.getOrElse { "blockingWindowCaptureError=${it.javaClass.name}\n" }
 
     private fun safeName(value: String) = value.replace(Regex("[^A-Za-z0-9_.-]"), "_").take(140)
 
@@ -82,6 +111,7 @@ internal object UiWindowEvidence {
         for ((name, command) in mapOf(
             "window.txt" to "timeout 5 dumpsys window",
             "activities.txt" to "timeout 5 dumpsys activity activities",
+            "last-anr.txt" to "timeout 5 dumpsys activity lastanr",
             "power.txt" to "timeout 5 dumpsys power"
         )) save(name) {
             // Fixed read-only shell commands; no URL, test data, or user input is interpolated.

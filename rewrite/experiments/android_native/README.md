@@ -59,21 +59,27 @@ app data. Only hash-verified Python/data assets go into private app storage.
 The APK uses native-library extraction; ELF alignment and actual 16-KiB device
 execution are separate checks. No claim of bit-for-bit reproducibility is made.
 
-JNI accepts only bounded JSON operations from the unexported Java lab API,
-initializes an isolated interpreter, leaves ART signal handling alone, and
-serializes interpreter access off the main thread. Python errors return bounded
-codes without URLs or tracebacks. The source-built interpreter is long-lived;
-production service isolation, cancellation, memory/CPU quotas, restart recovery
-and Android background lifecycle integration remain unimplemented.
+The current process-isolation stage uses a non-exported `:python_runtime` bound
+Service, typed AIDL, one request per fresh process, and a main-process supervisor.
+The main process never loads CPython. Requests have internal IDs and a global
+monotonic deadline; cancellation/death/IPC failures retire the worker before a
+result is delivered. A validated UID/name/start-time identity protects kill
+operations. Python runs behind a per-thread socket-denying seccomp filter;
+HTTPS runs on a prestarted Java transport thread with independent counters.
+
+Kernel `RLIMIT_AS`/`RLIMIT_CPU`, external RSS sampling and forced worker termination
+provide limits outside Python. This is shared-UID failure containment, not a
+filesystem sandbox for hostile code. Actual measured RSS/PSS evidence and the
+sampling caveat are described in [PROCESS_ISOLATION.md](PROCESS_ISOLATION.md).
 
 The native test invokes the real pinned yt-dlp on one own HTTPS HTML5 fixture.
-Numeric loopback origin checks, a fixture-only CA, byte/request/time budgets,
-no redirects outside the origin, disabled plugins/JS/remote components and a
-Python audit guard restrict the experiment. The Python audit guard is defense
-in depth, not an OS sandbox. Media transfer is disabled. Unknown video codec
-metadata remains unknown and ineligible. Tests also reject the wrong CA and
-external process execution. No public website, YouTube, DRM/access-control
-workaround or universal site support is tested or promised.
+The Java transport uses only the fixture CA and numeric loopback origin; plugins,
+JS/remote components, cookies, media transfer and external executables stay off.
+OpenSSL is additionally exercised with a real in-memory client/server TLS
+handshake inside the worker, without granting Python direct network sockets.
+Unknown codec metadata remains unknown/ineligible. Public sites and YouTube
+remain unintegrated. The prior PR34 evidence is historical; the current exact
+commit's process/fault evidence belongs in its implementation PR.
 
 ## Reproduce
 
@@ -101,13 +107,13 @@ signing or historical-verifier modes. Two jobs build both ABIs once, then feed
 only that run's artifact ID to four hosted x86_64 emulator jobs: API26/4KiB,
 API29/4KiB, API35/4KiB and API36/16KiB. The script asserts actual SDK, ABI and
 page size (API26 reads `AT_PAGESZ`, which works without shell `getconf`)
-and requires all four JNI tests to pass, with no skip/fallback.
+and requires all 23 JNI/process tests to pass, with no skip/fallback.
 The 16KiB image is pinned to official API36 revision7 and provisioned with
 4GiB guest RAM. Official API35 ps16k revision5 was rejected after a reproduced
 `system_server` crash: `DisplayFoldController.onDefaultDisplayFocusChanged`
 `NoSuchMethodError` caused `DeadSystemException` and aborted instrumentation
 (CI121 attempt2 job134632656982). This is an image limitation, not a successful
-API35/16KiB validation. API35/4KiB, all 41 product tests and all four JNI tests
+API35/16KiB validation. API35/4KiB, all 41 product tests and all 23 JNI/process tests
 remain required as before. Image fingerprint/revision and system_server PID
 before/after tests are retained; a system_server restart/fatal also fails the job.
 Failure logs are retained; APKs expire after one day. An emulator timeout stops
@@ -116,9 +122,8 @@ only this lab application. ARM64 execution and physical-device testing remain
 
 ## Evidence status
 
-Local source compilation and static ELF checks have succeeded for x86_64; the
-Java app and instrumentation APK compile. These are not Android execution
-results. The first full source-build/hosted-emulator CI must pass before this
-prototype can be treated as technically demonstrated. Final run IDs and exact
-source commits belong in the implementation PR; all product/release gates stay
-closed.
+Build/static checks do not establish Android execution. The implementation PR
+records exact-head CI IDs, all 23 tests on each target, measured resource reports
+and failures found during validation. ARM64 execution, physical-device QA,
+full foreground/background lifecycle policy and product distribution remain
+separate gates. All 41 product API35 tests remain unchanged.

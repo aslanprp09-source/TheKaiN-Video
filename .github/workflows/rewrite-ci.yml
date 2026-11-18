@@ -68,7 +68,7 @@ jobs:
       - id: assemble-lab
         run: |
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-35' 'build-tools;35.0.0'
-          gradle --no-daemon -p rewrite/experiments/android_native/android :app:assembleDebug :app:assembleDebugAndroidTest -PlabRuntimeDir="$RUNNER_TEMP/native-lab/package"
+          gradle --no-daemon -p rewrite/experiments/android_native/android :app:assembleDebug :app:assembleDebugAndroidTest :app:lintDebug -PlabRuntimeDir="$RUNNER_TEMP/native-lab/package"
           python3 rewrite/experiments/android_native/delivery.py pack --work "$RUNNER_TEMP/native-lab" --output "$RUNNER_TEMP/native-lab-delivery"
       - id: upload-lab
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
@@ -274,7 +274,7 @@ jobs:
           gradle --no-daemon :app:installDebug :app:installDebugAndroidTest
           adb -s "$ANDROID_SERIAL" shell pm grant com.thekain.video.rebuild android.permission.POST_NOTIFICATIONS
           bash tools/emulator-ui-ready.sh "$RUNNER_TEMP/m4-device-evidence/ui-readiness"
-          gradle --no-daemon :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.listener=com.thekain.video.UiFailureListener -Pandroid.testInstrumentationRunnerArguments.notClass=com.thekain.video.ProcessRestartTest,com.thekain.video.NotificationDeniedTest,com.thekain.video.M5VisualTest
+          gradle --no-daemon :app:connectedDebugAndroidTest -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true -Pandroid.testInstrumentationRunnerArguments.listener=com.thekain.video.UiFailureListener -Pandroid.testInstrumentationRunnerArguments.notClass=com.thekain.video.ProcessRestartTest,com.thekain.video.NotificationDeniedTest,com.thekain.video.M5VisualTest
       - name: Verify instrumentation results
         if: always()
         run: python3 tools/report-tests.py app/build/outputs/androidTest-results/connected 41

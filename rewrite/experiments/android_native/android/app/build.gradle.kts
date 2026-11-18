@@ -1,6 +1,7 @@
 plugins { id("com.android.application") }
 val runtimeDir = providers.gradleProperty("labRuntimeDir")
 android {
+    buildFeatures { aidl = true }
     namespace = "com.thekain.runtime.lab"
     compileSdk = 35
     defaultConfig {
