@@ -3,7 +3,7 @@ set -Eeuo pipefail
 api="${1:?API required}"; image="${2:?Image required}"; pages="${3:?Page size required}"
 delivery="${4:?Same-run delivery directory required}"; evidence="${5:?Evidence required}"
 case "$api/$image/$pages" in
-  26/google_apis/4096|29/google_apis/4096|35/google_apis/4096|35/google_apis_ps16k/16384) ;;
+  26/google_apis/4096|29/google_apis/4096|35/google_apis/4096|36/google_apis_ps16k/16384) ;;
   *) echo 'Unreviewed emulator matrix'; exit 1 ;;
 esac
 mkdir -p "$evidence"
@@ -36,10 +36,24 @@ sudo apt-get update
 sudo apt-get install --yes --no-install-recommends libpulse0 libglu1-mesa libxkbcommon-x11-0 libxcb-cursor0 libnss3
 sdk="$ANDROID_HOME/cmdline-tools/latest/bin"
 "$sdk/sdkmanager" 'platform-tools' 'build-tools;35.0.0' 'emulator' "system-images;android-$api;$image;x86_64"
+properties="$ANDROID_HOME/system-images/android-$api/$image/x86_64/source.properties"
+cp "$properties" "$evidence/image-source.properties"
+if [ "$api" = 36 ]; then
+  # Official API35 ps16k rev5 crashes system_server (DisplayFoldController).
+  # The additional 16KiB target is the official API36 rev7 image, never a 4KiB fallback.
+  python3 - "$properties" <<'PYREV'
+from pathlib import Path
+import sys
+values={k.strip():v.strip() for line in Path(sys.argv[1]).read_text().splitlines() if '=' in line for k,v in [line.split('=',1)]}
+assert values.get('Pkg.Revision','').strip()=='7', 'Unreviewed 16KiB image revision'
+PYREV
+fi
 python3 rewrite/experiments/android_native/delivery.py verify --folder "$delivery"
 mkdir -p "$ANDROID_AVD_HOME"
 echo no | "$sdk/avdmanager" create avd -n NativeLab -k "system-images;android-$api;$image;x86_64" --device pixel_2
-"$ANDROID_HOME/emulator/emulator" -avd NativeLab -no-snapshot -no-window -no-audio -no-boot-anim -gpu swiftshader -memory 2048 -cores 2 -port 5554 > "$evidence/emulator.txt" 2>&1 &
+memory=2048
+if [ "$pages" = 16384 ]; then memory=4096; fi
+"$ANDROID_HOME/emulator/emulator" -avd NativeLab -no-snapshot -no-window -no-audio -no-boot-anim -gpu swiftshader -memory "$memory" -cores 2 -port 5554 > "$evidence/emulator.txt" 2>&1 &
 timeout 180 adb -s "$ANDROID_SERIAL" wait-for-device
 for attempt in $(seq 1 180); do
   if [ "$(adb -s "$ANDROID_SERIAL" shell getprop sys.boot_completed | tr -d '\r')" = 1 ]; then break; fi
@@ -66,9 +80,20 @@ adb -s "$ANDROID_SERIAL" shell getprop ro.product.cpu.abi | tr -d '\r' > "$evide
 test "$(cat "$evidence/api.txt")" = "$api"
 test "$(cat "$evidence/page-size.txt")" = "$pages"
 test "$(cat "$evidence/abi.txt")" = x86_64
+adb -s "$ANDROID_SERIAL" shell getprop ro.build.fingerprint > "$evidence/fingerprint.txt"
+adb -s "$ANDROID_SERIAL" shell pidof system_server | tr -d '\r' > "$evidence/system-server-before.txt"
+test -s "$evidence/system-server-before.txt"
 adb -s "$ANDROID_SERIAL" install -r -t "$delivery/lab.apk"
 adb -s "$ANDROID_SERIAL" install -r -t "$delivery/tests.apk"
 timeout 180 adb -s "$ANDROID_SERIAL" shell am instrument -w -e class com.thekain.runtime.lab.NativeLabTest com.thekain.runtime.lab.test/androidx.test.runner.AndroidJUnitRunner > "$evidence/instrumentation.txt"
+adb -s "$ANDROID_SERIAL" shell pidof system_server | tr -d '\r' > "$evidence/system-server-after.txt"
+cmp "$evidence/system-server-before.txt" "$evidence/system-server-after.txt"
+adb -s "$ANDROID_SERIAL" logcat -b crash -d > "$evidence/crash.txt"
+python3 - "$evidence/crash.txt" <<'PYSYSTEM'
+from pathlib import Path
+import sys
+assert 'FATAL EXCEPTION IN SYSTEM PROCESS' not in Path(sys.argv[1]).read_text(errors='replace'), 'Android system_server crashed'
+PYSYSTEM
 python3 - "$evidence/instrumentation.txt" "$api" "$pages" <<'PY'
 from pathlib import Path
 import re,sys,json

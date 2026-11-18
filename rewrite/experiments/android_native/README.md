@@ -99,9 +99,17 @@ The existing `rewrite-ci.yml` has a **default-off** manual
 `native_runtime_lab=true` input. It fails closed when combined with build,
 signing or historical-verifier modes. Two jobs build both ABIs once, then feed
 only that run's artifact ID to four hosted x86_64 emulator jobs: API26/4KiB,
-API29/4KiB, API35/4KiB and API35/16KiB. The script asserts actual SDK, ABI and
+API29/4KiB, API35/4KiB and API36/16KiB. The script asserts actual SDK, ABI and
 page size (API26 reads `AT_PAGESZ`, which works without shell `getconf`)
 and requires all four JNI tests to pass, with no skip/fallback.
+The 16KiB image is pinned to official API36 revision7 and provisioned with
+4GiB guest RAM. Official API35 ps16k revision5 was rejected after a reproduced
+`system_server` crash: `DisplayFoldController.onDefaultDisplayFocusChanged`
+`NoSuchMethodError` caused `DeadSystemException` and aborted instrumentation
+(CI121 attempt2 job134632656982). This is an image limitation, not a successful
+API35/16KiB validation. API35/4KiB, all 41 product tests and all four JNI tests
+remain required as before. Image fingerprint/revision and system_server PID
+before/after tests are retained; a system_server restart/fatal also fails the job.
 Failure logs are retained; APKs expire after one day. An emulator timeout stops
 only this lab application. ARM64 execution and physical-device testing remain
 `NOT_RUN` until separately performed. Do not install this lab over the product.

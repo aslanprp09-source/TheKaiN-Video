@@ -256,7 +256,7 @@ def check_native_lab(ci, lock):
         {'api': '26', 'image': 'google_apis', 'pages': '4096'},
         {'api': '29', 'image': 'google_apis', 'pages': '4096'},
         {'api': '35', 'image': 'google_apis', 'pages': '4096'},
-        {'api': '35', 'image': 'google_apis_ps16k', 'pages': '16384'}]}}, 'all four real API/page-size targets required')
+        {'api': '36', 'image': 'google_apis_ps16k', 'pages': '16384'}]}}, 'all four real API/page-size targets required')
     action_specs = {
         'checkout': ('actions/checkout', {'persist-credentials': 'false', 'ref': '${{ github.sha }}'}),
         'setup-python': ('actions/setup-python', {'python-version': '3.11.18'}),
