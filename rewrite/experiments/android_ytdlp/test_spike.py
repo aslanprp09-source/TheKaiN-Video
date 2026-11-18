@@ -113,10 +113,16 @@ class LifecycleTests(unittest.TestCase):
                     child_pid = int(pid_file.read_text())
                     # A killed grandchild may briefly remain a zombie until init reaps it.
                     state = Path(f'/proc/{child_pid}/stat')
+                    def exited():
+                        try:
+                            value = state.read_text()
+                        except FileNotFoundError:
+                            return True
+                        return value.rsplit(')', 1)[1].split()[0] == 'Z'
                     for _ in range(50):
-                        if not state.exists() or state.read_text().split()[2] == 'Z': break
+                        if exited(): break
                         time.sleep(0.01)
-                    self.assertTrue(not state.exists() or state.read_text().split()[2] == 'Z')
+                    self.assertTrue(exited())
                 finally:
                     if canceled: notifier.join(timeout=3)
 
