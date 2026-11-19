@@ -18,6 +18,9 @@ public class NativeLabTest extends RuntimeTestSupport {
         assertTrue(report.installedExtensions);assertEquals(0,report.mimalloc);
         assertTrue(report.openssl.startsWith("OpenSSL 3.5.9"));
         assertEquals(Os.sysconf(OsConstants._SC_PAGESIZE),report.pages);
+        assertEquals(64,report.pointerBits);
+        assertEquals(android.os.Build.SUPPORTED_ABIS[0].equals("arm64-v8a")?"aarch64":"x86_64",report.machine);
+        assertTrue(out.observedCpuMs>0);assertEquals(android.os.Process.myUid(),out.workerUid);
         assertEquals(out.virtualBefore+RuntimeRequest.MAX_HEADROOM,out.addressLimit);
         assertTrue(out.cpuLimit>0);assertTrue(report.opensslHandshake);
     }

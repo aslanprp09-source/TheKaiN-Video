@@ -86,7 +86,7 @@ adb -s "$ANDROID_SERIAL" shell pidof system_server | tr -d '\r' > "$evidence/sys
 test -s "$evidence/system-server-before.txt"
 adb -s "$ANDROID_SERIAL" install -r -t "$delivery/lab.apk"
 adb -s "$ANDROID_SERIAL" install -r -t "$delivery/tests.apk"
-timeout 420 adb -s "$ANDROID_SERIAL" shell am instrument -w -e class com.thekain.runtime.lab.NativeLabTest,com.thekain.runtime.lab.RuntimeProcessTest com.thekain.runtime.lab.test/androidx.test.runner.AndroidJUnitRunner > "$evidence/instrumentation.txt" &
+timeout 600 adb -s "$ANDROID_SERIAL" shell am instrument -w -e class com.thekain.runtime.lab.NativeLabTest,com.thekain.runtime.lab.RuntimeProcessTest,com.thekain.runtime.lab.LabLifecycleTest com.thekain.runtime.lab.test/androidx.test.runner.AndroidJUnitRunner > "$evidence/instrumentation.txt" &
 driver=$!
 bash rewrite/experiments/android_native/sample-meminfo.sh "$driver" "$evidence" &
 sampler=$!
@@ -109,7 +109,8 @@ python3 - "$evidence/instrumentation.txt" "$api" "$pages" <<'PY'
 from pathlib import Path
 import re,sys,json
 text=Path(sys.argv[1]).read_text();print(text)
-assert re.search(r'^OK \(23 tests?\)\s*$',text,re.M), 'All 23 native/process tests must execute successfully'
+assert re.search(r'^OK \(27 tests?\)\s*$',text,re.M), 'All original 23 plus 4 lifecycle tests must execute successfully'
 assert not any(s in text for s in ('FAILURES!!!','shortMsg=','INSTRUMENTATION_FAILED')), 'Native instrumentation failed'
-print('::notice::'+json.dumps({'native_JNI_smoke':'PASS','api':int(sys.argv[2]),'actual_page_size':int(sys.argv[3]),'tests':23,'production_ready':False}))
+print('::notice::'+json.dumps({'native_JNI_smoke':'PASS','api':int(sys.argv[2]),'actual_page_size':int(sys.argv[3]),'tests':27,'production_ready':False}))
 PY
+python3 rewrite/experiments/android_native/lifecycle-smoke.py --evidence "$evidence" --delivery "$delivery"

@@ -5,6 +5,7 @@ from pathlib import Path
 import ssl
 import sys
 import sysconfig
+import struct
 
 from spike import MAX_OUTPUT, SpikeError, normalize, origin
 import _thekain_transport
@@ -55,6 +56,7 @@ def dispatch(raw):
         if request.get('op')=='probe':
             result={'status':'PASS','python':list(sys.version_info[:3]),'platform':sys.platform,
                     'openssl':ssl.OPENSSL_VERSION,'page_size':os.sysconf('SC_PAGE_SIZE'),
+                    'machine':os.uname().machine,'pointer_bits':struct.calcsize('P')*8,
                     'installed_native_extensions':os.path.dirname(ssl._ssl.__file__)==sys._thekain_native_directory,
                     'mimalloc':int(sysconfig.get_config_var('WITH_MIMALLOC')),
                     'openssl_handshake':openssl_memory_handshake()}

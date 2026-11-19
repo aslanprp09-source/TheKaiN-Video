@@ -272,7 +272,7 @@ def check_native_lab(ci, lock):
     commands = {
         'source-build': 'python3 rewrite/experiments/android_native/build.py --work "$RUNNER_TEMP/native-lab"',
         'assemble-lab': '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \'platforms;android-35\' \'build-tools;35.0.0\'\n'
-            'gradle --no-daemon -p rewrite/experiments/android_native/android :app:assembleDebug :app:assembleDebugAndroidTest :app:lintDebug -PlabRuntimeDir="$RUNNER_TEMP/native-lab/package"\n'
+            'gradle --no-daemon -p rewrite/experiments/android_native/android :app:assembleDebug :app:assembleDebugAndroidTest :app:lintDebug :probe:assembleDebug :probe:lintDebug -PlabRuntimeDir="$RUNNER_TEMP/native-lab/package"\n'
             'python3 rewrite/experiments/android_native/delivery.py pack --work "$RUNNER_TEMP/native-lab" --output "$RUNNER_TEMP/native-lab-delivery"\n',
         'build-diagnostics': 'python3 rewrite/experiments/android_native/diagnostics.py --work "$RUNNER_TEMP/native-lab"',
         'native-smoke': "bash rewrite/experiments/android_native/device-smoke.sh '${{ matrix.api }}' '${{ matrix.image }}' '${{ matrix.pages }}' "

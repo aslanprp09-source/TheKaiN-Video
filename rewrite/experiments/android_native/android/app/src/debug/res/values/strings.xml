@@ -1,0 +1,24 @@
+<resources>
+    <string name="lab_title">TheKaiN Runtime QA</string>
+    <string name="lab_warning">Отдельная лаборатория. Общий UID не является песочницей. RSS — измеряемый порог, а не мгновенный предел. Эти настройки не применяются к основному приложению.</string>
+    <string name="lab_probe">Проверить JNI / ARM64</string>
+    <string name="lab_analyze">Анализ своей HTTPS-страницы</string>
+    <string name="lab_hang">Зависание Python</string>
+    <string name="lab_deadline">Дедлайн 6 секунд</string>
+    <string name="lab_crash">Авария Python</string>
+    <string name="lab_kill_worker">Завершить Service</string>
+    <string name="lab_repeat">Пять анализов подряд</string>
+    <string name="lab_export">Сохранить JSON-отчёт</string>
+    <string name="lab_kill_owner">Завершить процесс QA</string>
+    <string name="lab_cancel">Отменить операцию</string>
+    <string name="lab_physical">Это физический телефон — отметка оператора</string>
+    <string name="lab_battery">Настройка батареи — отметка оператора</string>
+    <string-array name="lab_battery_options">
+        <item>Не указана</item><item>Обычная</item><item>Ограниченная</item>
+    </string-array>
+    <string name="lab_owner_warning">Сначала запустите зависание и дождитесь PID Python. Завершится только эта лаборатория. Откройте её снова, проверьте восстановление и сохраните отчёт. Основное приложение не затрагивается.</string>
+    <string name="lab_confirm">Завершить QA</string>
+    <string name="lab_back">Назад</string>
+    <string name="lab_exported">Отчёт сохранён. Не передавайте файлы ключей или каталоги приложения.</string>
+    <string name="lab_export_failed">Отчёт не сохранён.</string>
+</resources>

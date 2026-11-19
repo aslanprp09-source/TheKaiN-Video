@@ -1,0 +1,8 @@
+<resources>
+    <item type="id" name="lab_probe"/><item type="id" name="lab_analyze"/>
+    <item type="id" name="lab_hang"/><item type="id" name="lab_deadline"/>
+    <item type="id" name="lab_crash"/><item type="id" name="lab_kill_worker"/>
+    <item type="id" name="lab_repeat"/><item type="id" name="lab_export"/>
+    <item type="id" name="lab_kill_owner"/><item type="id" name="lab_cancel"/>
+    <item type="id" name="lab_status"/>
+</resources>

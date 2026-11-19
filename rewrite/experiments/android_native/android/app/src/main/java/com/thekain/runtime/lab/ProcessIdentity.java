@@ -8,10 +8,22 @@ import java.nio.charset.StandardCharsets;
 final class ProcessIdentity {
     static final String NAME="com.thekain.runtime.lab:python_runtime";
     final int pid;
-    final long startTicks,rssBytes,virtualBytes;
+    final long startTicks,rssBytes,virtualBytes,cpuTicks;
+    final int uid;
+    static final long CLOCK_TICKS=clockTicks();
     final boolean zombie;
-    private ProcessIdentity(int pid,long ticks,long rss,long virtual,boolean zombie) {
-        this.pid=pid;startTicks=ticks;rssBytes=rss;virtualBytes=virtual;this.zombie=zombie;
+    private ProcessIdentity(int pid,long ticks,long rss,long virtual,boolean zombie,long cpu,int uid) {
+        this.pid=pid;startTicks=ticks;rssBytes=rss;virtualBytes=virtual;this.zombie=zombie;cpuTicks=cpu;this.uid=uid;
+    }
+    private static long clockTicks() {
+        long ticks=android.system.Os.sysconf(android.system.OsConstants._SC_CLK_TCK);
+        if(ticks<=0 || ticks>100000)throw new IllegalStateException("INVALID_CLOCK_TICKS");
+        return ticks;
+    }
+    static long selfStartTicks() throws IOException {
+        String stat=read("/proc/self/stat",4096);int end=stat.lastIndexOf(')');
+        if(end<0)throw new IOException("PROC_STAT");
+        return Long.parseLong(stat.substring(end+2).trim().split(" +")[19]);
     }
     static String read(String path,int max) throws IOException {
         try(InputStream in=new FileInputStream(path)) {
@@ -32,7 +44,9 @@ final class ProcessIdentity {
         String[] fields=stat.substring(end+2).trim().split(" +");
         if(fields.length<20)throw new IOException("PROC_STAT");
         boolean zombie=fields[0].equals("Z");long start=Long.parseLong(fields[19]);
-        if(zombie)return new ProcessIdentity(pid,start,0,0,true);
+        long cpu=Long.parseLong(fields[11])+Long.parseLong(fields[12]);
+        if(cpu<0)throw new IOException("PROC_CPU");
+        if(zombie)return new ProcessIdentity(pid,start,0,0,true,cpu,-1);
         if(!read(base+"cmdline",512).split("\u0000",2)[0].equals(NAME))throw new IOException("NOT_WORKER");
         String status=read(base+"status",32768);long uid=-1,rss=-1,vm=-1;
         for(String line:status.split("\n")) {
@@ -42,7 +56,7 @@ final class ProcessIdentity {
             if(values[0].equals("VmSize:"))vm=Long.parseLong(values[1])*1024;
         }
         if(uid!=Process.myUid() || rss<0 || vm<0)throw new IOException("WORKER_IDENTITY");
-        return new ProcessIdentity(pid,start,rss,vm,false);
+        return new ProcessIdentity(pid,start,rss,vm,false,cpu,(int)uid);
     }
     boolean same(ProcessIdentity other) { return other.pid==pid && other.startTicks==startTicks; }
     boolean exited() {
