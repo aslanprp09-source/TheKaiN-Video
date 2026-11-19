@@ -17,6 +17,7 @@ cleanup() {
   adb -s "$ANDROID_SERIAL" shell dumpsys activity exit-info com.thekain.runtime.lab > "$evidence/exit-info.txt" 2>/dev/null || true
   if [ "$result" -ne 0 ]; then
     if [ -f "$evidence/instrumentation.txt" ]; then tail -120 "$evidence/instrumentation.txt"; fi
+    if [ -f "$evidence/isolated-instrumentation.txt" ]; then tail -160 "$evidence/isolated-instrumentation.txt"; fi
     tail -120 "$evidence/crash.txt"
     tail -100 "$evidence/exit-info.txt"
     python3 - "$evidence/logcat.txt" <<'PY'
@@ -114,3 +115,16 @@ assert not any(s in text for s in ('FAILURES!!!','shortMsg=','INSTRUMENTATION_FA
 print('::notice::'+json.dumps({'native_JNI_smoke':'PASS','api':int(sys.argv[2]),'actual_page_size':int(sys.argv[3]),'tests':27,'production_ready':False}))
 PY
 python3 rewrite/experiments/android_native/lifecycle-smoke.py --evidence "$evidence" --delivery "$delivery"
+timeout 600 adb -s "$ANDROID_SERIAL" shell am instrument -w -e class com.thekain.runtime.lab.IsolatedRuntimeTest com.thekain.runtime.lab.test/androidx.test.runner.AndroidJUnitRunner > "$evidence/isolated-instrumentation.txt" &
+driver=$!
+bash rewrite/experiments/android_native/sample-meminfo.sh "$driver" "$evidence" isolated &
+sampler=$!
+result=0
+wait "$driver" || result=$?
+kill "$sampler" 2>/dev/null || true
+wait "$sampler" 2>/dev/null || true
+adb -s "$ANDROID_SERIAL" exec-out run-as com.thekain.runtime.lab cat files/isolated-evidence.jsonl > "$evidence/isolated-evidence.jsonl"
+test "$result" = 0
+python3 rewrite/experiments/android_native/isolated_report.py --evidence "$evidence" --api "$api" --pages "$pages"
+adb -s "$ANDROID_SERIAL" shell pidof system_server | tr -d '\r' > "$evidence/system-server-after-isolated.txt"
+cmp "$evidence/system-server-before.txt" "$evidence/system-server-after-isolated.txt"

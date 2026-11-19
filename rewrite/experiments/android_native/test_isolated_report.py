@@ -1,0 +1,37 @@
+import copy
+import unittest
+from .isolated_report import validate
+
+
+class IsolatedEvidenceTest(unittest.TestCase):
+    def fixture(self):
+        rows=[]
+        for i,error in enumerate((0,1,2,4,5,6,7,8,9,10,11,14)):
+            rows.append(dict(id=str(i),error=error,death_confirmed=True,retire_to_exit_ms=80,
+                cancel_to_exit_ms=80 if error==1 else -1,requests=1,payload_bytes=128,
+                parent_pid=100,parent_uid=10001,worker_pid=200+i,worker_uid=99000+i,
+                samples=8,peak_rss_bytes=200*1024*1024,rss_limit=384*1024*1024,
+                start_ticks=100+i,python_entered=True,rlimit_as=2**32+256*1024*1024,
+                virtual_before=2**32,rlimit_cpu=20,cpu_ticks=7,observed_cpu_ms=70,
+                security_denials=31,mode=2 if error in (1,2) else 0,instance=str(i)))
+        return rows
+
+    def test_incomplete_or_contradictory_isolation_proof_is_rejected(self):
+        rows=self.fixture();self.assertFalse(validate(rows)['production_ready'])
+        mutations=(('worker_uid',10001),('worker_uid',10002),('worker_pid',100),
+            ('death_confirmed',False),('samples',0),('cpu_ticks',0),('rlimit_cpu',0),
+            ('security_denials',0),('retire_to_exit_ms',9999),('payload_bytes',3*1024*1024))
+        for field,value in mutations:
+            changed=copy.deepcopy(rows);changed[0][field]=value
+            with self.subTest(field=field,value=value),self.assertRaises(AssertionError):validate(changed)
+        for subset in (rows[:1],rows[1:], [r for r in rows if r['mode']!=2]):
+            with self.assertRaises(AssertionError):validate(subset)
+
+    def test_unverified_resources_or_proc_identity_must_never_enter_python(self):
+        for mode in (3,4):
+            rows=self.fixture();rows[5]['mode']=mode
+            with self.assertRaises(AssertionError):validate(rows)
+            rows[5]['python_entered']=False;validate(rows)
+
+
+if __name__=='__main__':unittest.main()

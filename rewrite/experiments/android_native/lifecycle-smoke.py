@@ -103,7 +103,8 @@ def run(evidence, delivery):
     adb('install', '-r', '-t', str(delivery/'probe.apk'))
     probe = adb('shell', 'am', 'instrument', '-w', 'com.thekain.runtime.probe/.BoundaryProbe').decode()
     (evidence/'boundary-probe.txt').write_text(probe)
-    for field in ('different_uid=true', 'service_non_exported=true', 'external_bind_denied=true', 'boundary_probe=PASS'):
+    for field in ('different_uid=true', 'service_non_exported=true', 'external_bind_denied=true',
+                  'isolated_service_flag=true', 'isolated_external_bind_denied=true', 'boundary_probe=PASS'):
         assert field in probe, 'Independent UID boundary probe failed: '+field
     assert 'INSTRUMENTATION_CODE: -1' in probe
     # A normal launcher process, not instrumentation: test-runner force-stop must not mask Binder death.
