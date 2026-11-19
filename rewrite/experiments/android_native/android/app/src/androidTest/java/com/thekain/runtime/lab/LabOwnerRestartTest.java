@@ -11,24 +11,10 @@ import java.nio.charset.StandardCharsets;
 import java.util.concurrent.*;
 import static org.junit.Assert.*;
 
-/** Two explicit instrumentation phases; the driver kills only the validated owner PID. */
+/** Verification follows guarded owner self-kill from a normal, non-instrumented Activity. */
 @RunWith(AndroidJUnit4.class)
 public class LabOwnerRestartTest {
     private LabApplication app() {return (LabApplication)InstrumentationRegistry.getInstrumentation().getTargetContext().getApplicationContext();}
-    @Test public void seed() throws Exception {
-        LabApplication app=app();LabSession session=app.session();session.whenReady().get(30,TimeUnit.SECONDS);
-        session.start(RuntimeRequest.HANG);long until=SystemClock.elapsedRealtime()+2000;
-        while(session.active()==null && SystemClock.elapsedRealtime()<until)Thread.sleep(10);
-        LabSession.Active active=session.active();assertNotNull(active);active.started.get(20,TimeUnit.SECONDS);
-        JSONObject marker=new JSONObject().put("id",active.operation.id).put("parent_pid",android.os.Process.myPid())
-            .put("parent_start_ticks",ProcessIdentity.selfStartTicks()).put("worker_pid",active.child.pid)
-            .put("worker_start_ticks",active.child.startTicks).put("uid",android.os.Process.myUid());
-        File folder=new File(app.getFilesDir(),"qa-evidence");assertTrue(folder.mkdirs()||folder.isDirectory());
-        try(FileOutputStream out=new FileOutputStream(new File(folder,"owner-marker.json"))) {
-            out.write(marker.toString().getBytes(StandardCharsets.UTF_8));out.getFD().sync();
-        }
-        Thread.sleep(60000);fail("Driver did not terminate owner PID");
-    }
     @Test public void verify() throws Exception {
         LabApplication app=app();JSONObject marker=new JSONObject(ProcessIdentity.read(new File(app.getFilesDir(),"qa-evidence/owner-marker.json").getPath(),4096));
         assertNotEquals(marker.getInt("parent_pid"),android.os.Process.myPid());

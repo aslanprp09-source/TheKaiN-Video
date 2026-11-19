@@ -78,7 +78,19 @@ public class LabLifecycleTest {
             screenshot("qa-ready");CompletableFuture<NativeRuntime.Outcome> result=session.start(RuntimeRequest.HANG);
             LabSession.Active active=started();String id=active.operation.id;screenshot("qa-running");
             scenario.recreate();focused(scenario);assertSame(session,app.session());assertEquals(id,session.active().operation.id);
-            assertTrue(session.cancel());NativeRuntime.Outcome out=result.get(5,TimeUnit.SECONDS);
+            scenario.onActivity(activity->activity.setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE));
+            long until=SystemClock.elapsedRealtime()+8000;AtomicBoolean landscape=new AtomicBoolean();
+            do {
+                scenario.onActivity(activity->landscape.set(activity.hasWindowFocus() && activity.getResources().getConfiguration().orientation==android.content.res.Configuration.ORIENTATION_LANDSCAPE));
+                if(landscape.get())break;Thread.sleep(50);
+            } while(SystemClock.elapsedRealtime()<until);
+            assertTrue("Landscape window was not ready",landscape.get());screenshot("qa-landscape-running");
+            scenario.onActivity(activity->{
+                android.view.View cancel=activity.findViewById(R.id.lab_cancel);android.graphics.Rect rect=new android.graphics.Rect();
+                assertTrue(cancel.isEnabled());assertTrue("Cancel must remain fully visible in landscape",cancel.getGlobalVisibleRect(rect));
+                assertEquals(cancel.getHeight(),rect.height());assertTrue(cancel.performClick());
+            });
+            NativeRuntime.Outcome out=result.get(5,TimeUnit.SECONDS);
             assertEquals(RuntimeResult.CANCELED,out.result.error);assertTrue(out.deathConfirmed);
             assertTrue(new JSONObject(session.report()).getBoolean("operator_claimed_physical_device"));
             assertEquals("restricted",new JSONObject(session.report()).getString("operator_battery_setting"));
@@ -115,5 +127,20 @@ public class LabLifecycleTest {
         JSONObject after=session.footprint();assertEquals(0,after.getInt("worker_processes"));assertEquals(0,after.getInt("owned_temp_files"));
         assertEquals(before.getLong("private_files"),after.getLong("private_files"));
         assertTrue("Only bounded journal growth is expected",after.getLong("private_bytes")-before.getLong("private_bytes")<65536);
+        app.resetForTest();
+        File journal=new File(app.getFilesDir(),"runtime-qa-state.json");
+        byte[] invalid="corrupt journal PRIVATE KEY sentinel".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        try(FileOutputStream out=new FileOutputStream(journal)) {out.write(invalid);out.getFD().sync();}
+        session=app.session();
+        try {session.whenReady().get(5,TimeUnit.SECONDS);fail("Corrupt journal must fail closed");}
+        catch(ExecutionException expected) { }
+        assertFalse(session.ready());assertTrue(session.canExport());assertNull(session.active());
+        assertTrue(new JSONObject(session.report()).has("qa_error_class"));assertFalse(session.report().contains("PRIVATE KEY"));
+        session.event("activity_resume",true);
+        try {session.start(RuntimeRequest.PROBE).get(5,TimeUnit.SECONDS);fail("Failed session must not start Python");}
+        catch(ExecutionException expected) { }
+        assertArrayEquals(invalid,java.nio.file.Files.readAllBytes(journal.toPath()));
+        assertFalse(session.report().contains("PRIVATE KEY"));
+        new android.util.AtomicFile(journal).delete(); // Test-only cleanup before the independent restart phase.
     }
 }

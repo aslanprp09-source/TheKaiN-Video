@@ -26,7 +26,7 @@ final class LabSession implements AutoCloseable {
     private OwnedQaFixture fixture;
     private volatile Active active;
     private volatile String display="Подготовка лаборатории…",report="{}";
-    private volatile boolean ready,closed;
+    private volatile boolean ready,closed,exportable;
     private long ownerStart;
     private volatile long lastHeartbeat;
     private final Runnable heartbeatTask=this::heartbeat;
@@ -82,7 +82,7 @@ final class LabSession implements AutoCloseable {
                 .put("lab_virtual_headroom_bytes",RuntimeRequest.MAX_HEADROOM)
                 .put("physical_device_attested",false).put("artifact89_review","BLOCKED_SEPARATE_GATE");
             fixture=new OwnedQaFixture(context); // Pure Java fixture; no interpreter in this PID.
-            store.save(state);report=state.toString();ready=true;
+            store.save(state);report=state.toString();ready=true;exportable=true;
             publish("Готово. Физическое выполнение подтверждается отдельным отчётом.");initialized.complete(null);
         } catch(Throwable failure) {fail(failure);initialized.completeExceptionally(failure);}
     }
@@ -90,16 +90,23 @@ final class LabSession implements AutoCloseable {
     String display() {return display;}
     String report() {return report;}
     boolean ready() {return ready;}
+    boolean canExport() {return exportable && active==null;}
     Active active() {return active;}
     void listen(Runnable listener) {listeners.add(listener);listener.run();}
     void unlisten(Runnable listener) {listeners.remove(listener);}
     private void publish(String message) {
         display=message+"\nPID приложения: "+android.os.Process.myPid()+"\nUID общий с Service; RSS измеряется периодически.\n"+
             "Сайты и основное приложение не подключены.";
-        report=state.toString();for(Runnable listener:listeners)main.post(listener);
+        if(ready)report=state.toString();for(Runnable listener:listeners)main.post(listener);
     }
     private void fail(Throwable failure) {
-        ready=false;publish("Ошибка лаборатории: "+failure.getClass().getSimpleName());
+        ready=false;
+        // A corrupt journal is preserved, never copied into an exported failure diagnostic.
+        try {report=new JSONObject().put("schema",1).put("source_commit",BuildConfig.QA_SOURCE_COMMIT)
+            .put("qa_error_class",failure.getClass().getSimpleName()).put("production_ready",false)
+            .put("product_integration",false).put("physical_device_attested",false).toString();exportable=true;}
+        catch(JSONException impossible) {exportable=false;report="{}";}
+        publish("Ошибка лаборатории: "+failure.getClass().getSimpleName());
     }
     CompletableFuture<NativeRuntime.Outcome> start(int kind) {
         CompletableFuture<NativeRuntime.Outcome> result=new CompletableFuture<>();
@@ -161,11 +168,13 @@ final class LabSession implements AutoCloseable {
                 JSONObject footprint=footprint();entry.put("footprint_after",footprint);
                 LabQaStore.append(state,"cases",entry,64);state.remove("pending");active=null;main.removeCallbacks(heartbeatTask);
                 state.put("footprint",footprint);store.save(state);
+                report=state.toString();if(!out.deathConfirmed)ready=false;
                 publish("Операция завершена: код "+out.result.error+", процесс завершён: "+out.deathConfirmed+
                     "\nRSS (наблюд.): "+out.peakRssBytes/1048576+" МиБ; CPU (наблюд.): "+out.observedCpuMs+" мс"+
                     (out.result.machine==null?"":"\nJNI/CPython: "+out.result.machine+", "+out.result.pointerBits+" бит"));
                 operation.completed.complete(out);result.complete(out);
             } catch(Throwable failure) {
+                active=null;main.removeCallbacks(heartbeatTask);
                 operation.completed.completeExceptionally(failure);result.completeExceptionally(failure);fail(failure);
             }
         }));
@@ -205,6 +214,7 @@ final class LabSession implements AutoCloseable {
     }
     void operatorSettings(boolean physical,int battery) {
         owner.execute(()->{
+            if(!ready || closed)return;
             try {state.put("operator_claimed_physical_device",physical).put("operator_battery_setting",
                 battery==1?"standard":battery==2?"restricted":"unknown");store.save(state);publish("Условия оператора записаны; это не аттестация устройства.");}
             catch(Exception failure) {fail(failure);}
@@ -212,7 +222,7 @@ final class LabSession implements AutoCloseable {
     }
     CompletableFuture<Void> export(Uri uri) {
         CompletableFuture<Void> result=new CompletableFuture<>();
-        if(!ready || !"content".equals(uri.getScheme()) || active!=null || !exporting.compareAndSet(false,true)) {
+        if(!canExport() || !"content".equals(uri.getScheme()) || !exporting.compareAndSet(false,true)) {
             result.completeExceptionally(new IllegalStateException("QA_EXPORT_UNAVAILABLE"));return result;
         }
         String data=report;
@@ -228,6 +238,7 @@ final class LabSession implements AutoCloseable {
         long at=SystemClock.elapsedRealtime();
         if(closed)return;
         owner.execute(()->{
+            if(!ready || closed)return;
             try {
                 LabQaStore.append(state,"events",new JSONObject().put("kind",kind).put("event_elapsed_ms",at)
                     .put("observed_elapsed_ms",SystemClock.elapsedRealtime()).put("window_focused",focused).put("power",power()),128);

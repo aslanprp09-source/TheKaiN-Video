@@ -29,6 +29,13 @@ a runtime error/success, and never resumes old operations. Owner Binder death
 already makes its child exit; CI proves that death **before relaunch/recovery**.
 The main process must never map libpython. A new analysis has a fresh worker ID.
 
+A malformed journal fails closed and is preserved. Lifecycle callbacks must not
+overwrite it after initialization fails. Export then offers only a minimal
+source/error-class diagnostic, excluding the corrupt content; it is incomplete
+test evidence, not a successful phone report. Cancel stays outside the scroll
+area, including a recreated landscape window; CI checks its full visibility and
+actually clicks it during a hang.
+
 The foreground has no wake lock, battery exemption, foreground service or alarm.
 Android may suspend/kill the app. Handler sampling is subject to scheduling and
 deep sleep; reports include actual elapsed time and deadline lateness. This is
@@ -51,8 +58,12 @@ exact whole-operation CPU peak/profile. The existing kernel RLIMITs remain.
    debug certificate, original inventories/ELFs/notices plus QA notice hashes.
    Official SDK35 apksigner/aapt/zipalign verify the delivered bytes.
 4. All original 23 plus four lifecycle tests on API26/29/35 4KiB and API36 16KiB.
-   Additional different-UID bind and two-phase owner-kill/restart probes run on
-   each target. New screenshots (`qa-ready`, `qa-running`) and owner journal are
+   Additional different-UID bind and owner-kill/restart probes run on each target.
+   The driver starts a normal Activity, uses its fixed hang/self-kill controls and
+   confirmation, then proves both PID deaths before starting verification
+   instrumentation. No shell SIGKILL/SELinux change; no test-runner force-stop
+   during owner death. Empty/transient `/proc` reads are not proof of death.
+   New screenshots (`qa-ready`, `qa-running`, landscape) and owner journal are
    collected only from the owned `qa-evidence` directory. No fixture PEM export.
 5. Require fresh independent KaiN1One approval of the final HEAD before merge
    and phone delivery. A debug signature is **not** protected product signing or

@@ -34,7 +34,7 @@ public final class LabQaActivity extends Activity {
         LabSession.Active active=session.active();cancel.setEnabled(active!=null);
         killWorker.setEnabled(active!=null && active.child!=null);
         killOwner.setEnabled(active!=null && active.child!=null && active.kind==RuntimeRequest.HANG);
-        export.setEnabled(idle);
+        export.setEnabled(session.canExport());
     };
     private int dp(int value) {return Math.round(value*getResources().getDisplayMetrics().density);}
     @Override public void onCreate(Bundle saved) {
@@ -48,9 +48,10 @@ public final class LabQaActivity extends Activity {
             view.setPadding(dp(16)+left,dp(16)+top,dp(16)+right,dp(16)+bottom);return insets;
         });
         TextView title=new TextView(this);title.setText(R.string.lab_title);title.setTextSize(22);root.addView(title);
-        TextView warning=new TextView(this);warning.setText(R.string.lab_warning);warning.setTextSize(13);root.addView(warning);
-        status=new TextView(this);status.setId(R.id.lab_status);status.setTextSize(15);status.setMinLines(5);root.addView(status);
+        TextView warning=new TextView(this);warning.setText(R.string.lab_warning);warning.setTextSize(13);
+        status=new TextView(this);status.setId(R.id.lab_status);status.setTextSize(15);status.setMinLines(5);
         ScrollView scroll=new ScrollView(this);LinearLayout cases=new LinearLayout(this);cases.setOrientation(LinearLayout.VERTICAL);scroll.addView(cases);
+        cases.addView(warning);cases.addView(status);
         root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
         start(cases,R.id.lab_probe,R.string.lab_probe,()->session.start(RuntimeRequest.PROBE));
         start(cases,R.id.lab_analyze,R.string.lab_analyze,()->session.start(RuntimeRequest.ANALYZE));
