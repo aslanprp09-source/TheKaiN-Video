@@ -200,6 +200,8 @@ public final class IsolatedRuntime implements AutoCloseable {
                     o.kernel=new Snapshot(pid,uid,start,dead);
                     o.observerPeak=Math.max(o.observerPeak,observerRss);o.observerCpu=Math.max(o.observerCpu,observerCpu);
                     if(!dead) {o.samples++;o.peak=Math.max(o.peak,rss);o.cpu=Math.max(o.cpu,cpu);}
+                    if(!o.retiring && (dead || rss>o.request.rssLimit))
+                        supervisor.post(()->retire(o,dead?RuntimeResult.WORKER_DIED:RuntimeResult.MEMORY_LIMIT));
                     return true;
                 }
             }
@@ -296,7 +298,8 @@ public final class IsolatedRuntime implements AutoCloseable {
                         if(result.error==RuntimeResult.OK && (o.procFailureSince>=0 || SystemClock.elapsedRealtime()-o.lastSample>1000 || !o.pythonEntered || o.address<=0 || o.cpuLimit<=0
                                 || result.pythonCalls!=1 || denials!=(o.mode==IsolatedInput.SECURITY?255:31)))
                             throw new IllegalArgumentException("INCOMPLETE_SUCCESS_PROOF");
-                        o.result=result;o.denials=denials;
+                        o.result=result.error==RuntimeResult.OK && o.peak>o.request.rssLimit
+                            ?new RuntimeResult(o.id,RuntimeResult.MEMORY_LIMIT):result;o.denials=denials;
                     }catch(RuntimeException e) {o.result=new RuntimeResult(o.id,RuntimeResult.IPC_ERROR);}
                     supervisor.post(()->retire(o,o.result.error));
                 }
@@ -354,7 +357,7 @@ public final class IsolatedRuntime implements AutoCloseable {
             && !serviceExists(ResourceObserverService.class) && !o.preparing && !o.configuring && !o.fetching.get() && (o.gate==null || o.gate.terminated());
         if(!dead && SystemClock.elapsedRealtime()<o.cleanupDeadline) {supervisor.postDelayed(()->reap(o),SAMPLE);return;}
         synchronized(this) {
-            if(!dead)o.error=RuntimeResult.CLEANUP_FAILED;
+            if(!dead) {o.error=RuntimeResult.CLEANUP_FAILED;lease.poison();}
             else if(o.error==0 && SystemClock.elapsedRealtime()>=o.request.deadline)o.error=RuntimeResult.TIMEOUT;
             o.finished=true;Outcome out=new Outcome(o,dead);record(o,out);
             if(dead) {o.ownerEndpoint=null;o.observerEndpoint=null;o.observer=null;o.sink=null;lease.cleared();active=null;LEASE.set(false);} // Otherwise poison: no uncertain worker reuse.

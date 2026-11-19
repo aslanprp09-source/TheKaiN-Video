@@ -24,6 +24,7 @@ cleanup() {
     timeout 8 adb -s "$ANDROID_SERIAL" exec-out screencap -p > "$evidence/failure-screen.png" 2>/dev/null || true
     if [ -f "$evidence/instrumentation.txt" ]; then tail -120 "$evidence/instrumentation.txt"; fi
     if [ -f "$evidence/isolated-instrumentation.txt" ]; then tail -160 "$evidence/isolated-instrumentation.txt"; fi
+    if [ -f "$evidence/observer-failure-instrumentation.txt" ]; then tail -100 "$evidence/observer-failure-instrumentation.txt"; fi
     if [ -f "$evidence/isolated-bootstrap.txt" ]; then tail -100 "$evidence/isolated-bootstrap.txt"; fi
     tail -120 "$evidence/crash.txt"
     tail -100 "$evidence/exit-info.txt"
@@ -152,3 +153,21 @@ done
 python3 rewrite/experiments/android_native/isolated_report.py --evidence "$evidence" --api "$api" --pages "$pages"
 adb -s "$ANDROID_SERIAL" shell pidof system_server | tr -d '\r' > "$evidence/system-server-after-isolated.txt"
 cmp "$evidence/system-server-before.txt" "$evidence/system-server-after-isolated.txt"
+
+# Deliberately poison the final isolated lease: no further runtime operation follows.
+# Successful kernel proof from the full suite above is retained separately.
+timeout 80 adb -s "$ANDROID_SERIAL" shell am instrument -w -e class com.thekain.runtime.lab.ObserverFailureTest com.thekain.runtime.lab.test/androidx.test.runner.AndroidJUnitRunner > "$evidence/observer-failure-instrumentation.txt"
+adb -s "$ANDROID_SERIAL" exec-out run-as com.thekain.runtime.lab cat files/observer-failure.json > "$evidence/observer-failure.json"
+python3 - "$evidence/observer-failure-instrumentation.txt" "$evidence/observer-failure.json" <<'PYOBSERVER'
+from pathlib import Path
+import re,sys,json
+text=Path(sys.argv[1]).read_text();print(text)
+assert re.search(r'^OK \(1 test\)\s*$',text,re.M), 'Observer-loss fail-closed test must execute'
+assert not any(s in text for s in ('FAILURES!!!','shortMsg=','INSTRUMENTATION_FAILED'))
+proof=json.loads(Path(sys.argv[2]).read_text())
+assert all(proof[k] is True for k in ('observer_lost','worker_binder_dead','observer_binder_dead','kernel_death_not_claimed','main_responsive','durable_reuse_refused'))
+assert proof['worker_uid']!=proof['observer_uid'] and proof['production_ready'] is False
+print('::notice::'+json.dumps(proof))
+PYOBSERVER
+adb -s "$ANDROID_SERIAL" shell pidof system_server | tr -d '\r' > "$evidence/system-server-after-observer-fault.txt"
+cmp "$evidence/system-server-before.txt" "$evidence/system-server-after-observer-fault.txt"

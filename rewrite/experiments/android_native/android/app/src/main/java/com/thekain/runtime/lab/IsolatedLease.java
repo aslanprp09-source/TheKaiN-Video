@@ -33,5 +33,15 @@ final class IsolatedLease {
         try {out.write(j.toString().getBytes(StandardCharsets.UTF_8));file.finishWrite(out);}
         catch(Exception e) {file.failWrite(out);throw e;}
     }
+    synchronized void poison() {
+        // Preserve a durable refusal even if another supervisor is constructed in this owner PID.
+        try {
+            JSONObject j=new JSONObject().put("boot",boot()).put("owner_pid",android.os.Process.myPid())
+                .put("owner_start",ProcessIdentity.selfStartTicks()).put("uncertain",true);
+            FileOutputStream out=file.startWrite();
+            try {out.write(j.toString().getBytes(StandardCharsets.UTF_8));file.finishWrite(out);}
+            catch(Exception e) {file.failWrite(out);throw e;}
+        }catch(Exception e) {android.util.Log.e("TheKaiNIsolated","UNCERTAIN_LEASE_WRITE_FAILED");}
+    }
     synchronized void cleared() {file.delete();}
 }

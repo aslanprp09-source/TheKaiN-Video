@@ -73,6 +73,12 @@ its separate UID prevents worker signals/ptrace under Linux DAC. No Python
 resource or HTTPS capability is given to the observer. JNI's exact-process guard
 is deliberately exercised there, and native-map absence is checked.
 
+A final, separate observer-loss test deliberately removes the Android binding
+while Python spins. It requires both actual OS retirements and a responsive main,
+but refuses to claim kernel death or reuse without the lost independent proof.
+The durable refusal survives construction of a replacement supervisor; no test
+reset erases that uncertainty. It runs after the complete successful suite.
+
 Only typed kernel snapshots cross to the owner. They carry monotonic sequence,
 measurement time, task identity and observer RSS/CPU; actual sender credentials
 must match the independently bound observer. Missing/error records fail closed;
@@ -94,7 +100,7 @@ The observer remains bound until original-kernel-task death is confirmed; the
 owner additionally requires worker Binder death and ServiceRecord removal.
 It then retires the Java observer and requires its rooted Binder death and
 ServiceRecord removal, plus ended owner transport/configuration callbacks,
-before releasing the lease. Losing the observer before kernel death poisons the
+before releasing the lease. Losing the observer before kernel death durably poisons the
 lease rather than trusting the Python worker or pretending cleanup. Failure within 2.5s gives CLEANUP_FAILED
 and poisons the lease; uncertain state never authorizes a fresh operation.
 Owner Binder death also makes the isolated worker self-terminate as a fallback.
