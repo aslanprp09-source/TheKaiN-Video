@@ -53,6 +53,7 @@ def inspect(report, receipt):
         require(type(ticks) is int and ticks >= 0 and type(hz) is int and 0 < hz <= 100000, 'CPU_COUNTERS')
         require(case['observed_worker_cpu_ms'] == ticks*1000//hz, 'CPU_CONVERSION')
         require(case.get('download_enabled') is False, 'NO_DOWNLOADS')
+        require(case['finished_elapsed_ms']-case['submitted_elapsed_ms'] == case['elapsed_ms'], 'CASE_TIMESTAMPS')
     def covered(kind, error):
         return [c for c in terminal if c['kind'] == kind and c['error'] == error]
     probes = covered(1, 0)
@@ -70,8 +71,12 @@ def inspect(report, receipt):
     footprint = report['footprint']
     require(footprint['worker_processes'] == 0 and footprint['owned_temp_files'] == 0, 'FINAL_FOOTPRINT')
     events = report.get('events', [])
-    require(len(events) <= 128 and any(e.get('kind') == 'activity_stop' for e in events)
-        and any(e.get('power', {}).get('interactive') is False for e in events), 'BACKGROUND_OBSERVATIONS')
+    require(len(events) <= 128, 'EVENT_LIMIT')
+    def during(case):
+        return [e for e in events if case['submitted_elapsed_ms'] <= e.get('event_elapsed_ms', -1) <= case['finished_elapsed_ms']]
+    require(any(any(e.get('kind') == 'activity_stop' for e in during(case))
+        and any(e.get('power', {}).get('interactive') is False for e in during(case))
+        for case in covered(4, 2)), 'BACKGROUND_OBSERVATIONS')
     return {'intake': 'OPERATOR_REPORT_REQUIRES_REVIEW', 'source_commit': report['source_commit'],
         'physical_device_attested': False, 'arm64_probe_reported': True, 'cases': len(cases),
         'max_sampled_rss_bytes': max(c['peak_sampled_rss_bytes'] for c in terminal),

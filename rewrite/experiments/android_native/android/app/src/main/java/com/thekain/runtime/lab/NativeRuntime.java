@@ -53,6 +53,7 @@ public final class NativeRuntime implements AutoCloseable {
         public final int workerPid,parentPid;
         public final long startTicks,elapsedMs,peakRssBytes,samples,virtualBefore,addressLimit,cpuLimit,networkBytes;
         public final long cancelToExitMs,retireToExitMs;
+        public final long submittedElapsedMs,finishedElapsedMs;
         public final long observedCpuMs,cpuTicks;
         public final int workerUid;
         public final int requests;
@@ -61,6 +62,7 @@ public final class NativeRuntime implements AutoCloseable {
             result=op.candidate;instance=op.instance;workerPid=op.child==null?0:op.child.pid;
             parentPid=android.os.Process.myPid();startTicks=op.child==null?0:op.child.startTicks;
             long finished=SystemClock.elapsedRealtime();
+            submittedElapsedMs=op.submitted;finishedElapsedMs=finished;
             elapsedMs=finished-op.submitted;peakRssBytes=op.peakRss;samples=op.samples;
             cancelToExitMs=op.cancelAt<0?-1:finished-op.cancelAt;
             retireToExitMs=op.retirementAt<0?-1:finished-op.retirementAt;

@@ -16,7 +16,8 @@ def sample():
             'cpu_ticks': 50, 'clock_ticks_per_second': 100, 'observed_worker_cpu_ms': 500, 'download_enabled': False,
             'machine': 'aarch64', 'pointer_bits': 64, 'openssl_handshake': True, 'python_calls': 1,
             'formats': 1, 'operator_battery_setting': 'standard' if index%2 else 'restricted',
-            'requested_fault': 'verified_worker_kill' if kind == 4 and error == 4 else 'none', 'elapsed_ms': 6000})
+            'requested_fault': 'verified_worker_kill' if kind == 4 and error == 4 else 'none', 'elapsed_ms': 6000,
+            'submitted_elapsed_ms':1000,'finished_elapsed_ms':7000})
     cases.append({'id':'00000000-0000-0000-0000-999999999999','source_commit':source,
         'outcome':'INTERRUPTED_OWNER_OR_SESSION','parent_identity_changed':True,'death_confirmed_on_relaunch':True,'error':None})
     return {'schema':1, 'source_commit':source, 'production_ready':False, 'product_integration':False,
@@ -25,7 +26,7 @@ def sample():
         'operator_claimed_physical_device':True, 'device':{'apk_sha256':'b'*64,'certificate_sha256':'c'*64,
             'emulator_hint':False,'process_64bit':True,'abis':['arm64-v8a'],'sdk':36},
         'cases':cases, 'footprint':{'worker_processes':0,'owned_temp_files':0},
-        'events':[{'kind':'activity_stop','power':{'interactive':False}}]}, receipt
+        'events':[{'kind':'activity_stop','event_elapsed_ms':3000,'power':{'interactive':False}}]}, receipt
 
 
 class PhoneIntakeTest(unittest.TestCase):
@@ -42,7 +43,8 @@ class PhoneIntakeTest(unittest.TestCase):
             lambda r:r['cases'][0].update(source_commit='d'*40),lambda r:r['cases'][0].update(death_confirmed=False),
             lambda r:r['cases'][0].update(main_python_loaded=True),lambda r:r['cases'][0].update(observed_worker_cpu_ms=501),
             lambda r:r['cases'].pop(),lambda r:r.update(pending={}),lambda r:r['footprint'].update(worker_processes=1),
-            lambda r:r.update(events=[]),lambda r:r.update(private_key='hidden'),
+            lambda r:r.update(events=[]),lambda r:r['events'][0].update(event_elapsed_ms=8000),
+            lambda r:r['cases'][0].update(finished_elapsed_ms=9000),lambda r:r.update(private_key='hidden'),
             lambda r:r.update(extra='-----BEGIN PRIVATE KEY-----'),lambda r:r.update(extra='https://private.invalid/?token=secret')]
         for index,mutate in enumerate(mutations):
             with self.subTest(index=index):

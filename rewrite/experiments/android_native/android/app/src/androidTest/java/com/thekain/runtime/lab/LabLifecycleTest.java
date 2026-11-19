@@ -58,6 +58,17 @@ public class LabLifecycleTest {
         assertFalse(ProcessIdentity.read("/proc/self/maps",2*1024*1024).contains("libpython3.14.so"));return out;
     }
     @Test public void recreationKeepsSingleOwnerAndExternalExtrasCannotStartPython() throws Exception {
+        // Simulate the API26 crash window after base -> .bak, before the next base exists.
+        File journal=new File(app.getCacheDir(),"qa-store-recovery-test.json");
+        android.util.AtomicFile atomic=new android.util.AtomicFile(journal);atomic.delete();
+        try {
+            JSONObject saved=new JSONObject().put("schema",1).put("cases",new JSONArray()).put("pending",new JSONObject().put("id","test-marker"));
+            try(FileOutputStream out=new FileOutputStream(new File(journal.getPath()+".bak"))) {
+                out.write(saved.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));out.getFD().sync();
+            }
+            assertFalse(journal.exists());
+            assertEquals("test-marker",new LabQaStore(journal).read().getJSONObject("pending").getString("id"));
+        } finally {atomic.delete();}
         Intent external=new Intent(app,LabQaActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             .putExtra("python","raise SystemExit(1)").putExtra("operation",RuntimeRequest.HANG)
             .putExtra("url","https://example.invalid/private");

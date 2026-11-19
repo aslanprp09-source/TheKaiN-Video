@@ -10,10 +10,17 @@ import org.json.*;
 final class LabQaStore {
     private final AtomicFile file;
     static final int MAX_BYTES=256*1024;
-    LabQaStore(Context context) {file=new AtomicFile(new File(context.getFilesDir(),"runtime-qa-state.json"));}
+    LabQaStore(Context context) {this(new File(context.getFilesDir(),"runtime-qa-state.json"));}
+    LabQaStore(File base) {file=new AtomicFile(base);}
     JSONObject read() throws Exception {
-        if(!file.getBaseFile().exists())return new JSONObject().put("schema",1).put("cases",new JSONArray());
-        try(InputStream in=file.openRead()) {
+        InputStream input;
+        try {input=file.openRead();} // API26 openRead restores a surviving .bak, even when base is absent.
+        catch(FileNotFoundException missing) {
+            File base=file.getBaseFile();
+            if(base.exists() || new File(base.getPath()+".bak").exists() || new File(base.getPath()+".new").exists())throw missing;
+            return new JSONObject().put("schema",1).put("cases",new JSONArray());
+        }
+        try(InputStream in=input) {
             ByteArrayOutputStream data=new ByteArrayOutputStream();byte[] buffer=new byte[8192];int n;
             while((n=in.read(buffer))!=-1) {if(data.size()+n>MAX_BYTES)throw new IOException("QA_JOURNAL_LIMIT");data.write(buffer,0,n);}
             JSONObject state=new JSONObject(data.toString("UTF-8"));

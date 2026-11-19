@@ -126,13 +126,15 @@ final class LabSession implements AutoCloseable {
     }
     private void attach(Active operation,CompletableFuture<NativeRuntime.Outcome> result) throws Exception {
         active=operation;
-        operation.startPower=power();
-        operation.batterySetting=state.optString("operator_battery_setting","unknown");
-        JSONObject pending=new JSONObject().put("id",operation.operation.id).put("kind",operation.kind)
-            .put("parent_pid",android.os.Process.myPid()).put("parent_start_ticks",ownerStart)
-            .put("source_commit",BuildConfig.QA_SOURCE_COMMIT).put("worker_pid",0)
-            .put("timeout_ms",operation.timeoutMs).put("started_elapsed_ms",SystemClock.elapsedRealtime());
-        try {state.put("pending",pending);store.save(state);}
+        try {
+            operation.startPower=power();
+            operation.batterySetting=state.optString("operator_battery_setting","unknown");
+            JSONObject pending=new JSONObject().put("id",operation.operation.id).put("kind",operation.kind)
+                .put("parent_pid",android.os.Process.myPid()).put("parent_start_ticks",ownerStart)
+                .put("source_commit",BuildConfig.QA_SOURCE_COMMIT).put("worker_pid",0)
+                .put("timeout_ms",operation.timeoutMs).put("started_elapsed_ms",SystemClock.elapsedRealtime());
+            state.put("pending",pending);store.save(state);
+        }
         catch(Exception failure) {
             operation.operation.cancel();
             operation.operation.completion().whenComplete((out,error)->owner.execute(()->{
@@ -241,6 +243,7 @@ final class LabSession implements AutoCloseable {
             .put("operator_battery_setting",operation.batterySetting)
             .put("worker_uid",out.workerUid).put("parent_uid",android.os.Process.myUid()).put("worker_start_ticks",out.startTicks)
             .put("worker_instance",out.instance).put("elapsed_ms",out.elapsedMs).put("timeout_ms",operation.timeoutMs)
+            .put("submitted_elapsed_ms",out.submittedElapsedMs).put("finished_elapsed_ms",out.finishedElapsedMs)
             .put("deadline_lateness_ms",Math.max(0,out.elapsedMs-operation.timeoutMs))
             .put("death_confirmed",out.deathConfirmed).put("peak_sampled_rss_bytes",out.peakRssBytes).put("rss_samples",out.samples)
             .put("observed_worker_cpu_ms",out.observedCpuMs).put("cpu_ticks",out.cpuTicks).put("clock_ticks_per_second",ProcessIdentity.CLOCK_TICKS)
