@@ -14,14 +14,23 @@ public final class IsolatedRuntime implements AutoCloseable {
     private static final AtomicBoolean LEASE=new AtomicBoolean();
     private static final long SAMPLE=40,CLEANUP=2500;
     private final Context context;
+    private final File fixtureHome;
+    private final IsolatedLease lease;
     private final HandlerThread thread=new HandlerThread("isolated-supervisor");
     private final Handler supervisor;
     private final ExecutorService preparation=Executors.newSingleThreadExecutor();
     private Operation active;
     private boolean closed;
     public IsolatedRuntime(Context context) {
-        if(ProcessIdentity.inWorker() || IsolatedRuntimeService.inWorker())throw new IllegalStateException("OWNER_REQUIRED");
-        this.context=context.getApplicationContext();thread.start();supervisor=new Handler(thread.getLooper());
+        this(context,null);
+    }
+    IsolatedRuntime(Context context,File fixtureHome) {
+        try {
+            if(!ProcessIdentity.read("/proc/self/cmdline",512).split("\u0000",2)[0].equals(context.getPackageName()))
+                throw new IllegalStateException("OWNER_REQUIRED");
+        }catch(IOException e) {throw new IllegalStateException("OWNER_IDENTITY_UNAVAILABLE",e);}
+        this.context=context.getApplicationContext();this.fixtureHome=fixtureHome;lease=new IsolatedLease(this.context);
+        thread.start();supervisor=new Handler(thread.getLooper());
     }
     public final class Operation {
         public final String id;
@@ -77,6 +86,9 @@ public final class IsolatedRuntime implements AutoCloseable {
         if(timeoutMs<100 || timeoutMs>NativeRuntime.MAX_DEADLINE_MS || mode<0 || mode>IsolatedInput.IPC_FLOOD)
             throw new IllegalArgumentException("LAB_BOUNDS");
         Operation o=new Operation(new RuntimeRequest(UUID.randomUUID().toString(),operation,url,ca,now+timeoutMs,rss,RuntimeRequest.MAX_HEADROOM),mode,now);
+        if(lease.uncertain()) {
+            o.error=RuntimeResult.CLEANUP_FAILED;o.retireAt=now;o.finished=true;o.future.complete(new Outcome(o,false));return o;
+        }
         if(closed || active!=null || !LEASE.compareAndSet(false,true)) {
             o.error=RuntimeResult.BUSY;o.retireAt=now;o.finished=true;o.future.complete(new Outcome(o,true));return o;
         }
@@ -89,7 +101,7 @@ public final class IsolatedRuntime implements AutoCloseable {
             try(FileOutputStream out=context.openFileOutput("isolated-owner-canary",Context.MODE_PRIVATE)) {
                 out.write(("owner-only-"+o.id).getBytes(java.nio.charset.StandardCharsets.US_ASCII));
             }
-            input=IsolatedResources.prepare(context,o.request,o.mode);
+            input=IsolatedResources.prepare(context,o.request,o.mode,fixtureHome);
             // Counters and all HTTPS IO belong to the trusted owner, not the isolated UID.
             gate=new ChildNetworkGate(o.request,new IRuntimeCallback.Stub() {
                 public boolean ready(String id,String instance,long ticks) {return false;}
@@ -97,10 +109,13 @@ public final class IsolatedRuntime implements AutoCloseable {
                 public void limits(String id,long before,long limit,long cpu) { }
                 public void completed(RuntimeResult result) { }
                 public void network(String id,int requests,long bytes) {o.requests=requests;o.payload=bytes;}
-            },RuntimeAssets.prepare(context));
+            },fixtureHome==null?RuntimeAssets.prepare(context):fixtureHome);
             IsolatedInput prepared=input;ChildNetworkGate transport=gate;
             supervisor.post(()->{o.preparing=false;if(!current(o) || o.retiring) {prepared.close();transport.close();return;}
-                o.gate=transport;bind(o,prepared);});
+                o.gate=transport;
+                try {lease.reserve(o.id);bind(o,prepared);}
+                catch(Exception e) {prepared.close();retire(o,RuntimeResult.IPC_ERROR);}
+            });
         }catch(Exception e) {
             if(input!=null)input.close();if(gate!=null)gate.close();
             supervisor.post(()->{o.preparing=false;if(current(o) && !o.retiring)retire(o,RuntimeResult.INVALID_REQUEST);});
@@ -108,6 +123,8 @@ public final class IsolatedRuntime implements AutoCloseable {
     }
     private synchronized boolean current(Operation o) {return active==o && !o.finished;}
     private void bind(Operation o,IsolatedInput input) {
+        // Keep pending descriptors owned even if binding fails or the callback never arrives.
+        oInput.put(o,input);
         o.connection=new ServiceConnection() {
             public void onServiceConnected(ComponentName component,IBinder binder) {
                 supervisor.post(()->{
@@ -116,7 +133,7 @@ public final class IsolatedRuntime implements AutoCloseable {
                         binder.linkToDeath(()->supervisor.post(()->{o.binderDead=true;if(current(o) && !o.retiring)retire(o,RuntimeResult.WORKER_DIED);}),0);
                         if(current(o) && !o.retiring)IIsolatedWorker.Stub.asInterface(binder).execute(input,callback(o));
                     }catch(Exception e) {if(current(o) && !o.retiring)retire(o,RuntimeResult.IPC_ERROR);}
-                    finally {input.close();}
+                    finally {input.close();oInput.remove(o);}
                 });
             }
             public void onServiceDisconnected(ComponentName component) {supervisor.post(()->{o.binderDead=true;if(current(o) && !o.retiring)retire(o,RuntimeResult.WORKER_DIED);});}
@@ -127,8 +144,6 @@ public final class IsolatedRuntime implements AutoCloseable {
             o.bound=context.bindService(new Intent(context,IsolatedRuntimeService.class),o.connection,Context.BIND_AUTO_CREATE);
             if(!o.bound) {input.close();retire(o,RuntimeResult.IPC_ERROR);}
         }catch(RuntimeException e) {input.close();retire(o,RuntimeResult.IPC_ERROR);}
-        // A callback may never arrive after an early unbind. Retain ownership of pending descriptors.
-        oInput.put(o,input);
     }
     private final Map<Operation,IsolatedInput> oInput=new HashMap<>();
     private synchronized boolean sender(Operation o,String capability) {
@@ -180,7 +195,11 @@ public final class IsolatedRuntime implements AutoCloseable {
                     if(!sender(o,capability) || o.result!=null)return;
                     try {
                         if(result==null || !o.id.equals(result.id) || denials<0 || denials>255)throw new IllegalArgumentException();
-                        result.validate();o.result=result;o.denials=denials;
+                        result.validate();
+                        if(result.error==RuntimeResult.OK && (!o.pythonEntered || o.address<=0 || o.cpuLimit<=0
+                                || result.pythonCalls!=1 || denials!=(o.mode==IsolatedInput.SECURITY?255:31)))
+                            throw new IllegalArgumentException("INCOMPLETE_SUCCESS_PROOF");
+                        o.result=result;o.denials=denials;
                     }catch(RuntimeException e) {o.result=new RuntimeResult(o.id,RuntimeResult.IPC_ERROR);}
                     supervisor.post(()->retire(o,o.result.error));
                 }
@@ -236,7 +255,7 @@ public final class IsolatedRuntime implements AutoCloseable {
             else if(o.error==0 && SystemClock.elapsedRealtime()>=o.request.deadline)o.error=RuntimeResult.TIMEOUT;
             o.finished=true;Outcome out=new Outcome(o,dead);record(o,out);
             if(o.kernel!=null)o.kernel.close();
-            if(dead) {active=null;LEASE.set(false);} // Otherwise poison: no uncertain worker reuse.
+            if(dead) {lease.cleared();active=null;LEASE.set(false);} // Otherwise poison: no uncertain worker reuse.
             o.started.completeExceptionally(new IllegalStateException("NOT_STARTED"));o.future.complete(out);
             if(closed)thread.quitSafely();
         }

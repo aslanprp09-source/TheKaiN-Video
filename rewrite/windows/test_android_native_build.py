@@ -4,6 +4,7 @@ from rewrite.experiments.android_native import test_process_report
 from rewrite.experiments.android_native import test_phone_report
 from rewrite.experiments.android_native import test_lifecycle_driver
 from rewrite.experiments.android_native import test_isolated_report
+from rewrite.experiments.android_native import test_isolated_phone_report
 
 
 def load_tests(loader,tests,pattern):
@@ -12,4 +13,5 @@ def load_tests(loader,tests,pattern):
     tests.addTests(loader.loadTestsFromModule(test_phone_report))
     tests.addTests(loader.loadTestsFromModule(test_lifecycle_driver))
     tests.addTests(loader.loadTestsFromModule(test_isolated_report))
+    tests.addTests(loader.loadTestsFromModule(test_isolated_phone_report))
     return tests

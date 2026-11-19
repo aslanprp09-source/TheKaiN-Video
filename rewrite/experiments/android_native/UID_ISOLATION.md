@@ -66,6 +66,16 @@ and poisons the lease; uncertain state never authorizes a fresh operation.
 Owner Binder death also makes the isolated worker self-terminate as a fallback.
 The OS mechanism must be proven on each platform; AOSP source is not a timing SLA.
 
+An AtomicFile reservation survives owner death. Losing the owner also loses its
+authenticated kernel descriptors; ordinary app process listings hide other UIDs
+and absence of a ServiceRecord alone cannot prove task death. A new owner therefore
+fails closed instead of resetting its static lease and silently proceeding. A
+strictly increased public Android BOOT_COUNT permits clearance after a real OS
+reboot, when no old task can remain. Corrupt/unreadable state stays blocked.
+Automatic recovery after owner death without reboot is **not implemented**;
+same-owner worker crash/cancel/deadline recovery is tested. This remains a lab
+limitation before product integration, not a claim that old processes are dead.
+
 Public AOSP15 references: [OomAdjuster](https://github.com/aosp-mirror/platform_frameworks_base/blob/android15-release/services/core/java/com/android/server/am/OomAdjuster.java)
 (isolated process without running services),
 [ActiveServices](https://github.com/aosp-mirror/platform_frameworks_base/blob/android15-release/services/core/java/com/android/server/am/ActiveServices.java)
@@ -76,7 +86,7 @@ Public AOSP15 references: [OomAdjuster](https://github.com/aosp-mirror/platform_
 ## Verification protocol and current status
 
 The existing default-off read-only native CI builds both ABIs from pinned source,
-runs original 27 tests and adds 19 isolated tests on API26/29/35 (4KiB) and
+runs original 27 tests and adds 22 isolated/backend/SDK-free UI tests on API26/29/35 (4KiB) and
 API36 official rev7 (16KiB). Negative tests cover owner file read/write, missing
 network permission, actual OS socket denial, read-only/sealed resources, forged
 proc FDs, tampered resource hash, malformed reply allocation, invalid capability/
@@ -90,6 +100,37 @@ Implementation-stage status: local JNI compilation x86_64/ARM64 PASS; Android
 matrix and new physical ARM64 isolated-UID execution **NOT_RUN** until linked
 run/device evidence is added. PR36's Samsung same-UID reports are historical,
 not evidence of this new boundary. Compile success is not execution.
+
+Initial CI154 (44522260214, source 0e74795) built both native ABIs from source,
+but lab Gradle dependency resolution failed with Maven Central HTTP429 before
+APK assembly/device tests. Product API35/29 emulator preparation separately
+failed with Ubuntu mirror timeout/HTTP503 (zero tests). Product Android JVM/Lint,
+legacy API26 and 111 host tests passed. PR CI155 separately exposed an existing
+Linux procfs test-observer race: ESRCH at read after task exit; ENOENT alone was
+caught. The test now recognizes both kernel death errors, with a regression that
+still rejects permission errors/empty records. This is separate from open
+Windows callback race #39. Infra reruns are not code or UI-stability fixes.
+
+## SDK-free ARM64 procedure
+
+The debug-only **TheKaiN UID QA** launcher is separate from the retained
+shared-UID QA launcher. It uses a separate owned HTTPS fixture directory so
+certificate files do not interfere. Run only one lab at a time. No SDK or ADB
+is required: press the UID/JNI probe, then the fixed safety/recovery suite,
+then save `TheKaiN-isolated-uid-qa-report.json` through Android's document picker.
+The suite includes actual probe/OpenSSL, Python file/network denials, blocked
+main cancellation/deadline, native crash, sampled memory limit, tampered inputs
+and five fresh own-HTTPS analyses. Manual hang/cancel and Activity recreation
+are also available. It accepts no external-intent operations/URLs/code.
+
+Lab versionCode=3 is distinct from product APK89 versionCode=3. CI debug signing
+is not release signing: compare the exact same-run source/APK/certificate receipt.
+A different CI debug certificate can require exporting prior evidence and
+uninstalling **only the separate runtime lab**, not the user's downloader.
+No actual installation or physical execution is claimed by providing a harness.
+Reports are operator evidence requiring review, never cryptographic device
+attestation or a change to the APK89 gate. Export includes device identity;
+review before sharing. No certificates' private bytes, URLs or Python are exported.
 
 Reproduce with the README source-build/assemble commands and default-off dispatch
 `native_runtime_lab=true`, build/sign/verify flags false on this task branch.

@@ -115,7 +115,7 @@ assert not any(s in text for s in ('FAILURES!!!','shortMsg=','INSTRUMENTATION_FA
 print('::notice::'+json.dumps({'native_JNI_smoke':'PASS','api':int(sys.argv[2]),'actual_page_size':int(sys.argv[3]),'tests':27,'production_ready':False}))
 PY
 python3 rewrite/experiments/android_native/lifecycle-smoke.py --evidence "$evidence" --delivery "$delivery"
-timeout 600 adb -s "$ANDROID_SERIAL" shell am instrument -w -e class com.thekain.runtime.lab.IsolatedRuntimeTest com.thekain.runtime.lab.test/androidx.test.runner.AndroidJUnitRunner > "$evidence/isolated-instrumentation.txt" &
+timeout 600 adb -s "$ANDROID_SERIAL" shell am instrument -w -e class com.thekain.runtime.lab.IsolatedRuntimeTest,com.thekain.runtime.lab.IsolatedQaTest com.thekain.runtime.lab.test/androidx.test.runner.AndroidJUnitRunner > "$evidence/isolated-instrumentation.txt" &
 driver=$!
 bash rewrite/experiments/android_native/sample-meminfo.sh "$driver" "$evidence" isolated &
 sampler=$!
@@ -126,5 +126,9 @@ wait "$sampler" 2>/dev/null || true
 adb -s "$ANDROID_SERIAL" exec-out run-as com.thekain.runtime.lab cat files/isolated-evidence.jsonl > "$evidence/isolated-evidence.jsonl"
 test "$result" = 0
 python3 rewrite/experiments/android_native/isolated_report.py --evidence "$evidence" --api "$api" --pages "$pages"
+adb -s "$ANDROID_SERIAL" exec-out run-as com.thekain.runtime.lab cat files/isolated-qa-report.json > "$evidence/isolated-qa-report.json"
+for label in entry suite-result recreated-cancelled; do
+  adb -s "$ANDROID_SERIAL" exec-out run-as com.thekain.runtime.lab cat "files/isolated-qa-evidence/$label.png" > "$evidence/isolated-qa-$label.png"
+done
 adb -s "$ANDROID_SERIAL" shell pidof system_server | tr -d '\r' > "$evidence/system-server-after-isolated.txt"
 cmp "$evidence/system-server-before.txt" "$evidence/system-server-after-isolated.txt"

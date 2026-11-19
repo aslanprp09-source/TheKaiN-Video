@@ -19,9 +19,13 @@ public final class IsolatedInput implements Parcelable,AutoCloseable {
     private IsolatedInput(Parcel p) {
         request=RuntimeRequest.CREATOR.createFromParcel(p);mode=p.readInt();bytes=p.readLong();
         sha256=Wire.string(p,64,false);
-        resources=ParcelFileDescriptor.CREATOR.createFromParcel(p);
-        certificate=ParcelFileDescriptor.CREATOR.createFromParcel(p);key=ParcelFileDescriptor.CREATOR.createFromParcel(p);
+        ParcelFileDescriptor[] fds=readDescriptors(p);resources=fds[0];certificate=fds[1];key=fds[2];
         try {validate();}catch(RuntimeException e) {close();throw e;}
+    }
+    private static ParcelFileDescriptor[] readDescriptors(Parcel p) {
+        ParcelFileDescriptor[] fds=new ParcelFileDescriptor[3];
+        try {for(int i=0;i<3;i++)fds[i]=ParcelFileDescriptor.CREATOR.createFromParcel(p);return fds;}
+        catch(RuntimeException e) {for(ParcelFileDescriptor fd:fds)if(fd!=null)try {fd.close();}catch(IOException ignored){}throw e;}
     }
     void validate() {
         Wire.check(request!=null);request.validate();Wire.check(mode>=NORMAL && mode<=IPC_FLOOD);

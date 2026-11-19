@@ -17,6 +17,15 @@ from rewrite.experiments.android_ytdlp.spike import (
     SpikeError, analyze_fixture, bounded_process, decode, normalize, origin)
 
 
+def kernel_record_exited(state):
+    try:
+        value=state.read_text()
+    except (FileNotFoundError,ProcessLookupError):
+        # procfs can return ENOENT at open or ESRCH after open when the task exits.
+        return True
+    return value.rsplit(')',1)[1].split()[0] == 'Z'
+
+
 class ProtocolTests(unittest.TestCase):
     def setUp(self):
         self.url = 'https://127.0.0.1:443/video.mp4?token=fixture-secret'
@@ -81,6 +90,18 @@ class ProtocolTests(unittest.TestCase):
 class LifecycleTests(unittest.TestCase):
     def command(self, code): return [sys.executable, '-I', '-c', code]
 
+    def test_kernel_esrch_confirms_death_but_denied_or_empty_read_does_not(self):
+        state=Path('/proc/123456/stat')
+        for error in (FileNotFoundError(),ProcessLookupError()):
+            with patch.object(Path,'read_text',side_effect=error):self.assertTrue(kernel_record_exited(state))
+        for value in ('', '123456 (owned) R 0 0'):
+            with patch.object(Path,'read_text',return_value=value):
+                if not value:
+                    with self.assertRaises(IndexError):kernel_record_exited(state)
+                else:self.assertFalse(kernel_record_exited(state))
+        with patch.object(Path,'read_text',side_effect=PermissionError()):
+            with self.assertRaises(PermissionError):kernel_record_exited(state)
+
     def test_output_and_stderr_flood_are_bounded_without_secret_in_error(self):
         for channel in ('stdout', 'stderr'):
             with self.assertRaises(SpikeError) as caught:
@@ -114,11 +135,7 @@ class LifecycleTests(unittest.TestCase):
                     # A killed grandchild may briefly remain a zombie until init reaps it.
                     state = Path(f'/proc/{child_pid}/stat')
                     def exited():
-                        try:
-                            value = state.read_text()
-                        except FileNotFoundError:
-                            return True
-                        return value.rsplit(')', 1)[1].split()[0] == 'Z'
+                        return kernel_record_exited(state)
                     for _ in range(50):
                         if exited(): break
                         time.sleep(0.01)

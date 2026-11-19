@@ -16,7 +16,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /** Genuine Android isolated UID: not a process holding the application's permissions. */
 public final class IsolatedRuntimeService extends Service {
     static final String NAME="com.thekain.runtime.lab:isolated_python";
-    private final AtomicBoolean used=new AtomicBoolean();
+    private static final AtomicBoolean USED=new AtomicBoolean();
+    // Keep the endpoint strongly rooted until PID death, including pre-Python handshake refusal.
+    // Binder object GC must never masquerade as worker process death.
+    private static volatile IBinder processBinder;
     private final ExecutorService python=Executors.newSingleThreadExecutor(r->new Thread(r,"isolated-python"));
     static boolean inWorker() {
         try {return ProcessIdentity.read("/proc/self/cmdline",512).split("\u0000",2)[0].equals(NAME)
@@ -33,7 +36,7 @@ public final class IsolatedRuntimeService extends Service {
             if(Binder.getCallingUid()!=getApplicationInfo().uid || input==null || owner==null) {
                 if(input!=null)input.close();return;
             }
-            if(!inWorker() || !used.compareAndSet(false,true)) {input.close();die();return;}
+            if(!inWorker() || !USED.compareAndSet(false,true)) {input.close();die();return;}
             try {
                 input.validate();long left=input.request.deadline-SystemClock.elapsedRealtime();
                 if(left<=0 || left>NativeRuntime.MAX_DEADLINE_MS)throw new IOException("DEADLINE");
@@ -60,7 +63,9 @@ public final class IsolatedRuntimeService extends Service {
         // Before the additional Python seccomp fence: prove the Android UID itself lacks network.
         try(java.net.Socket socket=new java.net.Socket()) {socket.connect(new InetSocketAddress("127.0.0.1",9),500);
             throw new IOException("ISOLATED_SOCKET_ALLOWED");}
-        catch(SocketException denied) {
+        catch(SecurityException denied) {
+            if(checkSelfPermission(android.Manifest.permission.INTERNET)!=PackageManager.PERMISSION_DENIED)throw denied;flags|=4;
+        }catch(SocketException denied) {
             Throwable cause=denied;boolean permission=false;
             while(cause!=null) {if(cause instanceof ErrnoException) {int n=((ErrnoException)cause).errno;permission|=n==OsConstants.EACCES || n==OsConstants.EPERM;}cause=cause.getCause();}
             if(!permission && !permissionDenied(denied))throw denied;flags|=4;
@@ -99,9 +104,14 @@ public final class IsolatedRuntimeService extends Service {
                         || owner.fetch(request.id,request.url,"POST").error!=RuntimeResult.INVALID_REQUEST)
                     throw new IOException("BROKER_ACCEPTED_FORBIDDEN_REQUEST");
             }
-            if(input.mode==IsolatedInput.BLOCK_MAIN)new Handler(Looper.getMainLooper()).post(()->{
-                CountDownLatch never=new CountDownLatch(1);for(;;)try {never.await();}catch(InterruptedException ignoredInterrupt) { }
-            });
+            if(input.mode==IsolatedInput.BLOCK_MAIN) {
+                CountDownLatch entered=new CountDownLatch(1);
+                new Handler(Looper.getMainLooper()).post(()->{
+                    entered.countDown();CountDownLatch never=new CountDownLatch(1);
+                    for(;;)try {never.await();}catch(InterruptedException ignoredInterrupt) { }
+                });
+                if(!entered.await(2,TimeUnit.SECONDS))throw new IOException("MAIN_THREAD_BLOCK_NOT_CONFIRMED");
+            }
             long left=request.deadline-SystemClock.elapsedRealtime();
             int seconds=(int)Math.max(1,(left+999)/1000)+1;
             long[] limits=IsolatedChild.configureBudget(request.virtualHeadroom,seconds);
@@ -129,6 +139,9 @@ public final class IsolatedRuntimeService extends Service {
         }
         // No cooperative self-kill/onDestroy path: unbind must let Android reap even a blocked main thread.
     }
-    @Override public IBinder onBind(Intent intent) {return binder;}
+    @Override public IBinder onBind(Intent intent) {
+        if(processBinder!=null && processBinder!=binder) {die();return null;}
+        processBinder=binder;return binder;
+    }
     @Override public boolean onUnbind(Intent intent) {return false;}
 }

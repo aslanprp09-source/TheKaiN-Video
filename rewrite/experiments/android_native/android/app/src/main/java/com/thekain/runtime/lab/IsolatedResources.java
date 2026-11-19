@@ -19,12 +19,15 @@ final class IsolatedResources {
     }
     private static ParcelFileDescriptor snapshot(Context context,byte[] data) throws Exception {
         File file=File.createTempFile("isolated-fixture-",".tmp",context.getCacheDir());
+        ParcelFileDescriptor fd=null;
         try {
             try(FileOutputStream out=new FileOutputStream(file)) {out.write(data);}
-            return ParcelFileDescriptor.open(file,ParcelFileDescriptor.MODE_READ_ONLY);
-        }finally {if(!file.delete())throw new IOException("RESOURCE_UNLINK");}
+            fd=ParcelFileDescriptor.open(file,ParcelFileDescriptor.MODE_READ_ONLY);
+            if(!file.delete())throw new IOException("RESOURCE_UNLINK");return fd;
+        }catch(Exception e) {if(fd!=null)fd.close();throw e;}
+        finally {if(file.exists())file.delete();}
     }
-    static IsolatedInput prepare(Context context,RuntimeRequest request,int mode) throws Exception {
+    static IsolatedInput prepare(Context context,RuntimeRequest request,int mode,File fixtureHome) throws Exception {
         if(Looper.myLooper()==Looper.getMainLooper())throw new IOException("BACKGROUND_REQUIRED");
         String abi=Build.SUPPORTED_ABIS[0];
         if(!abi.equals("x86_64") && !abi.equals("arm64-v8a"))throw new IOException("ABI");
@@ -60,14 +63,15 @@ final class IsolatedResources {
             try(InputStream in=new FileInputStream(zip)) {byte[] b=new byte[16384];int n;while((n=in.read(b))!=-1)hash.update(b,0,n);}
             resources=ParcelFileDescriptor.open(zip,ParcelFileDescriptor.MODE_READ_ONLY);
             // These are public, ephemeral owned TLS-fixture credentials, never release signing material.
-            File home=RuntimeAssets.prepare(context);
+            File home=fixtureHome==null?RuntimeAssets.prepare(context):fixtureHome;
             try(InputStream in=new FileInputStream(new File(home,"fixtures/owned-ca.pem"))) {certificate=snapshot(context,bytes(in,16384));}
             try(InputStream in=new FileInputStream(new File(home,"fixtures/owned-key.pem"))) {key=snapshot(context,bytes(in,16384));}
             String digest=hex(hash.digest());if(mode==IsolatedInput.BAD_DIGEST)digest="0000000000000000000000000000000000000000000000000000000000000000";
+            if(!zip.delete())throw new IOException("RESOURCE_UNLINK");
             return new IsolatedInput(request,mode,resources,certificate,key,size,digest);
         }catch(Exception e) {
             for(ParcelFileDescriptor fd:new ParcelFileDescriptor[]{resources,certificate,key})if(fd!=null)fd.close();throw e;
-        }finally {if(!zip.delete())throw new IOException("RESOURCE_UNLINK");}
+        }finally {if(zip.exists())zip.delete();}
     }
     private IsolatedResources() { }
 }

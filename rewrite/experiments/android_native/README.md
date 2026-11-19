@@ -1,10 +1,13 @@
 # Source-built Android JNI experiment
 
 Issue #5; isolated follow-up to PR31/PR33. This is a separate application
-`com.thekain.runtime.lab`, with no Activity, exported component, product integration,
+`com.thekain.runtime.lab`, with separate debug-only QA launchers, no exported worker, product integration,
 release-signing Environment, publication or user-media access. `production_ready`
 and `automatic_publication` remain false. The existing Android application's tests
 and required branch checks remain in place.
+
+The subsequent genuine UID boundary is described in [UID_ISOLATION.md](UID_ISOLATION.md).
+The original shared-UID interpreter/process/QA tests remain a separate baseline.
 
 ## Fixed input and license inventory
 

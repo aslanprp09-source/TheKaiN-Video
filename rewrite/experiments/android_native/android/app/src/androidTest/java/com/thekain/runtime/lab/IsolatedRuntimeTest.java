@@ -141,4 +141,16 @@ public final class IsolatedRuntimeTest extends RuntimeTestSupport {
             assertEquals(0,fresh.result.error);assertTrue(fresh.deathConfirmed);assertNotEquals(out.instance,fresh.instance);
         }
     }
+    @Test public void lostOwnerLeaseCannotBeForgottenByANewSupervisor() throws Exception {
+        IsolatedLease lease=new IsolatedLease(context);assertFalse(lease.file.getBaseFile().exists());
+        lease.reserve("00000000-0000-0000-0000-000000000000");
+        try {
+            org.json.JSONObject marker=new org.json.JSONObject(ProcessIdentity.read(lease.file.getBaseFile().getPath(),2048));
+            marker.put("owner_pid",parentPid+1);
+            try(FileOutputStream out=new FileOutputStream(lease.file.getBaseFile())) {out.write(marker.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));}
+            IsolatedRuntime.Outcome blocked=isolated.submit(RuntimeRequest.PROBE,null,1,30000).completion().get(2,TimeUnit.SECONDS);
+            assertEquals(RuntimeResult.CLEANUP_FAILED,blocked.result.error);assertFalse(blocked.deathConfirmed);
+            assertEquals(0,blocked.workerPid);assertFalse(blocked.pythonEntered);healthyMain();
+        }finally {lease.cleared();} // Synthetic test marker only; no worker was bound.
+    }
 }

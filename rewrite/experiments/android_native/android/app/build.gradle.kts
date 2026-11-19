@@ -12,8 +12,8 @@ android {
         applicationId = "com.thekain.runtime.lab"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.2-device-qa-lab"
+        versionCode = 3
+        versionName = "0.3-isolated-uid-lab"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         val commit = providers.exec { commandLine("git", "rev-parse", "HEAD") }.standardOutput.asText.get().trim()
         require(commit.matches(Regex("[0-9a-f]{40}")))

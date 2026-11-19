@@ -1,5 +1,10 @@
 # ARM64 and background QA — separate debug laboratory
 
+For the subsequent genuine isolated-UID backend, separate debug launcher and
+report, see [UID_ISOLATION.md](UID_ISOLATION.md). PR36's bounded Samsung
+shared-UID acceptance does not verify that new boundary. New UID phone execution
+remains NOT_RUN until its exact-build report is reviewed.
+
 Issue #5, next stage after PR35. Physical Samsung execution: **NOT_RUN** until an
 actual report is returned and reviewed. Emulator results and ARM64 compilation
 cannot fill this field. No product adapter, YouTube support, release publication,
