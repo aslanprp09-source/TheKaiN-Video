@@ -29,10 +29,14 @@ def proc_identity(pid):
     except subprocess.CalledProcessError:
         raw = ''
     if ')' not in raw:
+        path=f'/proc/{pid}'
         present = subprocess.run(['adb', '-s', 'emulator-5554', 'shell', 'run-as', PACKAGE,
-            '/system/bin/toybox', 'test', '-d', f'/proc/{pid}'], timeout=10, capture_output=True)
-        assert present.returncode in (0, 1), 'Cannot establish process existence'
-        return None if present.returncode == 1 else ('?', None)
+            'ls', '-d', path], timeout=10, capture_output=True)
+        if present.returncode == 0 and present.stdout.strip() == path.encode():
+            return ('?', None) # Transient/denied stat read of a PID that still exists.
+        if present.returncode == 1 and path.encode() in present.stderr and b'No such file or directory' in present.stderr:
+            return None
+        raise AssertionError('Cannot establish process existence: '+present.stderr.decode(errors='replace')[:200])
     fields = raw[raw.rindex(')')+2:].split()
     assert len(fields) >= 20, 'Incomplete kernel process identity'
     return fields[0], int(fields[19])
@@ -46,11 +50,19 @@ def hierarchy(evidence, label):
     return ET.fromstring(raw)
 
 
+def window_focused(focus):
+    # A listed window or focused app alone is not evidence of input focus.
+    return all(any(field in line and PACKAGE+'/' in line for line in focus.splitlines())
+        for field in ('mCurrentFocus=', 'mFocusedApp='))
+
+
 def tap(evidence, resource, scroll=False, text=None):
-    for attempt in range(8):
-        focus = adb('shell', 'dumpsys', 'window', 'windows').decode()
+    until=time.monotonic()+20
+    while time.monotonic()<until:
+        # API29+ prints global focus in DisplayContent, omitted by the 'windows' subcommand.
+        focus = adb('shell', 'dumpsys', 'window').decode()
         (evidence/'owner-window.txt').write_text(focus)
-        if not any('mCurrentFocus=' in line and PACKAGE in line for line in focus.splitlines()):
+        if not window_focused(focus):
             time.sleep(.2)
             continue
         tree = hierarchy(evidence, 'owner-ui')
@@ -153,4 +165,22 @@ if __name__ == '__main__':
     parser.add_argument('--evidence', type=Path, required=True)
     parser.add_argument('--delivery', type=Path, required=True)
     args = parser.parse_args()
-    run(args.evidence, args.delivery)
+    try:
+        run(args.evidence, args.delivery)
+    except Exception:
+        # Own CI emulator only; no PEM/raw journal/remote URL dump. Preserve exact failure state.
+        for command,name in ((('dumpsys','window'),'failure-window.txt'),
+                (('dumpsys','activity','activities'),'failure-activity.txt')):
+            try:
+                raw=adb('shell',*command).decode(errors='replace');(args.evidence/name).write_text(raw)
+                print('\n'.join(line for line in raw.splitlines() if any(term in line for term in
+                    ('mCurrentFocus','mFocusedApp','mResumedActivity','mTopResumedActivity')))[-4000:])
+            except Exception as capture:
+                print('QA diagnostic capture: '+type(capture).__name__)
+        try:
+            hierarchy(args.evidence,'failure-ui')
+            (args.evidence/'failure-screen.png').write_bytes(adb('exec-out','screencap','-p'))
+            print((args.evidence/'failure-ui.xml').read_text()[-8000:])
+        except Exception as capture:
+            print('QA UI capture: '+type(capture).__name__)
+        raise

@@ -63,6 +63,11 @@ exact whole-operation CPU peak/profile. The existing kernel RLIMITs remain.
    confirmation, then proves both PID deaths before starting verification
    instrumentation. No shell SIGKILL/SELinux change; no test-runner force-stop
    during owner death. Empty/transient `/proc` reads are not proof of death.
+   Readiness requires both `mCurrentFocus` and `mFocusedApp` from the full window
+   dump (the `windows` subcommand omits display focus on API29+), plus an enabled
+   fixed control in the current UI hierarchy. Failure captures focus/Activity,
+   UI tree and screenshot. PID disappearance uses explicit ENOENT, never a
+   permission error or an unavailable API26 toybox applet.
    New screenshots (`qa-ready`, `qa-running`, landscape) and owner journal are
    collected only from the owned `qa-evidence` directory. No fixture PEM export.
 5. Require fresh independent KaiN1One approval of the final HEAD before merge
