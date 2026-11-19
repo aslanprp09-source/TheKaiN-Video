@@ -51,12 +51,12 @@ def main():
     parser.add_argument('--api',type=int,required=True);parser.add_argument('--pages',type=int,required=True)
     args=parser.parse_args();folder=args.evidence
     text=(folder/'isolated-instrumentation.txt').read_text()
-    assert re.search(r'^OK \(22 tests\)\s*$',text,re.M), text[-12000:]
+    assert re.search(r'^OK \(24 tests\)\s*$',text,re.M), text[-12000:]
     assert not any(s in text for s in ('FAILURES!!!','shortMsg=','INSTRUMENTATION_FAILED'))
     assert int((folder/'api.txt').read_text())==args.api
     assert int((folder/'page-size.txt').read_text())==args.pages
     rows=[json.loads(line) for line in (folder/'isolated-evidence.jsonl').read_text().splitlines()]
-    report=validate(rows);report.update(api=args.api,actual_page_size=args.pages,tests=22)
+    report=validate(rows);report.update(api=args.api,actual_page_size=args.pages,tests=24)
     snapshots=sum('MEMINFO in pid' in p.read_text(errors='replace') for p in folder.glob('meminfo-isolated-*.txt'))
     assert snapshots>0,'No independent isolated-worker dumpsys meminfo snapshot'
     report['independent_meminfo_snapshots']=snapshots

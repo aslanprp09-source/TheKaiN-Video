@@ -15,7 +15,7 @@ class IsolatedPhoneIntakeTest(unittest.TestCase):
                 death_confirmed=True,main_python_loaded=False,python_entered=mode not in (3,4),
                 python_calls=1,security_denials=255 if mode==1 else 31,requests=1,payload_bytes=128,
                 machine='aarch64',pointer_bits=64,pages=4096,openssl_handshake=True,retire_to_exit_ms=80,
-                resource_input_bytes=22*1024*1024,cpu_ticks=8,clock_ticks_per_second=100))
+                resource_input_bytes=22*1024*1024,cpu_ticks=8,clock_ticks_per_second=100,owned_ipc_temp_files=0))
         receipt=dict(repository_commit='a'*40,apk_sha256={'lab.apk':'b'*64},debug_certificate_sha256='c'*64)
         report=dict(schema=1,boundary='android_isolated_uid',source_commit='a'*40,production_ready=False,
             product_integration=False,physical_device_attested=False,qa89_review='BLOCKED_SEPARATE_TASK',

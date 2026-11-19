@@ -16,14 +16,18 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /** Genuine Android isolated UID: not a process holding the application's permissions. */
 public final class IsolatedRuntimeService extends Service {
     static final String NAME="com.thekain.runtime.lab:isolated_python";
+    static final String COMPONENT_PROCESS_NAME=NAME+":com.thekain.runtime.lab.IsolatedRuntimeService";
     private static final AtomicBoolean USED=new AtomicBoolean();
     // Keep the endpoint strongly rooted until PID death, including pre-Python handshake refusal.
     // Binder object GC must never masquerade as worker process death.
     private static volatile IBinder processBinder;
     private final ExecutorService python=Executors.newSingleThreadExecutor(r->new Thread(r,"isolated-python"));
     static boolean inWorker() {
-        try {return ProcessIdentity.read("/proc/self/cmdline",512).split("\u0000",2)[0].equals(NAME)
-            && android.os.Process.myUid()%100000>=90000;}
+        try {
+            String name=ProcessIdentity.read("/proc/self/cmdline",512).split("\u0000",2)[0];
+            // Android decorates isolated Service process names with the exact component.
+            return (name.equals(NAME) || name.equals(COMPONENT_PROCESS_NAME)) && android.os.Process.myUid()%100000>=90000;
+        }
         catch(IOException e) {return false;}
     }
     private static void die() {

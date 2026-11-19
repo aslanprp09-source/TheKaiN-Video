@@ -3,8 +3,8 @@ set -Eeuo pipefail
 driver="${1:?Instrumentation driver PID required}"
 evidence="${2:?Evidence directory required}"
 case "${3:-baseline}" in
-  baseline) worker_name=com.thekain.runtime.lab:python_runtime ;;
-  isolated) worker_name=com.thekain.runtime.lab:isolated_python ;;
+  baseline) worker_names=(com.thekain.runtime.lab:python_runtime) ;;
+  isolated) worker_names=(com.thekain.runtime.lab:isolated_python com.thekain.runtime.lab:isolated_python:com.thekain.runtime.lab.IsolatedRuntimeService) ;;
   *) exit 1 ;;
 esac
 [[ "$driver" =~ ^[0-9]+$ ]]
@@ -12,7 +12,7 @@ count=0
 last_pid=""
 while kill -0 "$driver" 2>/dev/null; do
   # No worker between operations is normal; pipefail must not end sampling.
-  pid=$(adb -s "$ANDROID_SERIAL" shell pidof "$worker_name" 2>/dev/null | tr -d '\r') || pid=""
+  pid=$(adb -s "$ANDROID_SERIAL" shell pidof "${worker_names[@]}" 2>/dev/null | tr -d '\r') || pid=""
   case "$pid" in ''|*[!0-9]*) ;; *)
     if [ "$count" -lt 32 ] && [ "$pid" != "$last_pid" ]; then
       last_pid="$pid"

@@ -19,6 +19,8 @@ public final class IsolatedRuntimeTest extends RuntimeTestSupport {
     private IsolatedRuntime.Outcome finish(IsolatedRuntime.Operation op) throws Exception {
         IsolatedRuntime.Outcome out=op.completion().get(35,TimeUnit.SECONDS);
         assertTrue("Confirmed OS retirement, error="+out.result.error,out.deathConfirmed);
+        File[] leftovers=context.getCacheDir().listFiles((folder,name)->name.startsWith("isolated-python-") || name.startsWith("isolated-fixture-"));
+        assertNotNull(leftovers);assertEquals("No retained IPC resource files",0,leftovers.length);
         healthyMain();return out;
     }
     private IsolatedRuntime.Operation submit(int op,String address,int mode,long timeout) {
@@ -50,6 +52,23 @@ public final class IsolatedRuntimeTest extends RuntimeTestSupport {
         assertEquals(count+1,server.getRequestCount());assertEquals(1,out.requests);assertTrue(out.payloadBytes>0);
         assertFalse(out.result.downloadEnabled);assertFalse(out.result.eligible);assertNull(out.result.videoCodec);
         assertEquals("mp4a.40.2",out.result.audioCodec);
+    }
+    @Test public void cancelBlockedHttpsReadRetiresOwnerTransportBeforeFreshOperation() throws Exception {
+        int count=server.getRequestCount();IsolatedRuntime.Operation op=submit(RuntimeRequest.ANALYZE,url.replace("/video","/stall"),0,30000);
+        op.whenPythonStarted().get(25,TimeUnit.SECONDS);
+        long until=SystemClock.elapsedRealtime()+5000;
+        while(server.getRequestCount()==count && SystemClock.elapsedRealtime()<until)Thread.sleep(10);
+        assertTrue("Owned server must observe the blocked HTTP request",server.getRequestCount()>count);
+        assertTrue(op.cancel());IsolatedRuntime.Outcome out=finish(op);
+        assertEquals(RuntimeResult.CANCELED,out.result.error);assertTrue(out.cancelToExitMs<=3000);recovery(out);
+    }
+    @Test public void repeatedLegacyWorkerKillsRetainTypedDeathAndFreshRecovery() throws Exception {
+        for(int i=0;i<3;i++) {
+            NativeRuntime.Operation op=runtime.submit(RuntimeRequest.HANG,null,1,30000);
+            int pid=op.whenPythonStarted().get(25,TimeUnit.SECONDS);ProcessIdentity.worker(pid).killOwned();
+            NativeRuntime.Outcome out=await(op);assertEquals(RuntimeResult.WORKER_DIED,out.result.error);
+            assertWorkerRetired(out);assertFresh(out);
+        }
     }
     @Test public void pythonCannotReadOrModifyOwnerFilesOrOpenNetwork() throws Exception {
         IsolatedRuntime.Outcome out=finish(submit(RuntimeRequest.PROBE,null,IsolatedInput.SECURITY,30000));

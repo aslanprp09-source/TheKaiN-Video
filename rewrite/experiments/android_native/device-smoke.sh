@@ -30,7 +30,7 @@ cleanup() {
 from pathlib import Path
 import sys
 lines=Path(sys.argv[1]).read_text(errors='replace').splitlines()
-terms=('thekain.runtime.lab','lmkd','lowmemorykiller','python.stderr','AndroidRuntime','Fatal signal','TheKaiNRuntime')
+terms=('thekain.runtime.lab','lmkd','lowmemorykiller','python.stderr','AndroidRuntime','Fatal signal','TheKaiNRuntime','TheKaiNIsolated')
 for line in [s for s in lines if any(term in s for term in terms)][-120:]: print(line)
 PY
   fi

@@ -19,8 +19,18 @@ final class ChildNetworkGate implements AutoCloseable {
     private final IRuntimeCallback callback;
     private final ThreadPoolExecutor io;
     private final SSLSocketFactory tls;
+    private static final ThreadPoolExecutor DISCONNECT=disconnectExecutor();
+    private volatile boolean closed;
+    private volatile HttpsURLConnection activeConnection;
+    private Future<byte[]> activeTask;
+    private Future<?> disconnectTask;
     private int requests;
     private long bytes;
+    private static ThreadPoolExecutor disconnectExecutor() {
+        ThreadPoolExecutor pool=new ThreadPoolExecutor(1,1,0,TimeUnit.MILLISECONDS,new ArrayBlockingQueue<>(1),
+            task->new Thread(task,"owned-https-disconnect"));
+        pool.prestartAllCoreThreads();return pool;
+    }
 
     ChildNetworkGate(RuntimeRequest request,IRuntimeCallback callback,File home) throws Exception {
         this.request=request;this.callback=callback;
@@ -39,19 +49,26 @@ final class ChildNetworkGate implements AutoCloseable {
     }
     public void started() throws android.os.RemoteException { callback.phase(request.id,1); }
     private int remaining() throws Failure {
+        if(closed)throw new Failure(RuntimeResult.CANCELED);
         long left=request.deadline-SystemClock.elapsedRealtime();
         if(left<=0)throw new Failure(RuntimeResult.TIMEOUT);
         return (int)Math.min(left,3000);
     }
     public byte[] fetch(String url,String method) throws Failure {
         if(url==null || url.length()>2048 || !("GET".equals(method)||"HEAD".equals(method)))throw new Failure(RuntimeResult.INVALID_REQUEST);
-        Future<byte[]> task=io.submit(()->fetchOnIoThread(url,method));
+        Future<byte[]> task;
+        synchronized(this) {
+            if(closed)throw new Failure(RuntimeResult.CANCELED);
+            task=io.submit(()->fetchOnIoThread(url,method));activeTask=task;
+        }
         try { return task.get(Math.max(1,request.deadline-SystemClock.elapsedRealtime()),TimeUnit.MILLISECONDS); }
         catch(TimeoutException e) { task.cancel(true);throw new Failure(RuntimeResult.TIMEOUT); }
+        catch(CancellationException e) {throw new Failure(RuntimeResult.CANCELED);}
         catch(ExecutionException e) {
             if(e.getCause() instanceof Failure)throw (Failure)e.getCause();
             throw new Failure(RuntimeResult.NATIVE_FAILED);
         } catch(InterruptedException e) { Thread.currentThread().interrupt();throw new Failure(RuntimeResult.CANCELED); }
+        finally {synchronized(this) {if(activeTask==task)activeTask=null;}}
     }
     private byte[] fetchOnIoThread(String target,String method) throws Failure {
         for(int redirect=0;redirect<6;redirect++) {
@@ -68,12 +85,15 @@ final class ChildNetworkGate implements AutoCloseable {
             try {
                 callback.network(request.id,requests,bytes);
                 connection=(HttpsURLConnection)new URL(target).openConnection(Proxy.NO_PROXY);
+                synchronized(this) {
+                    if(closed)throw new Failure(RuntimeResult.CANCELED);activeConnection=connection;
+                }
                 connection.setSSLSocketFactory(tls);
                 connection.setInstanceFollowRedirects(false);connection.setUseCaches(false);
                 connection.setConnectTimeout(remaining());connection.setReadTimeout(remaining());connection.setRequestMethod(method);
                 connection.setRequestProperty("User-Agent","TheKaiN-owned-process-lab");
                 connection.setRequestProperty("Accept-Encoding","identity");connection.setRequestProperty("Cookie","");
-                int status=connection.getResponseCode();
+                remaining();int status=connection.getResponseCode();
                 long headerChars=0;
                 for(java.util.Map.Entry<String,java.util.List<String>> entry:connection.getHeaderFields().entrySet()) {
                     if(entry.getKey()!=null)headerChars+=entry.getKey().length();
@@ -108,9 +128,30 @@ final class ChildNetworkGate implements AutoCloseable {
             catch(SSLException e) { throw new Failure(RuntimeResult.TLS_ERROR); }
             catch(SocketTimeoutException e) { throw new Failure(RuntimeResult.TIMEOUT); }
             catch(Exception e) { throw new Failure(RuntimeResult.NATIVE_FAILED); }
-            finally { if(connection!=null)connection.disconnect(); }
+            finally {
+                if(connection!=null)connection.disconnect();
+                synchronized(this) {if(activeConnection==connection)activeConnection=null;}
+            }
         }
         throw new Failure(RuntimeResult.REQUEST_LIMIT);
     }
-    @Override public void close() { io.shutdownNow(); }
+    /** Cancellation of Future alone does not close an Android SSL read. */
+    @Override public synchronized void close() {
+        if(closed)return;closed=true;
+        if(activeTask!=null)activeTask.cancel(true);io.shutdownNow();
+        Runnable disconnect=()->{
+            long until=SystemClock.elapsedRealtime()+2500;
+            // Also catches the narrow race between the last closed check and connect.
+            while(!io.isTerminated() && SystemClock.elapsedRealtime()<until) {
+                HttpsURLConnection connection=activeConnection;if(connection!=null)connection.disconnect();
+                java.util.concurrent.locks.LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(10));
+            }
+        };
+        try {disconnectTask=DISCONNECT.submit(disconnect);}
+        catch(RejectedExecutionException unavailable) {
+            // Fail closed rather than throwing out of the supervisor's retirement loop.
+            disconnectTask=new CompletableFuture<Void>();
+        }
+    }
+    synchronized boolean terminated() {return closed && io.isTerminated() && disconnectTask!=null && disconnectTask.isDone();}
 }

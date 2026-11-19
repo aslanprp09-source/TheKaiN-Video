@@ -135,8 +135,10 @@ final class IsolatedQaSession {
             .put("elapsed_ms",out.elapsedMs).put("cancel_to_exit_ms",out.cancelToExitMs).put("retire_to_exit_ms",out.retireToExitMs)
             .put("requests",out.requests).put("payload_bytes",out.payloadBytes).put("power_before",before).put("power_after",power())
             .put("main_python_loaded",ProcessIdentity.read("/proc/self/maps",2*1024*1024).contains("libpython3.14.so"));
+        File[] temporary=context.getCacheDir().listFiles((folder,name)->name.startsWith("isolated-python-") || name.startsWith("isolated-fixture-"));
+        if(temporary==null)throw new IOException("QA_FOOTPRINT_UNAVAILABLE");row.put("owned_ipc_temp_files",temporary.length);
         LabQaStore.append(state,"cases",row,64);state.remove("pending");save();operation=null;
-        if((expected>=0?out.result.error!=expected:out.result.error!=1 && out.result.error!=2) || !out.deathConfirmed || (out.result.error==0 && (out.securityDenials!=(mode==1?255:31)
+        if(temporary.length!=0 || (expected>=0?out.result.error!=expected:out.result.error!=1 && out.result.error!=2) || !out.deathConfirmed || (out.result.error==0 && (out.securityDenials!=(mode==1?255:31)
                 || out.workerUid==android.os.Process.myUid())))throw new IOException("QA_EXPECTATION_MISMATCH");
     }
     void export(android.net.Uri uri,java.util.function.Consumer<Boolean> result) {

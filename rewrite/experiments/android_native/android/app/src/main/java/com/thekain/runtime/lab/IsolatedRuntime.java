@@ -48,6 +48,7 @@ public final class IsolatedRuntime implements AutoCloseable {
         String instance="";int error=-1,denials;
         RuntimeResult result;
         long samples,peak,cpu,before,address,cpuLimit,resourceBytes,cancelAt=-1,retireAt,cleanupDeadline;
+        volatile long procFailureSince=-1;
         Operation(RuntimeRequest request,int mode,long submitted) {this.request=request;this.mode=mode;id=request.id;this.submitted=submitted;}
         public CompletableFuture<Outcome> completion() {return future.thenApplyAsync(v->v);}
         public CompletableFuture<Integer> whenPythonStarted() {return started.thenApplyAsync(v->v);}
@@ -111,8 +112,8 @@ public final class IsolatedRuntime implements AutoCloseable {
                 public void network(String id,int requests,long bytes) {o.requests=requests;o.payload=bytes;}
             },fixtureHome==null?RuntimeAssets.prepare(context):fixtureHome);
             IsolatedInput prepared=input;ChildNetworkGate transport=gate;
-            supervisor.post(()->{o.preparing=false;if(!current(o) || o.retiring) {prepared.close();transport.close();return;}
-                o.gate=transport;o.resourceBytes=prepared.bytes;
+            supervisor.post(()->{o.gate=transport;o.resourceBytes=prepared.bytes;o.preparing=false;
+                if(!current(o) || o.retiring) {prepared.close();transport.close();return;}
                 try {lease.reserve(o.id);bind(o,prepared);}
                 catch(Exception e) {prepared.close();retire(o,RuntimeResult.IPC_ERROR);}
             });
@@ -200,7 +201,7 @@ public final class IsolatedRuntime implements AutoCloseable {
                     try {
                         if(result==null || !o.id.equals(result.id) || denials<0 || denials>255)throw new IllegalArgumentException();
                         result.validate();
-                        if(result.error==RuntimeResult.OK && (!o.pythonEntered || o.address<=0 || o.cpuLimit<=0
+                        if(result.error==RuntimeResult.OK && (o.procFailureSince>=0 || !o.pythonEntered || o.address<=0 || o.cpuLimit<=0
                                 || result.pythonCalls!=1 || denials!=(o.mode==IsolatedInput.SECURITY?255:31)))
                             throw new IllegalArgumentException("INCOMPLETE_SUCCESS_PROOF");
                         o.result=result;o.denials=denials;
@@ -212,7 +213,7 @@ public final class IsolatedRuntime implements AutoCloseable {
     }
     private synchronized void observe(Operation o,KernelDescriptors.Sample s) {
         if(o.kernel==null || s.start!=o.kernel.start || s.uid!=o.kernel.uid || s.zombie)throw new IllegalStateException("PEER_CHANGED");
-        o.samples++;o.peak=Math.max(o.peak,s.rss);o.cpu=Math.max(o.cpu,s.cpu);
+        o.procFailureSince=-1;o.samples++;o.peak=Math.max(o.peak,s.rss);o.cpu=Math.max(o.cpu,s.cpu);
     }
     private void sample(Operation o) {
         if(!current(o) || o.retiring)return;
@@ -221,7 +222,11 @@ public final class IsolatedRuntime implements AutoCloseable {
                 KernelDescriptors.Sample s=o.kernel.sample();
                 if(s.zombie) {retire(o,RuntimeResult.WORKER_DIED);return;}
                 observe(o,s);if(s.rss>o.request.rssLimit) {retire(o,RuntimeResult.MEMORY_LIMIT);return;}
-            }catch(Exception e) {retire(o,o.kernel.dead()?RuntimeResult.WORKER_DIED:RuntimeResult.IPC_ERROR);return;}
+            }catch(Exception e) {
+                if(o.kernel.dead() || (o.binder!=null && !o.binder.isBinderAlive())) {retire(o,RuntimeResult.WORKER_DIED);return;}
+                long now=SystemClock.elapsedRealtime();if(o.procFailureSince<0)o.procFailureSince=now;
+                if(now-o.procFailureSince>=120) {retire(o,RuntimeResult.IPC_ERROR);return;}
+            }
         }
         if(o.canceled) {retire(o,RuntimeResult.CANCELED);return;}
         if(SystemClock.elapsedRealtime()>=o.request.deadline) {retire(o,RuntimeResult.TIMEOUT);return;}
@@ -252,7 +257,8 @@ public final class IsolatedRuntime implements AutoCloseable {
     private void reap(Operation o) {
         if(!current(o))return;
         boolean kernelDead=o.kernel!=null?o.kernel.dead():o.binder==null || o.binderDead || !o.binder.isBinderAlive();
-        boolean dead=kernelDead && (o.binder==null || o.binderDead || !o.binder.isBinderAlive()) && !serviceExists() && !o.preparing;
+        boolean dead=kernelDead && (o.binder==null || o.binderDead || !o.binder.isBinderAlive()) && !serviceExists() && !o.preparing
+            && !o.fetching.get() && (o.gate==null || o.gate.terminated());
         if(!dead && SystemClock.elapsedRealtime()<o.cleanupDeadline) {supervisor.postDelayed(()->reap(o),SAMPLE);return;}
         synchronized(this) {
             if(!dead)o.error=RuntimeResult.CLEANUP_FAILED;

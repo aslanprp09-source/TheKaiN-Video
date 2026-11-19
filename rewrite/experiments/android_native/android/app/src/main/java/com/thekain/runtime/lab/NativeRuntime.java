@@ -35,6 +35,7 @@ public final class NativeRuntime implements AutoCloseable {
         private RuntimeResult candidate;
         private long cleanupDeadline,peakRss,samples,vmBefore,addressLimit,cpuLimit,networkBytes,cpuTicks;
         private long cancelAt=-1,retirementAt=-1;
+        private volatile long procFailureSince=-1;
         private int requests;
         private Operation(RuntimeRequest request,long submitted) { this.request=request;id=request.id;this.submitted=submitted; }
         public CompletableFuture<Outcome> completion() { return result.thenApplyAsync(value->value); }
@@ -116,6 +117,7 @@ public final class NativeRuntime implements AutoCloseable {
         if(closed)thread.quitSafely();
     }
     private synchronized void observe(Operation op,ProcessIdentity identity) {
+        op.procFailureSince=-1;
         op.samples++;op.peakRss=Math.max(op.peakRss,identity.rssBytes);op.cpuTicks=Math.max(op.cpuTicks,identity.cpuTicks);
     }
     public NativeRuntime(Context context) {
@@ -219,7 +221,10 @@ public final class NativeRuntime implements AutoCloseable {
                     if(!current(op) || op.retiring || op.candidate!=null)return;
                     if(result==null || !sender(result.id))op.candidate=new RuntimeResult(op.id,RuntimeResult.IPC_ERROR);
                     else {
-                        try { result.validate();op.candidate=result; }
+                        try {
+                            result.validate();op.candidate=result.error==RuntimeResult.OK && op.procFailureSince>=0
+                                ?new RuntimeResult(op.id,RuntimeResult.IPC_ERROR):result;
+                        }
                         catch(RuntimeException e) { op.candidate=new RuntimeResult(op.id,RuntimeResult.IPC_ERROR); }
                     }
                 }
@@ -248,7 +253,13 @@ public final class NativeRuntime implements AutoCloseable {
                 if(!op.child.same(now) || now.zombie) { died(op);return; }
                 observe(op,now);
                 if(now.rssBytes>op.request.rssLimit) { retire(op,RuntimeResult.MEMORY_LIMIT);return; }
-            } catch(IOException|RuntimeException e) { if(op.child.exited())died(op);else retire(op,RuntimeResult.IPC_ERROR);return; }
+            } catch(IOException|RuntimeException e) {
+                if(op.child.exited() || (op.binder!=null && !op.binder.isBinderAlive())) {died(op);return;}
+                // SIGKILL can clear proc records before Binder death is delivered.
+                // Unknown state must never authorize a successful monitored result.
+                long now=SystemClock.elapsedRealtime();if(op.procFailureSince<0)op.procFailureSince=now;
+                if(now-op.procFailureSince>=120) {retire(op,RuntimeResult.IPC_ERROR);return;}
+            }
         }
         if(op.canceled.get()) { retire(op,RuntimeResult.CANCELED);return; }
         if(SystemClock.elapsedRealtime()>=op.request.deadline) { retire(op,RuntimeResult.TIMEOUT);return; }
