@@ -19,6 +19,8 @@ def summarize(records):
     assert limited and all(r['rlimit_as'] == r['virtual_before']+r['virtual_headroom'] and
         0 < r['rlimit_cpu'] <= 64 and r['kernel_socket_denied'] for r in limited), 'Kernel limit proof missing'
     assert all(r['samples'] > 0 and r['peak_rss_bytes'] > 0 for r in started), 'Missing independent RSS samples'
+    assert all(r['parent_uid']==r['worker_uid'] and r['clock_ticks_per_second']>0
+        and r['observed_cpu_ms']==r['cpu_ticks']*1000//r['clock_ticks_per_second'] for r in started), 'Missing UID/CPU counter evidence'
     memory=[r for r in records if r['operation']==6]
     assert memory and all(r['error']==7 for r in memory), 'Memory fault escaped'
     success=[r for r in records if r['error']==0]
@@ -31,6 +33,7 @@ def summarize(records):
         'canceled_operation_elapsed_ms':[r['elapsed_ms'] for r in records if r['error']==1],
         'cancel_to_exit_ms':[r['cancel_to_exit_ms'] for r in records if r['error']==1],
         'max_retire_to_exit_ms':max(r['retire_to_exit_ms'] for r in records),
+        'max_observed_worker_cpu_ms':max(r['observed_cpu_ms'] for r in started),
         'death_confirmed':True,'source':'parent /proc RSS polling + child kernel getrlimit, not Python counters',
         'production_ready':False,'arm64_execution':'NOT_RUN'}
 

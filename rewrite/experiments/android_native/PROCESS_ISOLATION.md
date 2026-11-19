@@ -1,5 +1,10 @@
 # Runtime process, cancellation and resource experiment
 
+The subsequent standalone debug QA harness and physical ARM64/background protocol
+are specified in [DEVICE_QA.md](DEVICE_QA.md). It adds four lifecycle tests plus
+independent UID/owner-restart probes; all original 23 below remain. Phone results
+remain NOT_RUN until an actual operator report is reviewed.
+
 Issue #5; next implementation stage after PR34. Still only the separate
 `com.thekain.runtime.lab` app. Product UI, `main`, release policy and publication
 are outside this change; `production_ready=false`, `automatic_publication=false`.

@@ -48,18 +48,22 @@ def verify(folder):
     folder=Path(folder);report=json.loads((folder/'build-report.json').read_text())
     require(report['profile']==PROFILE and report.get('repository_commit')==os.environ['GITHUB_SHA'],'LAB_SOURCE_MISMATCH')
     require(set(report['abis'])==set(PROFILE['abis']),'LAB_ABI_SET_MISMATCH')
-    for name in ('lab.apk','tests.apk'):
+    for name in ('lab.apk','tests.apk','probe.apk'):
         apk=folder/name
         require(digest(apk)==report['apk_sha256'][name],'LAB_APK_DIGEST_MISMATCH')
         require(certificate(apk)==report['debug_certificate_sha256'],'LAB_CERTIFICATE_MISMATCH')
         text=subprocess.check_output([str(tools()/'aapt'),'dump','badging',str(apk)],text=True)
-        expected='com.thekain.runtime.lab'+('.test' if name=='tests.apk' else '')
+        expected='com.thekain.runtime.probe' if name=='probe.apk' else 'com.thekain.runtime.lab'+('.test' if name=='tests.apk' else '')
         require(re.findall(r"^package: name='([^']+)'",text,re.M)==[expected],'LAB_PACKAGE_IDENTITY')
         require(re.findall(r"^sdkVersion:'(\d+)'",text,re.M)==['26'],'LAB_MIN_SDK')
         require(re.findall(r"^targetSdkVersion:'(\d+)'",text,re.M)==['35'],'LAB_TARGET_SDK')
     subprocess.run([str(tools()/'zipalign'),'-c','-P','16','4',str(folder/'lab.apk')],check=True)
     with zipfile.ZipFile(folder/'lab.apk') as archive:
         verify_runtime_assets(archive,report)
+        for name,sha in report['qa_debug_notices_sha256'].items():
+            require(name in ('qa-debug-dependencies.json','qa-debug-Apache-2.0.txt'),'LAB_QA_NOTICE_PATH')
+            require(hashlib.sha256(archive.read('assets/legal/'+name)).hexdigest()==sha,'LAB_QA_NOTICE_CHANGED')
+        require(set(report['qa_debug_notices_sha256'])=={'qa-debug-dependencies.json','qa-debug-Apache-2.0.txt'},'LAB_QA_NOTICES_MISSING')
         for name,item in report['license_notices'].items():
             require('/' not in name and '\\' not in name, 'LAB_NOTICE_PATH')
             require(hashlib.sha256(archive.read('assets/legal/'+name)).hexdigest()==item['sha256'], 'LAB_NOTICE_BYTES_CHANGED')
@@ -71,8 +75,9 @@ def verify(folder):
         require({n for n in archive.namelist() if n.endswith('.so')}==set(expected),'LAB_UNEXPECTED_ELF_SET')
         for name,sha in expected.items():
             require(hashlib.sha256(archive.read(name)).hexdigest()==sha,'LAB_ELF_BYTES_CHANGED')
-    with zipfile.ZipFile(folder/'tests.apk') as archive:
-        require(not any(n.endswith('.so') for n in archive.namelist()),'LAB_TEST_APK_UNKNOWN_NATIVE_CODE')
+    for name in ('tests.apk','probe.apk'):
+        with zipfile.ZipFile(folder/name) as archive:
+            require(not any(n.endswith('.so') for n in archive.namelist()),'LAB_TEST_APK_UNKNOWN_NATIVE_CODE')
     print('Same-run lab source/APK/certificate/ELF/ZIP receipt: PASS (not product signing or runtime execution)')
 
 
@@ -81,10 +86,14 @@ def pack(work,output):
     project=Path(__file__).parent/'android/app/build/outputs/apk'
     shutil.copy2(project/'debug/app-debug.apk',output/'lab.apk')
     shutil.copy2(project/'androidTest/debug/app-debug-androidTest.apk',output/'tests.apk')
+    shutil.copy2(Path(__file__).parent/'android/probe/build/outputs/apk/debug/probe-debug.apk',output/'probe.apk')
     report=json.loads((work/'package/build-report.json').read_text())
     report['repository_commit']=os.environ['GITHUB_SHA']
     report['asset_inventory_sha256']={abi:digest(work/'package/assets'/('inventory-'+abi+'.json')) for abi in PROFILE['abis']}
-    report['apk_sha256']={name:digest(output/name) for name in ('lab.apk','tests.apk')}
+    report['apk_sha256']={name:digest(output/name) for name in ('lab.apk','tests.apk','probe.apk')}
+    with zipfile.ZipFile(output/'lab.apk') as archive:
+        report['qa_debug_notices_sha256']={name:hashlib.sha256(archive.read('assets/legal/'+name)).hexdigest()
+            for name in ('qa-debug-dependencies.json','qa-debug-Apache-2.0.txt')}
     report['debug_certificate_sha256']=certificate(output/'lab.apk')
     (output/'build-report.json').write_text(json.dumps(report,indent=2)+'\n')
     verify(output)

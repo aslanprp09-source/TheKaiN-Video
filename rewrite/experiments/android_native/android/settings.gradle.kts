@@ -5,3 +5,4 @@ dependencyResolutionManagement {
 }
 rootProject.name = "TheKaiNNativeRuntimeLab"
 include(":app")
+include(":probe")

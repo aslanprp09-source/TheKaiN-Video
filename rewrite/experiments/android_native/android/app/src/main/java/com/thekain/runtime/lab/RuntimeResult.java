@@ -9,20 +9,20 @@ public final class RuntimeResult implements Parcelable {
     public static final int OK=0,CANCELED=1,TIMEOUT=2,BUSY=3,WORKER_DIED=4,IPC_ERROR=5,
         INVALID_REQUEST=6,MEMORY_LIMIT=7,TLS_ERROR=8,REQUEST_LIMIT=9,RESPONSE_LIMIT=10,
         OUTPUT_LIMIT=11,NATIVE_FAILED=12,CLEANUP_FAILED=13,OUT_OF_SCOPE=14;
-    public final String id,python,openssl,platform,videoCodec,audioCodec;
+    public final String id,python,openssl,platform,videoCodec,audioCodec,machine;
     public static final int REASON_NONE=0,TRACKS_UNKNOWN=1,UNSUPPORTED=2;
-    public final int error,pages,mimalloc,formats,reason;
+    public final int error,pages,mimalloc,formats,reason,pointerBits;
     public final boolean installedExtensions,externalExecBlocked,eligible,downloadEnabled,opensslHandshake;
     public final long pythonCalls;
 
-    RuntimeResult(String id,int error) { this(id,error,null,null,null,null,null,0,0,0,false,false,false,false,false,0,REASON_NONE); }
+    RuntimeResult(String id,int error) { this(id,error,null,null,null,null,null,0,0,0,false,false,false,false,false,0,REASON_NONE,null,0); }
     private RuntimeResult(String id,int error,String python,String openssl,String platform,String video,String audio,
             int pages,int mimalloc,int formats,boolean installed,boolean blocked,boolean eligible,boolean download,
-            boolean handshake,long calls,int reason) {
+            boolean handshake,long calls,int reason,String machine,int pointerBits) {
         this.id=id;this.error=error;this.python=python;this.openssl=openssl;this.platform=platform;
         videoCodec=video;audioCodec=audio;this.pages=pages;this.mimalloc=mimalloc;this.formats=formats;
         installedExtensions=installed;externalExecBlocked=blocked;this.eligible=eligible;downloadEnabled=download;
-        opensslHandshake=handshake;pythonCalls=calls;this.reason=reason;validate();
+        opensslHandshake=handshake;pythonCalls=calls;this.reason=reason;this.machine=machine;this.pointerBits=pointerBits;validate();
     }
     static int error(String code) {
         switch(code) {
@@ -45,19 +45,23 @@ public final class RuntimeResult implements Parcelable {
             j.optInt("page_size"),j.optInt("mimalloc"),j.optInt("formats"),j.optBoolean("installed_native_extensions"),
             j.optBoolean("external_exec_blocked"),j.optBoolean("eligible"),j.optBoolean("download_enabled"),
             j.optBoolean("openssl_handshake"),j.optLong("python_calls"),
-            "TRACKS_UNKNOWN".equals(j.optString("reason"))?TRACKS_UNKNOWN:REASON_NONE);
+            "TRACKS_UNKNOWN".equals(j.optString("reason"))?TRACKS_UNKNOWN:REASON_NONE,
+            j.optString("machine",null),j.optInt("pointer_bits"));
     }
     private static String nullable(JSONObject j,String key) { return j.isNull(key)?null:j.optString(key,null); }
     private RuntimeResult(Parcel in) {
         this(Wire.string(in,64,false),in.readInt(),Wire.string(in,64,true),Wire.string(in,128,true),
             Wire.string(in,32,true),Wire.string(in,128,true),Wire.string(in,128,true),in.readInt(),in.readInt(),
-            in.readInt(),Wire.bool(in),Wire.bool(in),Wire.bool(in),Wire.bool(in),Wire.bool(in),in.readLong(),in.readInt());
+            in.readInt(),Wire.bool(in),Wire.bool(in),Wire.bool(in),Wire.bool(in),Wire.bool(in),in.readLong(),in.readInt(),
+            Wire.string(in,32,true),in.readInt());
     }
     void validate() {
         Wire.check(id!=null && id.length()<=64 && error>=OK && error<=OUT_OF_SCOPE);
         for(String s:new String[]{python,openssl,platform,videoCodec,audioCodec}) Wire.check(s==null || s.length()<=128);
         Wire.check(formats>=0 && formats<=128 && pages>=0 && pages<=65536 && pythonCalls>=0);
         Wire.check(reason>=REASON_NONE && reason<=UNSUPPORTED);
+        Wire.check(machine==null || machine.matches("[A-Za-z0-9_]{1,32}"));
+        Wire.check(pointerBits==0 || pointerBits==64);
         Wire.check(!downloadEnabled); // Lab never authorizes media transfer.
     }
     @Override public void writeToParcel(Parcel out,int flags) {
@@ -66,6 +70,7 @@ public final class RuntimeResult implements Parcelable {
         out.writeInt(mimalloc);out.writeInt(formats);out.writeInt(installedExtensions?1:0);
         out.writeInt(externalExecBlocked?1:0);out.writeInt(eligible?1:0);out.writeInt(downloadEnabled?1:0);
         out.writeInt(opensslHandshake?1:0);out.writeLong(pythonCalls);out.writeInt(reason);
+        out.writeString(machine);out.writeInt(pointerBits);
     }
     @Override public int describeContents() { return 0; }
     public static final Creator<RuntimeResult> CREATOR=new Creator<RuntimeResult>() {

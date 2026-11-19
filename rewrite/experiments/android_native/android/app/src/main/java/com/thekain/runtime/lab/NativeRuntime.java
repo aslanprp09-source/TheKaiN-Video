@@ -18,7 +18,7 @@ public final class NativeRuntime implements AutoCloseable {
     private final Handler supervisor;
     private static final AtomicBoolean GLOBAL_BUSY=new AtomicBoolean();
     private Operation active;
-    private boolean closed;
+    private boolean closed,recovering;
 
     public final class Operation {
         public final String id;
@@ -33,7 +33,7 @@ public final class NativeRuntime implements AutoCloseable {
         private ProcessIdentity child;
         private String instance="";
         private RuntimeResult candidate;
-        private long cleanupDeadline,peakRss,samples,vmBefore,addressLimit,cpuLimit,networkBytes;
+        private long cleanupDeadline,peakRss,samples,vmBefore,addressLimit,cpuLimit,networkBytes,cpuTicks;
         private long cancelAt=-1,retirementAt=-1;
         private int requests;
         private Operation(RuntimeRequest request,long submitted) { this.request=request;id=request.id;this.submitted=submitted; }
@@ -53,18 +53,70 @@ public final class NativeRuntime implements AutoCloseable {
         public final int workerPid,parentPid;
         public final long startTicks,elapsedMs,peakRssBytes,samples,virtualBefore,addressLimit,cpuLimit,networkBytes;
         public final long cancelToExitMs,retireToExitMs;
+        public final long submittedElapsedMs,finishedElapsedMs;
+        public final long observedCpuMs,cpuTicks;
+        public final int workerUid;
         public final int requests;
         public final boolean deathConfirmed;
         private Outcome(Operation op,boolean dead) {
             result=op.candidate;instance=op.instance;workerPid=op.child==null?0:op.child.pid;
             parentPid=android.os.Process.myPid();startTicks=op.child==null?0:op.child.startTicks;
             long finished=SystemClock.elapsedRealtime();
+            submittedElapsedMs=op.submitted;finishedElapsedMs=finished;
             elapsedMs=finished-op.submitted;peakRssBytes=op.peakRss;samples=op.samples;
             cancelToExitMs=op.cancelAt<0?-1:finished-op.cancelAt;
             retireToExitMs=op.retirementAt<0?-1:finished-op.retirementAt;
             virtualBefore=op.vmBefore;addressLimit=op.addressLimit;cpuLimit=op.cpuLimit;
             requests=op.requests;networkBytes=op.networkBytes;deathConfirmed=dead;
+            cpuTicks=op.cpuTicks;observedCpuMs=cpuTicks*1000/ProcessIdentity.CLOCK_TICKS;
+            workerUid=op.child==null?-1:op.child.uid;
         }
+    }
+    public static final class Recovery {
+        public final int error,killedWorkers;
+        public final long elapsedMs;
+        Recovery(int error,int killed,long elapsed) {this.error=error;killedWorkers=killed;elapsedMs=elapsed;}
+    }
+    /** After owner-process death: retire only this app's reserved worker; never resume old work. */
+    public synchronized CompletableFuture<Recovery> recoverBeforeUse() {
+        CompletableFuture<Recovery> result=new CompletableFuture<>();
+        if(closed || active!=null || recovering || !GLOBAL_BUSY.compareAndSet(false,true)) {
+            result.complete(new Recovery(RuntimeResult.BUSY,0,0));return result.thenApplyAsync(value->value);
+        }
+        recovering=true;long start=SystemClock.elapsedRealtime();
+        supervisor.post(()->recover(result,start,new HashSet<>()));return result.thenApplyAsync(value->value);
+    }
+    private void recover(CompletableFuture<Recovery> result,long start,Set<String> killed) {
+        try {
+            context.stopService(new Intent(context,RuntimeService.class));
+            ActivityManager manager=(ActivityManager)context.getSystemService(Context.ACTIVITY_SERVICE);
+            List<ActivityManager.RunningAppProcessInfo> list=manager.getRunningAppProcesses();
+            if(list==null)throw new IOException("ANDROID_PROCESS_STATE_UNAVAILABLE");
+            for(ActivityManager.RunningAppProcessInfo p:list) {
+                if(p.uid!=android.os.Process.myUid() || !ProcessIdentity.NAME.equals(p.processName))continue;
+                try {
+                    ProcessIdentity identity=ProcessIdentity.worker(p.pid);
+                    String key=identity.pid+":"+identity.startTicks;
+                    if(!identity.zombie && !killed.contains(key)) {identity.killOwned();killed.add(key);}
+                } catch(FileNotFoundException alreadyExited) { }
+            }
+        } catch(IOException|RuntimeException unavailable) {
+            finishRecovery(result,start,killed.size(),RuntimeResult.CLEANUP_FAILED);return;
+        }
+        if(!workerExists()) {finishRecovery(result,start,killed.size(),RuntimeResult.OK);return;}
+        if(SystemClock.elapsedRealtime()-start>=CLEANUP_MS) {
+            finishRecovery(result,start,killed.size(),RuntimeResult.CLEANUP_FAILED);return;
+        }
+        supervisor.postDelayed(()->recover(result,start,killed),SAMPLE_MS);
+    }
+    private synchronized void finishRecovery(CompletableFuture<Recovery> result,long start,int killed,int error) {
+        recovering=false;
+        if(error==RuntimeResult.OK)GLOBAL_BUSY.set(false); // Unconfirmed cleanup stays poisoned.
+        result.complete(new Recovery(error,killed,SystemClock.elapsedRealtime()-start));
+        if(closed)thread.quitSafely();
+    }
+    private synchronized void observe(Operation op,ProcessIdentity identity) {
+        op.samples++;op.peakRss=Math.max(op.peakRss,identity.rssBytes);op.cpuTicks=Math.max(op.cpuTicks,identity.cpuTicks);
     }
     public NativeRuntime(Context context) {
         if(ProcessIdentity.inWorker())throw new IllegalStateException("SUPERVISOR_REQUIRES_MAIN_PROCESS");
@@ -131,7 +183,7 @@ public final class NativeRuntime implements AutoCloseable {
                     try {
                         ProcessIdentity child=ProcessIdentity.worker(Binder.getCallingPid());
                         if(child.zombie || child.startTicks!=ticks)return false;
-                        op.child=child;op.instance=instance;op.samples++;op.peakRss=Math.max(op.peakRss,child.rssBytes);return true;
+                        op.child=child;op.instance=instance;observe(op,child);return true;
                     } catch(IOException|RuntimeException e) { return false; }
                 }
             }
@@ -182,7 +234,7 @@ public final class NativeRuntime implements AutoCloseable {
         if(processes==null)return;
         for(ActivityManager.RunningAppProcessInfo info:processes) {
             if(info.uid==android.os.Process.myUid() && ProcessIdentity.NAME.equals(info.processName)) {
-                try { ProcessIdentity p=ProcessIdentity.worker(info.pid);if(!p.zombie) {op.child=p;op.samples++;op.peakRss=Math.max(op.peakRss,p.rssBytes);} }
+                try { ProcessIdentity p=ProcessIdentity.worker(info.pid);if(!p.zombie) {op.child=p;observe(op,p);} }
                 catch(IOException|RuntimeException ignored) { }
             }
         }
@@ -194,7 +246,7 @@ public final class NativeRuntime implements AutoCloseable {
             try {
                 ProcessIdentity now=ProcessIdentity.worker(op.child.pid);
                 if(!op.child.same(now) || now.zombie) { died(op);return; }
-                op.samples++;op.peakRss=Math.max(op.peakRss,now.rssBytes);
+                observe(op,now);
                 if(now.rssBytes>op.request.rssLimit) { retire(op,RuntimeResult.MEMORY_LIMIT);return; }
             } catch(IOException|RuntimeException e) { if(op.child.exited())died(op);else retire(op,RuntimeResult.IPC_ERROR);return; }
         }
@@ -270,6 +322,9 @@ public final class NativeRuntime implements AutoCloseable {
                 .put("parent_pid",outcome.parentPid).put("worker_pid",outcome.workerPid).put("start_ticks",outcome.startTicks)
                 .put("elapsed_ms",outcome.elapsedMs).put("peak_rss_bytes",outcome.peakRssBytes).put("rss_limit",op.request.rssLimit)
                 .put("python_entered",op.pythonEntered)
+                .put("worker_uid",outcome.workerUid).put("parent_uid",android.os.Process.myUid())
+                .put("observed_cpu_ms",outcome.observedCpuMs).put("cpu_ticks",outcome.cpuTicks)
+                .put("clock_ticks_per_second",ProcessIdentity.CLOCK_TICKS)
                 .put("cancel_to_exit_ms",outcome.cancelToExitMs).put("retire_to_exit_ms",outcome.retireToExitMs)
                 .put("samples",outcome.samples).put("virtual_before",outcome.virtualBefore).put("rlimit_as",outcome.addressLimit)
                 .put("virtual_headroom",op.request.virtualHeadroom).put("rlimit_cpu",outcome.cpuLimit).put("kernel_socket_denied",outcome.addressLimit>0).put("requests",outcome.requests).put("payload_bytes",outcome.networkBytes)
@@ -282,6 +337,7 @@ public final class NativeRuntime implements AutoCloseable {
     }
     @Override public synchronized void close() {
         closed=true;
+        if(recovering)return;
         // Cleanup completion owns shutdown; a delayed bind must not outlive a fixed quit timer.
         if(active!=null && !active.finished)active.cancel();
         else supervisor.post(thread::quitSafely);
