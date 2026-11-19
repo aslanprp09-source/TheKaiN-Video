@@ -24,13 +24,14 @@ cleanup() {
     timeout 8 adb -s "$ANDROID_SERIAL" exec-out screencap -p > "$evidence/failure-screen.png" 2>/dev/null || true
     if [ -f "$evidence/instrumentation.txt" ]; then tail -120 "$evidence/instrumentation.txt"; fi
     if [ -f "$evidence/isolated-instrumentation.txt" ]; then tail -160 "$evidence/isolated-instrumentation.txt"; fi
+    if [ -f "$evidence/isolated-bootstrap.txt" ]; then tail -100 "$evidence/isolated-bootstrap.txt"; fi
     tail -120 "$evidence/crash.txt"
     tail -100 "$evidence/exit-info.txt"
     python3 - "$evidence/logcat.txt" <<'PY'
 from pathlib import Path
 import sys
 lines=Path(sys.argv[1]).read_text(errors='replace').splitlines()
-terms=('thekain.runtime.lab','lmkd','lowmemorykiller','python.stderr','AndroidRuntime','Fatal signal','TheKaiNRuntime','TheKaiNIsolated')
+terms=('thekain.runtime.lab','lmkd','lowmemorykiller','python.stderr','AndroidRuntime','Fatal signal','TheKaiNRuntime','TheKaiNIsolated','avc: denied','transaction failed','Failed reply')
 for line in [s for s in lines if any(term in s for term in terms)][-120:]: print(line)
 PY
   fi
@@ -93,6 +94,15 @@ adb -s "$ANDROID_SERIAL" shell pidof system_server | tr -d '\r' > "$evidence/sys
 test -s "$evidence/system-server-before.txt"
 adb -s "$ANDROID_SERIAL" install -r -t "$delivery/lab.apk"
 adb -s "$ANDROID_SERIAL" install -r -t "$delivery/tests.apk"
+# A passing run still executes all original 27 and all additional 24 below.
+timeout 80 adb -s "$ANDROID_SERIAL" shell am instrument -w -e class 'com.thekain.runtime.lab.IsolatedRuntimeTest#separateUidInterpreterSealedResourcesAndOpenSsl' com.thekain.runtime.lab.test/androidx.test.runner.AndroidJUnitRunner > "$evidence/isolated-bootstrap.txt"
+python3 - "$evidence/isolated-bootstrap.txt" <<'PYBOOT'
+from pathlib import Path
+import re,sys
+text=Path(sys.argv[1]).read_text();print(text)
+assert re.search(r'^OK \(1 test\)\s*$',text,re.M), 'Isolated UID real JNI/IPC bootstrap failed; full matrix is NOT passed'
+assert not any(s in text for s in ('FAILURES!!!','shortMsg=','INSTRUMENTATION_FAILED'))
+PYBOOT
 timeout 600 adb -s "$ANDROID_SERIAL" shell am instrument -w -e class com.thekain.runtime.lab.NativeLabTest,com.thekain.runtime.lab.RuntimeProcessTest,com.thekain.runtime.lab.LabLifecycleTest com.thekain.runtime.lab.test/androidx.test.runner.AndroidJUnitRunner > "$evidence/instrumentation.txt" &
 driver=$!
 bash rewrite/experiments/android_native/sample-meminfo.sh "$driver" "$evidence" &

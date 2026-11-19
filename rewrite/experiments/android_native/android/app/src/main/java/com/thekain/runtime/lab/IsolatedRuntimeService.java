@@ -21,6 +21,7 @@ public final class IsolatedRuntimeService extends Service {
     // Keep the endpoint strongly rooted until PID death, including pre-Python handshake refusal.
     // Binder object GC must never masquerade as worker process death.
     private static volatile IBinder processBinder;
+    private IIsolatedOwner ownerLease;
     private final ExecutorService python=Executors.newSingleThreadExecutor(r->new Thread(r,"isolated-python"));
     static boolean inWorker() {
         try {
@@ -38,24 +39,30 @@ public final class IsolatedRuntimeService extends Service {
         @Override public void execute(IsolatedInput input,IIsolatedOwner owner) {
             // The Android binding is private; only the installed package UID may submit work.
             if(Binder.getCallingUid()!=getApplicationInfo().uid || input==null || owner==null) {
+                android.util.Log.e("TheKaiNIsolated","CALLER_REJECTED_"+Binder.getCallingUid()+"_"+getApplicationInfo().uid);
                 if(input!=null)input.close();return;
             }
             if(!inWorker() || !USED.compareAndSet(false,true)) {input.close();die();return;}
+            String stage="VALIDATE";ownerLease=owner;
             try {
                 input.validate();long left=input.request.deadline-SystemClock.elapsedRealtime();
                 if(left<=0 || left>NativeRuntime.MAX_DEADLINE_MS)throw new IOException("DEADLINE");
-                owner.asBinder().linkToDeath(IsolatedRuntimeService::die,0);
+                stage="OWNER_DEATH_LINK";owner.asBinder().linkToDeath(IsolatedRuntimeService::die,0);
+                stage="OPEN_PROC_DESCRIPTORS";
                 try(ParcelFileDescriptor stat=ParcelFileDescriptor.open(new File("/proc/self/stat"),ParcelFileDescriptor.MODE_READ_ONLY);
                         ParcelFileDescriptor status=ParcelFileDescriptor.open(new File("/proc/self/status"),ParcelFileDescriptor.MODE_READ_ONLY)) {
                     if(input.mode==IsolatedInput.FAKE_PROC) {
                         if(owner.ready(input.request.id,UUID.randomUUID().toString(),input.resources,status))throw new IOException("FAKE_FD_ACCEPTED");
                         throw new IOException("EXPECTED_FAKE_FD_REFUSAL");
                     }
+                    stage="READY_TRANSACTION";
                     if(!owner.ready(input.request.id,UUID.randomUUID().toString(),stat,status))throw new IOException("PEER_REFUSED");
                 }
                 python.execute(()->run(input,owner));
             }catch(Exception e) {
-                android.util.Log.e("TheKaiNIsolated","HANDSHAKE_REFUSED_"+e.getClass().getSimpleName());
+                android.util.Log.e("TheKaiNIsolated","HANDSHAKE_REFUSED_"+stage+"_"+e.getClass().getSimpleName()+"_alive="+owner.asBinder().isBinderAlive());
+                for(StackTraceElement frame:e.getStackTrace())
+                    android.util.Log.e("TheKaiNIsolated","HANDSHAKE_FRAME_"+frame.getClassName()+"."+frame.getMethodName()+":"+frame.getLineNumber());
                 input.close();try {owner.completed(input.request.id,new RuntimeResult(input.request.id,RuntimeResult.IPC_ERROR),0);}catch(Exception ignored){}
             }
         }

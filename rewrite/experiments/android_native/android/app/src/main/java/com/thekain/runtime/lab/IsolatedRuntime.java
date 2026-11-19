@@ -42,7 +42,7 @@ public final class IsolatedRuntime implements AutoCloseable {
         volatile boolean canceled,retiring,finished,preparing;
         volatile int requests;volatile long payload;
         volatile ChildNetworkGate gate;
-        KernelDescriptors kernel;IBinder binder;
+        KernelDescriptors kernel;IBinder binder;IIsolatedOwner ownerEndpoint;
         ServiceConnection connection;
         boolean bound,connected,binderDead,pythonEntered;
         String instance="";int error=-1,denials;
@@ -132,7 +132,13 @@ public final class IsolatedRuntime implements AutoCloseable {
                     o.connected=true;o.binder=binder;
                     try {
                         binder.linkToDeath(()->supervisor.post(()->{o.binderDead=true;if(current(o) && !o.retiring)retire(o,RuntimeResult.WORKER_DIED);}),0);
-                        if(current(o) && !o.retiring)IIsolatedWorker.Stub.asInterface(binder).execute(input,callback(o));
+                        if(current(o) && !o.retiring) {
+                            o.ownerEndpoint=callback(o);
+                            IIsolatedWorker.Stub.asInterface(binder).execute(input,o.ownerEndpoint);
+                            supervisor.postDelayed(()->{
+                                if(current(o) && !o.retiring && o.kernel==null)retire(o,RuntimeResult.IPC_ERROR);
+                            },3000);
+                        }
                     }catch(Exception e) {if(current(o) && !o.retiring)retire(o,RuntimeResult.IPC_ERROR);}
                     finally {input.close();oInput.remove(o);}
                 });
@@ -154,6 +160,7 @@ public final class IsolatedRuntime implements AutoCloseable {
     private IIsolatedOwner callback(Operation o) {
         return new IIsolatedOwner.Stub() {
             @Override public boolean ready(String capability,String instance,ParcelFileDescriptor stat,ParcelFileDescriptor status) {
+                android.util.Log.i("TheKaiNIsolated","OWNER_READY_ENTER_"+Binder.getCallingPid()+"_"+Binder.getCallingUid());
                 try {
                     synchronized(IsolatedRuntime.this) {
                         if(!current(o) || o.retiring || o.canceled || o.kernel!=null || !o.id.equals(capability)
@@ -265,7 +272,7 @@ public final class IsolatedRuntime implements AutoCloseable {
             else if(o.error==0 && SystemClock.elapsedRealtime()>=o.request.deadline)o.error=RuntimeResult.TIMEOUT;
             o.finished=true;Outcome out=new Outcome(o,dead);record(o,out);
             if(o.kernel!=null)o.kernel.close();
-            if(dead) {lease.cleared();active=null;LEASE.set(false);} // Otherwise poison: no uncertain worker reuse.
+            if(dead) {o.ownerEndpoint=null;lease.cleared();active=null;LEASE.set(false);} // Otherwise poison: no uncertain worker reuse.
             o.started.completeExceptionally(new IllegalStateException("NOT_STARTED"));o.future.complete(out);
             if(closed)thread.quitSafely();
         }

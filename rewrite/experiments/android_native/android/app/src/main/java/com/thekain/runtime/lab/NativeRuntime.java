@@ -30,6 +30,7 @@ public final class NativeRuntime implements AutoCloseable {
         private ServiceConnection connection;
         private boolean bound,retiring,finished,pythonEntered;
         private IBinder binder;
+        private IRuntimeCallback callbackEndpoint;
         private ProcessIdentity child;
         private String instance="";
         private RuntimeResult candidate;
@@ -169,7 +170,7 @@ public final class NativeRuntime implements AutoCloseable {
         op.binder=binder;
         try {
             binder.linkToDeath(()->supervisor.post(()->died(op)),0);
-            IRuntimeWorker.Stub.asInterface(binder).execute(op.request,callback(op));
+            op.callbackEndpoint=callback(op);IRuntimeWorker.Stub.asInterface(binder).execute(op.request,op.callbackEndpoint);
         } catch(RemoteException|RuntimeException e) { retire(op,RuntimeResult.IPC_ERROR); }
     }
     private IRuntimeCallback callback(Operation op) {
@@ -304,7 +305,7 @@ public final class NativeRuntime implements AutoCloseable {
                 op.candidate=new RuntimeResult(op.id,RuntimeResult.TIMEOUT);
             op.finished=true;
             // A failed reap remains a poisoned lease: never reuse an unconfirmed process.
-            if(dead) {active=null;GLOBAL_BUSY.set(false);}
+            if(dead) {op.callbackEndpoint=null;active=null;GLOBAL_BUSY.set(false);}
             Outcome outcome=new Outcome(op,dead);record(op,outcome);
             op.pythonStarted.completeExceptionally(new IllegalStateException("NOT_STARTED"));
             op.result.complete(outcome);
