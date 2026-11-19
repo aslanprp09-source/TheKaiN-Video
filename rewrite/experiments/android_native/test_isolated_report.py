@@ -10,7 +10,8 @@ class IsolatedEvidenceTest(unittest.TestCase):
             rows.append(dict(id=str(i),error=error,death_confirmed=True,retire_to_exit_ms=80,
                 cancel_to_exit_ms=80 if error==1 else -1,requests=1,payload_bytes=128,
                 parent_pid=100,parent_uid=10001,worker_pid=200+i,worker_uid=99000+i,
-                samples=8,peak_rss_bytes=200*1024*1024,rss_limit=384*1024*1024,
+                observer_pid=400+i,observer_uid=98000+i,observer_start_ticks=50+i,observer_peak_rss_bytes=40*1024*1024,
+                observer_cpu_ticks=4,observer_python_loaded=False,samples=8,peak_rss_bytes=200*1024*1024,rss_limit=384*1024*1024,
                 start_ticks=100+i,python_entered=True,rlimit_as=2**32+256*1024*1024,
                 virtual_before=2**32,rlimit_cpu=20,cpu_ticks=7,observed_cpu_ms=70,
                 security_denials=31,mode=2 if error in (1,2) else 0,instance=str(i),resource_input_bytes=22*1024*1024))
@@ -18,7 +19,7 @@ class IsolatedEvidenceTest(unittest.TestCase):
 
     def test_incomplete_or_contradictory_isolation_proof_is_rejected(self):
         rows=self.fixture();self.assertFalse(validate(rows)['production_ready'])
-        mutations=(('worker_uid',10001),('worker_uid',10002),('worker_pid',100),
+        mutations=(('observer_uid',10001),('observer_uid',99000),('observer_pid',200),('observer_python_loaded',True),('observer_peak_rss_bytes',0),('worker_uid',10001),('worker_uid',10002),('worker_pid',100),
             ('death_confirmed',False),('samples',0),('cpu_ticks',0),('rlimit_cpu',0),
             ('security_denials',0),('retire_to_exit_ms',9999),('payload_bytes',3*1024*1024))
         for field,value in mutations:

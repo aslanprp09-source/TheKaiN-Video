@@ -48,14 +48,21 @@ final class KernelDescriptors implements AutoCloseable {
         long start,rss,vm,cpu;int uid;boolean zombie;
     }
     synchronized Sample sample() throws Exception {
-        String raw=read(stat,8192);int end=raw.lastIndexOf(')');
+        return parse(pid,uid,read(stat,8192),read(status,32768));
+    }
+    static Sample selfSample() throws Exception {
+        return parse(android.os.Process.myPid(),android.os.Process.myUid(),
+            ProcessIdentity.read("/proc/self/stat",8192),ProcessIdentity.read("/proc/self/status",32768));
+    }
+    private static Sample parse(int pid,int uid,String raw,String statusText) throws Exception {
+        int end=raw.lastIndexOf(')');
         if(end<0 || !raw.startsWith(pid+" ("))throw new IOException("PROC_STAT");
         String[] f=raw.substring(end+2).trim().split(" +");
         if(f.length<22)throw new IOException("PROC_STAT_FIELDS");
         Sample s=new Sample();s.start=Long.parseLong(f[19]);s.cpu=Long.parseLong(f[11])+Long.parseLong(f[12]);
         s.zombie=f[0].equals("Z") || f[0].equals("X");s.uid=-1;s.rss=-1;s.vm=-1;
         if(s.zombie)return s;
-        for(String line:read(status,32768).split("\n")) {
+        for(String line:statusText.split("\n")) {
             String[] v=line.trim().split("\\s+");
             if(v[0].equals("Uid:"))s.uid=Integer.parseInt(v[1]);
             if(v[0].equals("VmRSS:"))s.rss=Long.parseLong(v[1])*1024;

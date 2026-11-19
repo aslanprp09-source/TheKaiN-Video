@@ -36,9 +36,9 @@ public final class IsolatedRuntimeService extends Service {
         android.os.Process.killProcess(android.os.Process.myPid());
     }
     private final IIsolatedWorker.Stub binder=new IIsolatedWorker.Stub() {
-        @Override public void execute(IsolatedInput input,IIsolatedOwner owner) {
+        @Override public void execute(IsolatedInput input,IIsolatedOwner owner,IKernelSink kernelSink) {
             // The Android binding is private; only the installed package UID may submit work.
-            if(Binder.getCallingUid()!=getApplicationInfo().uid || input==null || owner==null) {
+            if(Binder.getCallingUid()!=getApplicationInfo().uid || input==null || owner==null || kernelSink==null) {
                 android.util.Log.e("TheKaiNIsolated","CALLER_REJECTED_"+Binder.getCallingUid()+"_"+getApplicationInfo().uid);
                 if(input!=null)input.close();return;
             }
@@ -48,15 +48,19 @@ public final class IsolatedRuntimeService extends Service {
                 input.validate();long left=input.request.deadline-SystemClock.elapsedRealtime();
                 if(left<=0 || left>NativeRuntime.MAX_DEADLINE_MS)throw new IOException("DEADLINE");
                 stage="OWNER_DEATH_LINK";owner.asBinder().linkToDeath(IsolatedRuntimeService::die,0);
+                stage="READY_METADATA";
+                if(!owner.ready(input.request.id,UUID.randomUUID().toString()))throw new IOException("PEER_REFUSED");
                 stage="OPEN_PROC_DESCRIPTORS";
                 try(ParcelFileDescriptor stat=ParcelFileDescriptor.open(new File("/proc/self/stat"),ParcelFileDescriptor.MODE_READ_ONLY);
                         ParcelFileDescriptor status=ParcelFileDescriptor.open(new File("/proc/self/status"),ParcelFileDescriptor.MODE_READ_ONLY)) {
                     if(input.mode==IsolatedInput.FAKE_PROC) {
-                        if(owner.ready(input.request.id,UUID.randomUUID().toString(),input.resources,status))throw new IOException("FAKE_FD_ACCEPTED");
+                        if(kernelSink.attach(input.request.id,input.resources,status))throw new IOException("FAKE_FD_ACCEPTED");
                         throw new IOException("EXPECTED_FAKE_FD_REFUSAL");
                     }
-                    stage="READY_TRANSACTION";
-                    if(!owner.ready(input.request.id,UUID.randomUUID().toString(),stat,status))throw new IOException("PEER_REFUSED");
+                    stage="KERNEL_SINK_TRANSACTION";
+                    if(input.mode==IsolatedInput.IPC_FLOOD && kernelSink.attach(UUID.randomUUID().toString(),stat,status))
+                        throw new IOException("WRONG_KERNEL_CAPABILITY_ACCEPTED");
+                    if(!kernelSink.attach(input.request.id,stat,status))throw new IOException("PEER_REFUSED");
                 }
                 python.execute(()->run(input,owner));
             }catch(Exception e) {

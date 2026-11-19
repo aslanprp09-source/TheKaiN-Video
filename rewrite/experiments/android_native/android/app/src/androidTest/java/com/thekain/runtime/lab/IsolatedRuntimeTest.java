@@ -30,6 +30,10 @@ public final class IsolatedRuntimeTest extends RuntimeTestSupport {
     private void identity(IsolatedRuntime.Outcome out) {
         assertTrue(out.workerPid>0);assertNotEquals(parentPid,out.workerPid);
         assertNotEquals(android.os.Process.myUid(),out.workerUid);assertTrue(out.workerUid%100000>=90000);
+        assertTrue(out.observerPid>0);assertNotEquals(parentPid,out.observerPid);assertNotEquals(out.workerPid,out.observerPid);
+        assertNotEquals(android.os.Process.myUid(),out.observerUid);assertNotEquals(out.workerUid,out.observerUid);
+        assertTrue(out.observerUid%100000>=90000);assertTrue(out.observerStartTicks>0);
+        assertTrue(out.observerPeakRssBytes>0);assertTrue(out.observerCpuTicks>0);assertFalse(out.observerPythonLoaded);
         assertTrue(out.startTicks>0);assertTrue(out.samples>0);assertTrue(out.peakRssBytes>0);
         assertTrue(out.observedCpuMs>0);assertTrue(out.cpuLimit>0);
         assertEquals(out.virtualBefore+RuntimeRequest.MAX_HEADROOM,out.addressLimit);
@@ -139,6 +143,9 @@ public final class IsolatedRuntimeTest extends RuntimeTestSupport {
         ServiceInfo info=context.getPackageManager().getServiceInfo(new ComponentName(context,IsolatedRuntimeService.class),0);
         assertFalse(info.exported);assertTrue((info.flags&ServiceInfo.FLAG_ISOLATED_PROCESS)!=0);
         assertEquals(IsolatedRuntimeService.NAME,info.processName);
+        ServiceInfo observer=context.getPackageManager().getServiceInfo(new ComponentName(context,ResourceObserverService.class),0);
+        assertFalse(observer.exported);assertTrue((observer.flags&ServiceInfo.FLAG_ISOLATED_PROCESS)!=0);
+        assertEquals(ResourceObserverService.NAME,observer.processName);
         try {Class.forName("com.thekain.runtime.lab.IsolatedChild");fail("JNI in owner");}
         catch(ExceptionInInitializerError expected) {assertTrue(expected.getCause() instanceof IllegalStateException);}
         healthyMain();

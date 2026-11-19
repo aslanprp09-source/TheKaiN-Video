@@ -49,13 +49,36 @@ HTTPS response/cancel/fresh-analysis regression enforces this cleanup boundary.
 ## Monitoring and termination without owner privileges
 
 The shared-UID `/proc/PID` and direct `killProcess` design cannot be reused across
-UIDs. Before Python, the worker opens read-only `/proc/self/stat` and `status`
-descriptors and passes them to the owner. The owner verifies exact kernel
+UIDs. Android SELinux additionally prohibits passing the isolated task's proc
+FDs directly into `untrusted_app`: CI166 API26 records an actual enforcing AVC
+`untrusted_app -> isolated_app:file read` for `/proc/<worker>/stat`. Binder
+reported DeadObjectException although the owner was alive. Retaining callbacks
+cannot fix that policy boundary; no policy/permissions are relaxed.
+
+A third process, `ResourceObserverService`, is non-exported and also
+`isolatedProcess=true`: a **different Linux UID** from both owner and Python,
+but Android's same `isolated_app` SELinux domain. It executes only pinned Java,
+never Python/JNI. Owner-only `IResourceObserver` prepares it; the worker receives
+only a single-use `IKernelSink`, with no monitor configuration/stop operation.
+Actual Binder credentials and the operation nonce authenticate both peers; the
+owner fixes the expected worker PID/UID before descriptor attachment. Before
+Python, the worker opens read-only `/proc/self/stat` and `status` and passes them
+directly to the observer, never the owner. The observer verifies exact kernel
 `/proc/<Binder PID>/{stat,status}` FD links, regular-file type, kernel fdinfo
-read-only flags, actual UID/PID/start ticks and reads the kernel seq-files itself.
-The worker cannot replace the records with a pipe, memfd or supplied counters.
+read-only flags, UID/PID/start ticks and reads the kernel seq-files itself.
+The worker cannot replace records with a pipe, memfd or supplied counters.
 These handles name the original task, not a future process that reuses its PID.
-Any inability to authenticate/sample fails closed; no self-reported RSS fallback.
+The observer cannot read owner storage or use the owner's network permission;
+its separate UID prevents worker signals/ptrace under Linux DAC. No Python
+resource or HTTPS capability is given to the observer. JNI's exact-process guard
+is deliberately exercised there, and native-map absence is checked.
+
+Only typed kernel snapshots cross to the owner. They carry monotonic sequence,
+measurement time, task identity and observer RSS/CPU; actual sender credentials
+must match the independently bound observer. Missing/error records fail closed;
+no self-reported Python RSS fallback. A stale observer (>1s) fails IPC; transient
+exit-record errors have only the existing 120ms grace, with no OK result allowed.
+Synchronous observer setup runs outside the deadline thread and owner locks.
 CPU uses actual SC_CLK_TCK. RSS is sampled every 40ms, not an instantaneous hard
 memory cap; overshoot is retained. RLIMIT_AS/CPU remain additional kernel limits.
 The ZIP input byte count is recorded separately: owner file cache and isolated
@@ -67,8 +90,12 @@ stop the private service. Android's isolated-process lifecycle performs the
 forced kill. No cross-UID signal permission, hidden API, root or relaxed SELinux
 is used. The worker deliberately has **no cooperative onDestroy self-kill**:
 tests block its main thread while Python spins, then require OS termination.
-The owner requires original-kernel-task death, Binder death and ServiceRecord
-retirement before releasing the lease. Failure within 2.5s gives CLEANUP_FAILED
+The observer remains bound until original-kernel-task death is confirmed; the
+owner additionally requires worker Binder death and ServiceRecord removal.
+It then retires the Java observer and requires its rooted Binder death and
+ServiceRecord removal, plus ended owner transport/configuration callbacks,
+before releasing the lease. Losing the observer before kernel death poisons the
+lease rather than trusting the Python worker or pretending cleanup. Failure within 2.5s gives CLEANUP_FAILED
 and poisons the lease; uncertain state never authorizes a fresh operation.
 Owner Binder death also makes the isolated worker self-terminate as a fallback.
 The OS mechanism must be proven on each platform; AOSP source is not a timing SLA.
@@ -77,7 +104,7 @@ freezing/deep Doze can delay the Handler until wake; no real-time background SLA
 is claimed. These cases remain separate open tasks, not passed by foreground CI.
 
 An AtomicFile reservation survives owner death. Losing the owner also loses its
-authenticated kernel descriptors; ordinary app process listings hide other UIDs
+authenticated observer channel; ordinary app process listings hide other UIDs
 and absence of a ServiceRecord alone cannot prove task death. A new owner therefore
 fails closed instead of resetting its static lease and silently proceeding. A
 strictly increased public Android BOOT_COUNT permits clearance after a real OS
@@ -103,7 +130,7 @@ proc FDs, tampered resource hash, malformed reply allocation, invalid capability
 method/origin, output/request/body limits, wrong CA, redirection, stale result,
 busy clients, close, native crash, memory fault and blocked-main cancellation/
 deadline with clean real-HTTPS restart. Independent external-app binding checks
-cover both services. Kernel CPU/RSS, independent shell meminfo and cleanup
+cover all three services. Kernel CPU/RSS, independent shell meminfo and cleanup
 latencies are retained in `isolated-{evidence.jsonl,resource-report.json}`.
 
 Implementation-stage status: local JNI compilation x86_64/ARM64 PASS; Android
@@ -144,8 +171,12 @@ endpoints explicitly for the whole lease. Connected-but-unready IPC has a 3s
 bound, within the global deadline, and emits fixed stage/stack-location diagnostics
 without URLs/key bytes. The full matrix remains blocked until proven successful.
 An upfront real isolated JNI/OpenSSL test exposes this boundary early; successful
-runs must subsequently execute all original 27 and additional 24 tests. Proc FD
-authentication and isolated UID checks are never replaced with self-reported RSS.
+runs must subsequently execute all original 27 and additional 24 tests. CI166 (44537400758, source f96bad1) confirmed the actual cross-domain proc FD
+SELinux denial. The three-UID observer design above addresses that denial; its
+fresh runtime matrix is still pending. Proc FD authentication and isolated UID
+checks are never replaced with self-reported RSS. Independent shell meminfo for
+both Python worker and Java observer, observer CPU/RSS and two-process retirement
+are mandatory evidence; compilation alone does not prove the design works.
 
 Native Windows CI161 ran 114 collected tests successfully (16 Linux-only skips),
 then the unchanged packaging guard rejected generated bytecode in two newly

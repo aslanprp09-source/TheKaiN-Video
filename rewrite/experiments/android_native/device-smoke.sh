@@ -135,10 +135,14 @@ timeout 600 adb -s "$ANDROID_SERIAL" shell am instrument -w -e class com.thekain
 driver=$!
 bash rewrite/experiments/android_native/sample-meminfo.sh "$driver" "$evidence" isolated &
 sampler=$!
+bash rewrite/experiments/android_native/sample-meminfo.sh "$driver" "$evidence" observer &
+observer_sampler=$!
 result=0
 wait "$driver" || result=$?
 kill "$sampler" 2>/dev/null || true
 wait "$sampler" 2>/dev/null || true
+kill "$observer_sampler" 2>/dev/null || true
+wait "$observer_sampler" 2>/dev/null || true
 adb -s "$ANDROID_SERIAL" exec-out run-as com.thekain.runtime.lab cat files/isolated-evidence.jsonl > "$evidence/isolated-evidence.jsonl"
 test "$result" = 0
 adb -s "$ANDROID_SERIAL" exec-out run-as com.thekain.runtime.lab cat files/isolated-qa-report.json > "$evidence/isolated-qa-report.json" 2>/dev/null || true

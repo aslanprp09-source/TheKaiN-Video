@@ -33,6 +33,11 @@ def inspect(report,receipt):
         if row['worker_pid']:
             assert row['worker_pid']!=row['parent_pid'] and row['worker_uid']!=row['parent_uid']
             assert 90000<=row['worker_uid']%100000<100000 and row['start_ticks']>0
+            assert row['observer_pid'] not in (row['parent_pid'],row['worker_pid']) and row['observer_pid']>0
+            assert row['observer_uid'] not in (row['parent_uid'],row['worker_uid'])
+            assert 90000 <= row['observer_uid'] % 100000 < 100000
+            assert row['observer_start_ticks']>0 and row['observer_peak_rss_bytes']>0 and row['observer_cpu_ticks']>0
+            assert row['observer_python_loaded'] is False, 'Python must never run in its resource observer'
             assert row['samples']>0 and row['peak_rss_bytes']>0
             instances.append(row['instance'])
         assert row['requests']<=12 and row['payload_bytes']<=2*1024*1024+1
@@ -57,6 +62,8 @@ def inspect(report,receipt):
         'sdk':device['sdk'],'operations':len(rows),'worker_instances':len(instances),
         'errors':dict(Counter(r['error'] for r in rows)),
         'max_sampled_rss_bytes':max(r['peak_rss_bytes'] for r in rows),
+        'max_observer_rss_bytes':max(r['observer_peak_rss_bytes'] for r in rows),
+        'max_observer_cpu_ticks':max(r['observer_cpu_ticks'] for r in rows),
         'max_resource_input_bytes':max(r['resource_input_bytes'] for r in rows),
         'max_retire_to_exit_ms':max(r['retire_to_exit_ms'] for r in rows),
         'production_ready':False,'physical_device_attested':False,'qa89_review':'BLOCKED_SEPARATE_TASK',

@@ -5,6 +5,7 @@ evidence="${2:?Evidence directory required}"
 case "${3:-baseline}" in
   baseline) worker_names=(com.thekain.runtime.lab:python_runtime) ;;
   isolated) worker_names=(com.thekain.runtime.lab:isolated_python com.thekain.runtime.lab:isolated_python:com.thekain.runtime.lab.IsolatedRuntimeService) ;;
+  observer) worker_names=(com.thekain.runtime.lab:resource_observer com.thekain.runtime.lab:resource_observer:com.thekain.runtime.lab.ResourceObserverService) ;;
   *) exit 1 ;;
 esac
 [[ "$driver" =~ ^[0-9]+$ ]]
