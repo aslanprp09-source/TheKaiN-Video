@@ -50,7 +50,10 @@ public final class IsolatedRuntimeService extends Service {
                     if(!owner.ready(input.request.id,UUID.randomUUID().toString(),stat,status))throw new IOException("PEER_REFUSED");
                 }
                 python.execute(()->run(input,owner));
-            }catch(Exception e) {input.close();try {owner.completed(input.request.id,new RuntimeResult(input.request.id,RuntimeResult.IPC_ERROR),0);}catch(Exception ignored) {}}
+            }catch(Exception e) {
+                android.util.Log.e("TheKaiNIsolated","HANDSHAKE_REFUSED_"+e.getClass().getSimpleName());
+                input.close();try {owner.completed(input.request.id,new RuntimeResult(input.request.id,RuntimeResult.IPC_ERROR),0);}catch(Exception ignored){}
+            }
         }
     };
     private int javaDenials() throws Exception {
@@ -78,19 +81,23 @@ public final class IsolatedRuntimeService extends Service {
         String m=e.getMessage();return m!=null && (m.contains("EACCES") || m.contains("EPERM") || m.contains("Permission denied") || m.contains("Operation not permitted"));
     }
     private void run(IsolatedInput input,IIsolatedOwner owner) {
+        String stage="READ_ONLY_CAPABILITIES";
         try(IsolatedInput ignored=input) {
             KernelDescriptors.readOnlyRegular(input.resources,160L*1024*1024);
             KernelDescriptors.readOnlyRegular(input.certificate,16384);KernelDescriptors.readOnlyRegular(input.key,16384);
             if(Os.fstat(input.resources.getFileDescriptor()).st_size!=input.bytes)throw new IOException("RESOURCE_SIZE");
+            stage="RESOURCE_DIGEST";
             MessageDigest hash=MessageDigest.getInstance("SHA-256");
             Os.lseek(input.resources.getFileDescriptor(),0,OsConstants.SEEK_SET);byte[] bytes=new byte[16384];int n;long total=0;
             while((n=Os.read(input.resources.getFileDescriptor(),bytes,0,bytes.length))>0) {
                 total+=n;if(total>input.bytes || SystemClock.elapsedRealtime()>=input.request.deadline)throw new IOException("RESOURCE_LIMIT");hash.update(bytes,0,n);
             }
             if(total!=input.bytes || !IsolatedResources.hex(hash.digest()).equals(input.sha256))throw new IOException("RESOURCE_HASH");
+            stage="SEALED_RESOURCE_COPY";
             try(ParcelFileDescriptor sealed=ParcelFileDescriptor.adoptFd(IsolatedChild.sealedCopy(input.resources.getFd(),input.bytes));
                     ParcelFileDescriptor cert=ParcelFileDescriptor.adoptFd(IsolatedChild.sealedCopy(input.certificate.getFd(),16384));
                     ParcelFileDescriptor key=ParcelFileDescriptor.adoptFd(IsolatedChild.sealedCopy(input.key.getFd(),16384))) {
+            stage="ANDROID_UID_DENIALS";
             int denials=javaDenials();
             try {Os.write(input.resources.getFileDescriptor(),new byte[]{0},0,1);throw new IOException("WRITABLE_RESOURCES");}
             catch(ErrnoException expected) {if(expected.errno!=OsConstants.EBADF)throw expected;denials|=16;}
@@ -114,6 +121,7 @@ public final class IsolatedRuntimeService extends Service {
             }
             long left=request.deadline-SystemClock.elapsedRealtime();
             int seconds=(int)Math.max(1,(left+999)/1000)+1;
+            stage="KERNEL_LIMITS";
             long[] limits=IsolatedChild.configureBudget(request.virtualHeadroom,seconds);
             if(limits.length!=4 || limits[3]!=1)throw new IOException("KERNEL_FENCE");
             owner.limits(request.id,limits[0],limits[1],limits[2]);
@@ -122,6 +130,7 @@ public final class IsolatedRuntimeService extends Service {
             if(request.url!=null)json.put("url",request.url);
             if(input.mode==IsolatedInput.SECURITY)json.put("owner_data",getApplicationInfo().dataDir);
             String resources="fd:"+sealed.getFd()+":"+cert.getFd()+":"+key.getFd();
+            stage="PYTHON";
             String raw=IsolatedChild.call(resources,getApplicationInfo().nativeLibraryDir,json.toString(),new IsolatedGate(owner,request.id));
             if(input.mode==IsolatedInput.SECURITY) {
                 int mask=new JSONObject(raw).optInt("security_denials");if(mask!=7)throw new IOException("PYTHON_SANDBOX_PROBE");denials|=mask<<5;
@@ -131,7 +140,7 @@ public final class IsolatedRuntimeService extends Service {
             owner.completed(request.id,result,denials);
             }
         }catch(Throwable e) {
-            android.util.Log.e("TheKaiNIsolated","WORKER_FAILED_"+e.getClass().getSimpleName());
+            android.util.Log.e("TheKaiNIsolated","WORKER_FAILED_"+stage+"_"+e.getClass().getSimpleName());
             try {owner.completed(input.request.id,new RuntimeResult(input.request.id,
                 "RESOURCE_HASH".equals(e.getMessage())?RuntimeResult.INVALID_REQUEST:
                 e instanceof OutOfMemoryError?RuntimeResult.MEMORY_LIMIT:

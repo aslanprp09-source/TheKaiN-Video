@@ -16,6 +16,12 @@ cleanup() {
   adb -s "$ANDROID_SERIAL" logcat -b crash -d > "$evidence/crash.txt" 2>/dev/null || true
   adb -s "$ANDROID_SERIAL" shell dumpsys activity exit-info com.thekain.runtime.lab > "$evidence/exit-info.txt" 2>/dev/null || true
   if [ "$result" -ne 0 ]; then
+    # Full window dump includes both mCurrentFocus and mFocusedApp on all matrix APIs.
+    timeout 8 adb -s "$ANDROID_SERIAL" shell dumpsys window > "$evidence/failure-window.txt" 2>/dev/null || true
+    timeout 8 adb -s "$ANDROID_SERIAL" shell dumpsys activity activities > "$evidence/failure-activities.txt" 2>/dev/null || true
+    timeout 10 adb -s "$ANDROID_SERIAL" shell uiautomator dump /sdcard/thekain-uid-failure.xml > "$evidence/failure-hierarchy-command.txt" 2>&1 || true
+    timeout 8 adb -s "$ANDROID_SERIAL" exec-out cat /sdcard/thekain-uid-failure.xml > "$evidence/failure-ui.xml" 2>/dev/null || true
+    timeout 8 adb -s "$ANDROID_SERIAL" exec-out screencap -p > "$evidence/failure-screen.png" 2>/dev/null || true
     if [ -f "$evidence/instrumentation.txt" ]; then tail -120 "$evidence/instrumentation.txt"; fi
     if [ -f "$evidence/isolated-instrumentation.txt" ]; then tail -160 "$evidence/isolated-instrumentation.txt"; fi
     tail -120 "$evidence/crash.txt"
@@ -125,10 +131,10 @@ kill "$sampler" 2>/dev/null || true
 wait "$sampler" 2>/dev/null || true
 adb -s "$ANDROID_SERIAL" exec-out run-as com.thekain.runtime.lab cat files/isolated-evidence.jsonl > "$evidence/isolated-evidence.jsonl"
 test "$result" = 0
-python3 rewrite/experiments/android_native/isolated_report.py --evidence "$evidence" --api "$api" --pages "$pages"
-adb -s "$ANDROID_SERIAL" exec-out run-as com.thekain.runtime.lab cat files/isolated-qa-report.json > "$evidence/isolated-qa-report.json"
+adb -s "$ANDROID_SERIAL" exec-out run-as com.thekain.runtime.lab cat files/isolated-qa-report.json > "$evidence/isolated-qa-report.json" 2>/dev/null || true
 for label in entry suite-result recreated-cancelled; do
-  adb -s "$ANDROID_SERIAL" exec-out run-as com.thekain.runtime.lab cat "files/isolated-qa-evidence/$label.png" > "$evidence/isolated-qa-$label.png"
+  adb -s "$ANDROID_SERIAL" exec-out run-as com.thekain.runtime.lab cat "files/isolated-qa-evidence/$label.png" > "$evidence/isolated-qa-$label.png" 2>/dev/null || true
 done
+python3 rewrite/experiments/android_native/isolated_report.py --evidence "$evidence" --api "$api" --pages "$pages"
 adb -s "$ANDROID_SERIAL" shell pidof system_server | tr -d '\r' > "$evidence/system-server-after-isolated.txt"
 cmp "$evidence/system-server-before.txt" "$evidence/system-server-after-isolated.txt"

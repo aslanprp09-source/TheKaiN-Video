@@ -41,7 +41,9 @@ public final class IsolatedQaTest {
     private JSONObject report() throws Exception {return new JSONObject(ProcessIdentity.read(new File(app.getFilesDir(),"isolated-qa-report.json").getPath(),256*1024));}
     private void idle() throws Exception {
         long until=SystemClock.elapsedRealtime()+180000;
-        while(!session.idle() && SystemClock.elapsedRealtime()<until)Thread.sleep(100);
+        while(!session.idle() && SystemClock.elapsedRealtime()<until) {
+            assertFalse(session.display(),session.display().startsWith("Проверка остановлена:"));Thread.sleep(100);
+        }
         assertTrue(session.display(),session.idle());
     }
     private void screenshot(String name) throws Exception {

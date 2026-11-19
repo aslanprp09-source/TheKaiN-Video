@@ -103,6 +103,7 @@ final class IsolatedQaSession {
                 }
                 publish("Набор завершён. Экспортируйте JSON для проверки исходников, APK и фактических результатов.");
             }catch(Exception e) {
+                ready=false;
                 try {state.put("qa_failure_class",e.getClass().getSimpleName());save();}catch(Exception ignored) { }
                 publish("Проверка остановлена: "+e.getClass().getSimpleName()+". Сохраните отчёт.");
             }
@@ -128,6 +129,8 @@ final class IsolatedQaSession {
             .put("python_entered",out.pythonEntered).put("python_calls",out.result.pythonCalls).put("machine",out.result.machine)
             .put("pointer_bits",out.result.pointerBits).put("pages",out.result.pages).put("openssl_handshake",out.result.opensslHandshake)
             .put("samples",out.samples).put("peak_rss_bytes",out.peakRssBytes).put("observed_cpu_ms",out.observedCpuMs)
+            .put("cpu_ticks",out.cpuTicks).put("clock_ticks_per_second",ProcessIdentity.CLOCK_TICKS)
+            .put("resource_input_bytes",out.resourceInputBytes).put("rss_limit_bytes",kind==RuntimeRequest.MEMORY?256L*1024*1024:RuntimeRequest.MAX_RSS)
             .put("rlimit_as",out.addressLimit).put("virtual_before",out.virtualBefore).put("rlimit_cpu",out.cpuLimit)
             .put("elapsed_ms",out.elapsedMs).put("cancel_to_exit_ms",out.cancelToExitMs).put("retire_to_exit_ms",out.retireToExitMs)
             .put("requests",out.requests).put("payload_bytes",out.payloadBytes).put("power_before",before).put("power_after",power())

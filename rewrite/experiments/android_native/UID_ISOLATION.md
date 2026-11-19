@@ -54,6 +54,9 @@ These handles name the original task, not a future process that reuses its PID.
 Any inability to authenticate/sample fails closed; no self-reported RSS fallback.
 CPU uses actual SC_CLK_TCK. RSS is sampled every 40ms, not an instantaneous hard
 memory cap; overshoot is retained. RLIMIT_AS/CPU remain additional kernel limits.
+The ZIP input byte count is recorded separately: owner file cache and isolated
+sealed-memfd backing pages are not fully accounted by process RSS. This bounded
+extra storage must be considered before choosing any physical-device budget.
 
 Cancellation/deadline revoke the broker, remove the final BIND_AUTO_CREATE and
 stop the private service. Android's isolated-process lifecycle performs the
@@ -65,6 +68,9 @@ retirement before releasing the lease. Failure within 2.5s gives CLEANUP_FAILED
 and poisons the lease; uncertain state never authorizes a fresh operation.
 Owner Binder death also makes the isolated worker self-terminate as a fallback.
 The OS mechanism must be proven on each platform; AOSP source is not a timing SLA.
+Deadline supervision also requires Android to schedule the owner. Cached-process
+freezing/deep Doze can delay the Handler until wake; no real-time background SLA
+is claimed. These cases remain separate open tasks, not passed by foreground CI.
 
 An AtomicFile reservation survives owner death. Losing the owner also loses its
 authenticated kernel descriptors; ordinary app process listings hide other UIDs

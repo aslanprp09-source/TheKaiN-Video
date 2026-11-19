@@ -20,6 +20,7 @@ def validate(rows):
             assert 90000 <= row['worker_uid'] % 100000 < 100000, 'Not an Android isolated UID'
             assert row['samples'] > 0 and row['peak_rss_bytes'] > 0 and row['start_ticks'] > 0
         if row['python_entered']:
+            assert 0 < row['resource_input_bytes'] <= 160*1024*1024
             assert row['rlimit_as'] == row['virtual_before']+256*1024*1024 and 0 < row['rlimit_cpu'] <= 64
             assert row['cpu_ticks'] > 0 and row['observed_cpu_ms'] > 0
         if row['error'] == 0:
@@ -37,6 +38,8 @@ def validate(rows):
         'max_success_sampled_rss_bytes':max(r['peak_rss_bytes'] for r in rows if r['error']==0),
         'max_sampled_rss_overshoot_bytes':max(max(0,r['peak_rss_bytes']-r['rss_limit']) for r in rows),
         'max_observed_cpu_ms':max(r['observed_cpu_ms'] for r in rows),
+        'max_resource_input_bytes':max(r['resource_input_bytes'] for r in rows),
+        'sealed_memfd_and_file_cache_not_fully_accounted_by_rss':True,
         'rss_is_sampled_not_hard_limit':True,'production_ready':False,'automatic_publication':False,
         'physical_arm64':'NOT_RUN','qa89_independent_review':'BLOCKED_SEPARATE_TASK',
         'lost_owner_kernel_handles':'FAIL_CLOSED_UNTIL_OS_REBOOT; automatic recovery not claimed',

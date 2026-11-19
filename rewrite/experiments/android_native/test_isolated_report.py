@@ -13,7 +13,7 @@ class IsolatedEvidenceTest(unittest.TestCase):
                 samples=8,peak_rss_bytes=200*1024*1024,rss_limit=384*1024*1024,
                 start_ticks=100+i,python_entered=True,rlimit_as=2**32+256*1024*1024,
                 virtual_before=2**32,rlimit_cpu=20,cpu_ticks=7,observed_cpu_ms=70,
-                security_denials=31,mode=2 if error in (1,2) else 0,instance=str(i)))
+                security_denials=31,mode=2 if error in (1,2) else 0,instance=str(i),resource_input_bytes=22*1024*1024))
         return rows
 
     def test_incomplete_or_contradictory_isolation_proof_is_rejected(self):

@@ -3,9 +3,14 @@ import argparse
 from collections import Counter
 import json
 from pathlib import Path
+if __package__:
+    from .phone_report import private_data
+else:
+    from phone_report import private_data
 
 
 def inspect(report,receipt):
+    private_data(report)
     assert report['schema']==1 and report['boundary']=='android_isolated_uid'
     assert report['source_commit']==receipt['repository_commit'], 'Source mismatch'
     assert report['production_ready'] is False and report['product_integration'] is False
@@ -31,6 +36,8 @@ def inspect(report,receipt):
             instances.append(row['instance'])
         assert row['requests']<=12 and row['payload_bytes']<=2*1024*1024+1
         if row['python_entered']:
+            assert 0 < row['resource_input_bytes'] <= 160*1024*1024
+            assert row['observed_cpu_ms']==row['cpu_ticks']*1000//row['clock_ticks_per_second']
             assert row['observed_cpu_ms']>0 and row['rlimit_cpu']>0
             assert row['rlimit_as']==row['virtual_before']+256*1024*1024
         if row['error']==0:
@@ -41,6 +48,7 @@ def inspect(report,receipt):
         and r['openssl_handshake'] is True for r in probes), 'No actual ARM64 JNI/OpenSSL probe'
     coverage={(r['operation'],r['mode'],r['error']) for r in rows}
     assert {(1,1,0),(4,2,1),(4,2,2),(5,0,4),(6,0,7),(1,3,5),(1,4,6)}<=coverage, 'Missing sandbox/fault coverage'
+    assert all(r['python_entered'] for r in rows if r['mode']==2), 'No actual blocked Python proof'
     last_fault=max(i for i,r in enumerate(rows) if r['expected_error'] in (4,5,6,7))
     analyses=[r for r in rows[last_fault+1:] if r['operation']==2 and r['error']==0]
     assert len(analyses)>=5, 'Five fresh owned analyses after fault recovery required'
@@ -48,6 +56,7 @@ def inspect(report,receipt):
         'sdk':device['sdk'],'operations':len(rows),'worker_instances':len(instances),
         'errors':dict(Counter(r['error'] for r in rows)),
         'max_sampled_rss_bytes':max(r['peak_rss_bytes'] for r in rows),
+        'max_resource_input_bytes':max(r['resource_input_bytes'] for r in rows),
         'max_retire_to_exit_ms':max(r['retire_to_exit_ms'] for r in rows),
         'production_ready':False,'physical_device_attested':False,'qa89_review':'BLOCKED_SEPARATE_TASK',
         'limitations':['Operator JSON can be edited; manual review and original same-run receipt required',

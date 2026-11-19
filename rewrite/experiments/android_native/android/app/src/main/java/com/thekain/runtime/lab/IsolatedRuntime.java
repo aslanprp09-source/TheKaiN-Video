@@ -47,7 +47,7 @@ public final class IsolatedRuntime implements AutoCloseable {
         boolean bound,connected,binderDead,pythonEntered;
         String instance="";int error=-1,denials;
         RuntimeResult result;
-        long samples,peak,cpu,before,address,cpuLimit,cancelAt=-1,retireAt,cleanupDeadline;
+        long samples,peak,cpu,before,address,cpuLimit,resourceBytes,cancelAt=-1,retireAt,cleanupDeadline;
         Operation(RuntimeRequest request,int mode,long submitted) {this.request=request;this.mode=mode;id=request.id;this.submitted=submitted;}
         public CompletableFuture<Outcome> completion() {return future.thenApplyAsync(v->v);}
         public CompletableFuture<Integer> whenPythonStarted() {return started.thenApplyAsync(v->v);}
@@ -65,7 +65,7 @@ public final class IsolatedRuntime implements AutoCloseable {
         public final String instance;
         public final boolean deathConfirmed,pythonEntered;
         public final long startTicks,samples,peakRssBytes,cpuTicks,observedCpuMs,virtualBefore,addressLimit,cpuLimit;
-        public final long elapsedMs,retireToExitMs,cancelToExitMs,payloadBytes;
+        public final long elapsedMs,retireToExitMs,cancelToExitMs,payloadBytes,resourceInputBytes;
         Outcome(Operation o,boolean dead) {
             result=o.result!=null && o.error==o.result.error?o.result:new RuntimeResult(o.id,o.error);
             workerPid=o.kernel==null?0:o.kernel.pid;workerUid=o.kernel==null?-1:o.kernel.uid;
@@ -75,7 +75,7 @@ public final class IsolatedRuntime implements AutoCloseable {
             virtualBefore=o.before;addressLimit=o.address;cpuLimit=o.cpuLimit;
             long now=SystemClock.elapsedRealtime();elapsedMs=now-o.submitted;
             retireToExitMs=now-o.retireAt;cancelToExitMs=o.cancelAt<0?-1:now-o.cancelAt;
-            requests=o.requests;payloadBytes=o.payload;
+            requests=o.requests;payloadBytes=o.payload;resourceInputBytes=o.resourceBytes;
         }
     }
     public Operation submit(int operation,String url,int ca,long timeoutMs) {
@@ -112,7 +112,7 @@ public final class IsolatedRuntime implements AutoCloseable {
             },fixtureHome==null?RuntimeAssets.prepare(context):fixtureHome);
             IsolatedInput prepared=input;ChildNetworkGate transport=gate;
             supervisor.post(()->{o.preparing=false;if(!current(o) || o.retiring) {prepared.close();transport.close();return;}
-                o.gate=transport;
+                o.gate=transport;o.resourceBytes=prepared.bytes;
                 try {lease.reserve(o.id);bind(o,prepared);}
                 catch(Exception e) {prepared.close();retire(o,RuntimeResult.IPC_ERROR);}
             });
@@ -160,7 +160,11 @@ public final class IsolatedRuntime implements AutoCloseable {
                         o.kernel=new KernelDescriptors(Binder.getCallingPid(),Binder.getCallingUid(),stat,status);
                         o.instance=instance;observe(o,o.kernel.sample());return true;
                     }
-                }catch(Exception e) {supervisor.post(()->retire(o,RuntimeResult.IPC_ERROR));return false;}
+                }catch(Exception e) {
+                    int errno=e instanceof android.system.ErrnoException?((android.system.ErrnoException)e).errno:0;
+                    android.util.Log.e("TheKaiNIsolated","PEER_PROC_REFUSED_"+e.getClass().getSimpleName()+"_"+errno);
+                    supervisor.post(()->retire(o,RuntimeResult.IPC_ERROR));return false;
+                }
                 finally {if(stat!=null)try {stat.close();}catch(IOException ignored){}if(status!=null)try {status.close();}catch(IOException ignored){}}
             }
             @Override public void phase(String capability) {
@@ -270,6 +274,7 @@ public final class IsolatedRuntime implements AutoCloseable {
                 .put("clock_ticks_per_second",ProcessIdentity.CLOCK_TICKS).put("observed_cpu_ms",r.observedCpuMs)
                 .put("virtual_before",r.virtualBefore).put("rlimit_as",r.addressLimit).put("rlimit_cpu",r.cpuLimit)
                 .put("requests",r.requests).put("payload_bytes",r.payloadBytes).put("death_confirmed",r.deathConfirmed)
+                .put("resource_input_bytes",r.resourceInputBytes)
                 .put("elapsed_ms",r.elapsedMs).put("retire_to_exit_ms",r.retireToExitMs).put("cancel_to_exit_ms",r.cancelToExitMs);
             File file=new File(context.getFilesDir(),"isolated-evidence.jsonl");
             try(FileOutputStream out=new FileOutputStream(file,file.length()<=1024*1024)) {out.write((j+"\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));}
