@@ -108,6 +108,11 @@ public final class IsolatedRuntimeTest extends RuntimeTestSupport {
         IsolatedRuntime.Outcome out=finish(submit(RuntimeRequest.PROBE,null,IsolatedInput.CHILD_FRAME,30000));
         assertEquals(RuntimeResult.IPC_ERROR,out.result.error);assertTrue(out.pythonEntered);identity(out);recovery(out);
     }
+    @Test public void platformCredentialSyscallKillsOnlyNativeChildAndFreshAnalysisRecovers() throws Exception {
+        IsolatedRuntime.Outcome out=finish(submit(RuntimeRequest.PROBE,null,IsolatedInput.PLATFORM_CREDENTIAL,30000));
+        assertEquals(RuntimeResult.WORKER_DIED,out.result.error);assertFalse(out.pythonEntered);
+        assertEquals(android.system.OsConstants.SIGSYS,out.workerExitSignal);recovery(out);
+    }
     @Test public void secondClientCannotShareAnInterpreter() throws Exception {
         IsolatedRuntime.Operation first=submit(RuntimeRequest.HANG,null,0,30000);
         first.whenPythonStarted().get(25,TimeUnit.SECONDS);

@@ -13,5 +13,7 @@ final class SupervisorNative {
     static native void kill(int pid);
     static native boolean reap(int pid);
     static native int dumpable();
+    static native int exitSignal(int pid);
+    static native int exitCode(int pid);
     private SupervisorNative() { }
 }

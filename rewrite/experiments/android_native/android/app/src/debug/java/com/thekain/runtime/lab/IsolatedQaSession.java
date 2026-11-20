@@ -131,7 +131,7 @@ final class IsolatedQaSession {
             .put("parent_pid",android.os.Process.myPid()).put("parent_uid",android.os.Process.myUid()).put("instance",out.instance)
             .put("observer_pid",out.observerPid).put("observer_uid",out.observerUid).put("observer_start_ticks",out.observerStartTicks)
             .put("observer_peak_rss_bytes",out.observerPeakRssBytes).put("observer_cpu_ticks",out.observerCpuTicks)
-            .put("observer_python_loaded",out.observerPythonLoaded).put("observer_non_dumpable",out.observerNonDumpable).put("child_protection",out.childProtection)
+            .put("observer_python_loaded",out.observerPythonLoaded).put("observer_non_dumpable",out.observerNonDumpable).put("child_protection",out.childProtection).put("worker_exit_signal",out.workerExitSignal).put("worker_exit_code",out.workerExitCode)
             .put("start_ticks",out.startTicks).put("death_confirmed",out.deathConfirmed).put("security_denials",out.securityDenials)
             .put("python_entered",out.pythonEntered).put("python_calls",out.result.pythonCalls).put("machine",out.result.machine)
             .put("pointer_bits",out.result.pointerBits).put("pages",out.result.pages).put("openssl_handshake",out.result.opensslHandshake)

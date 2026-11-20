@@ -155,7 +155,7 @@ The lab supports only the pinned 64-bit x86_64/ARM64 ABIs; no 32-bit runtime cla
 Mandatory native targets: API26/29/35 at 4KiB and official API36 ps16k rev7 at
 **actual 16KiB**, with both x86_64 and ARM64 source builds. An upfront real
 UID native interpreter/OpenSSL probe exposes bootstrap failures
-early; success must still be followed by all original 27 tests, **26 additional**
+early; success must still be followed by all original 27 tests, **27 additional**
 backend/UI tests, external-app bind rejection and the separate observer-loss test.
 Independent shell meminfo must include both native child and trusted Service.
 The resource journal/report includes identities, kernel CPU/RSS, overshoot,
@@ -202,3 +202,11 @@ Separate OPEN tasks remain [APK89 review #38](https://github.com/aslanprp09-sour
 and [deep Doze #41](https://github.com/aslanprp09-source/TheKaiN-Video/issues/41).
 Request fresh KaiN1One review only after all final-HEAD CI passes. Do not merge
 before approval. Main, protection, signing keys, releases and QA gates stay intact.
+
+The successful bootstrap does not invoke Android-blacklisted `setfsuid`: AOSP's
+[app blacklist](https://github.com/aosp-mirror/platform_bionic/blob/android10-release/libc/SECCOMP_BLACKLIST_APP.TXT)
+kills it, overriding an additional ERRNO filter with the stronger SIGSYS action.
+A dedicated negative test now requires actual waitpid SIGSYS evidence, no Python
+entry and successful fresh analysis. Linux host tests retain the direct ERRNO
+probe; credential denials remain in the native filter. Exit signal/code are
+recorded from the trusted supervisor's waitpid result, never inferred from EOF.

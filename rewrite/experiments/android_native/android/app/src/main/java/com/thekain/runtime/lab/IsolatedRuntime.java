@@ -45,7 +45,7 @@ public final class IsolatedRuntime implements AutoCloseable {
         volatile Snapshot kernel;IBinder binder;IIsolatedOwner ownerEndpoint;
         IResourceOwner observerEndpoint;IIsolatedWorker worker;
         volatile int peerPid,peerUid,observerPid,observerUid;volatile long observerStart,lastSample,sequence,observerPeak,observerCpu;
-        volatile boolean observerRetiring,observerNonDumpable,observerPythonLoaded,noChildConfirmed,executed;volatile int childProtection;
+        volatile boolean observerRetiring,observerNonDumpable,observerPythonLoaded,noChildConfirmed,executed;volatile int childProtection;volatile int exitSignal=-1,exitCode=-1;
         ServiceConnection connection;
         boolean bound,connected,binderDead,pythonEntered;
         String instance="";int error=-1,denials;
@@ -67,7 +67,7 @@ public final class IsolatedRuntime implements AutoCloseable {
         public final RuntimeResult result;
         public final int workerPid,workerUid,observerPid,observerUid,securityDenials,requests;
         public final long observerStartTicks,observerPeakRssBytes,observerCpuTicks;
-        public final boolean observerPythonLoaded,observerNonDumpable;public final int childProtection;
+        public final boolean observerPythonLoaded,observerNonDumpable;public final int childProtection,workerExitSignal,workerExitCode;
         public final String instance;
         public final boolean deathConfirmed,pythonEntered;
         public final long startTicks,samples,peakRssBytes,cpuTicks,observedCpuMs,virtualBefore,addressLimit,cpuLimit;
@@ -78,7 +78,7 @@ public final class IsolatedRuntime implements AutoCloseable {
             startTicks=o.kernel==null?0:o.kernel.start;instance=o.instance;securityDenials=o.denials;
             observerPid=o.observerPid;observerUid=o.observerUid;observerStartTicks=o.observerStart;
             observerPeakRssBytes=o.observerPeak;observerCpuTicks=o.observerCpu;observerPythonLoaded=o.observerPythonLoaded;
-            observerNonDumpable=o.observerNonDumpable;childProtection=o.childProtection;
+            observerNonDumpable=o.observerNonDumpable;childProtection=o.childProtection;workerExitSignal=o.exitSignal;workerExitCode=o.exitCode;
             deathConfirmed=dead;pythonEntered=o.pythonEntered;samples=o.samples;peakRssBytes=o.peak;
             cpuTicks=o.cpu;observedCpuMs=o.cpu*1000/ProcessIdentity.CLOCK_TICKS;
             virtualBefore=o.before;addressLimit=o.address;cpuLimit=o.cpuLimit;
@@ -92,7 +92,7 @@ public final class IsolatedRuntime implements AutoCloseable {
     }
     synchronized Operation submit(int operation,String url,int ca,long timeoutMs,long rss,int mode) {
         long now=SystemClock.elapsedRealtime();
-        if(timeoutMs<100 || timeoutMs>NativeRuntime.MAX_DEADLINE_MS || mode<0 || mode>IsolatedInput.CHILD_FRAME)
+        if(timeoutMs<100 || timeoutMs>NativeRuntime.MAX_DEADLINE_MS || mode<0 || mode>IsolatedInput.PLATFORM_CREDENTIAL)
             throw new IllegalArgumentException("LAB_BOUNDS");
         Operation o=new Operation(new RuntimeRequest(UUID.randomUUID().toString(),operation,url,ca,now+timeoutMs,rss,RuntimeRequest.MAX_HEADROOM),mode,now);
         if(lease.uncertain()) {
@@ -149,7 +149,7 @@ public final class IsolatedRuntime implements AutoCloseable {
                 }
             }
             public boolean sample(String cap,long sequence,long measuredAt,int pid,int uid,long start,long cpu,long rss,long vm,
-                    boolean dead,long observerRss,long observerCpu,boolean pythonLoaded,int childProtection) {
+                    boolean dead,long observerRss,long observerCpu,boolean pythonLoaded,int childProtection,int exitSignal,int exitCode) {
                 synchronized(IsolatedRuntime.this) {
                     long now=SystemClock.elapsedRealtime();
                     if(observerSender(o,cap) && pythonLoaded) {o.observerPythonLoaded=true;return false;}
@@ -157,6 +157,8 @@ public final class IsolatedRuntime implements AutoCloseable {
                             || start<=0 || sequence!=o.sequence+1 || measuredAt>now || now-measuredAt>1000
                             || pythonLoaded || (childProtection!=0 && childProtection!=255) || observerRss<=0 || observerCpu<0
                             || (o.kernel!=null && (start!=o.kernel.start || o.kernel.dead)))return false;
+                    if(exitSignal< -1 || exitSignal>64 || exitCode< -1 || exitCode>255 || (!dead && (exitSignal!=-1 || exitCode!=-1)))return false;
+                    if(dead) {o.exitSignal=exitSignal;o.exitCode=exitCode;}
                     if(!dead && (rss<=0 || vm<=0 || cpu<0))return false;
                     o.childProtection=Math.max(o.childProtection,childProtection);o.sequence=sequence;o.lastSample=measuredAt;o.procFailureSince=-1;
                     o.kernel=new Snapshot(pid,uid,start,dead);
@@ -337,7 +339,7 @@ public final class IsolatedRuntime implements AutoCloseable {
                 .put("resource_input_bytes",r.resourceInputBytes)
                 .put("observer_pid",r.observerPid).put("observer_uid",r.observerUid).put("observer_start_ticks",r.observerStartTicks)
                 .put("observer_peak_rss_bytes",r.observerPeakRssBytes).put("observer_cpu_ticks",r.observerCpuTicks)
-                .put("observer_python_loaded",r.observerPythonLoaded).put("observer_non_dumpable",r.observerNonDumpable).put("child_protection",r.childProtection)
+                .put("observer_python_loaded",r.observerPythonLoaded).put("observer_non_dumpable",r.observerNonDumpable).put("child_protection",r.childProtection).put("worker_exit_signal",r.workerExitSignal).put("worker_exit_code",r.workerExitCode)
                 .put("elapsed_ms",r.elapsedMs).put("retire_to_exit_ms",r.retireToExitMs).put("cancel_to_exit_ms",r.cancelToExitMs);
             File file=new File(context.getFilesDir(),"isolated-evidence.jsonl");
             try(FileOutputStream out=new FileOutputStream(file,file.length()<=1024*1024)) {out.write((j+"\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));}

@@ -35,6 +35,8 @@ def validate(rows):
         if row['mode'] in (3,4):
             assert row['python_entered'] is False, 'Unverified resource/proc FD reached Python'
     assert any(r['error']==7 and r['rss_limit']==64*1024*1024 and r['peak_rss_bytes']>r['rss_limit'] for r in rows), 'No actual independent resident-limit retirement'
+    credential=[r for r in rows if r['mode']==7]
+    assert credential and all(r['error']==4 and not r['python_entered'] and r['worker_exit_signal']==31 for r in credential), 'Missing real Android SIGSYS credential denial/recovery'
     blocked=[r for r in rows if r['mode']==2]
     assert {r['error'] for r in blocked} >= {1,2}, 'Blocked-main forced reap not demonstrated'
     assert all(r['python_entered'] for r in blocked)
@@ -61,12 +63,12 @@ def main():
     parser.add_argument('--api',type=int,required=True);parser.add_argument('--pages',type=int,required=True)
     args=parser.parse_args();folder=args.evidence
     text=(folder/'isolated-instrumentation.txt').read_text()
-    assert re.search(r'^OK \(26 tests\)\s*$',text,re.M), text[-12000:]
+    assert re.search(r'^OK \(27 tests\)\s*$',text,re.M), text[-12000:]
     assert not any(s in text for s in ('FAILURES!!!','shortMsg=','INSTRUMENTATION_FAILED'))
     assert int((folder/'api.txt').read_text())==args.api
     assert int((folder/'page-size.txt').read_text())==args.pages
     rows=[json.loads(line) for line in (folder/'isolated-evidence.jsonl').read_text().splitlines()]
-    report=validate(rows);report.update(api=args.api,actual_page_size=args.pages,tests=26)
+    report=validate(rows);report.update(api=args.api,actual_page_size=args.pages,tests=27)
     snapshots=sum('MEMINFO in pid' in p.read_text(errors='replace') for p in folder.glob('meminfo-isolated-*.txt'))
     assert snapshots>0,'No independent isolated-worker dumpsys meminfo snapshot'
     report['independent_meminfo_snapshots']=snapshots

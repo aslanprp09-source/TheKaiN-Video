@@ -53,7 +53,6 @@ static int hardened(pid_t parent) {
     struct rlimit files;if(getrlimit(RLIMIT_NOFILE,&files) || files.rlim_cur!=64 || files.rlim_max!=64)return 0;
     if(fcntl(0,F_SETOWN,parent)!=-1 || errno!=EPERM)return 0;
     if(ioctl(0,FIOSETOWN,&parent)!=-1 || errno!=EPERM)return 0;
-    if(syscall(__NR_setfsuid,getuid())!=-1 || errno!=EPERM)return 0;
     if(syscall(__NR_unshare,0)!=-1 || errno!=EPERM)return 0;
     if(kill(parent,0)!=-1 || errno!=EPERM)return 0;
     if(kill(0,0)!=-1 || errno!=EPERM)return 0;
@@ -76,14 +75,19 @@ static int child_run(int argc,char **argv) {
     // Only this child becomes dumpable; the Java supervisor remains non-dumpable.
     // Explicit readiness avoids racing procfs hidepid while the fork is still pre-exec.
     if(put32(0) || put32((uint32_t)getpid()) || put32((uint32_t)getuid()) || put32((uint32_t)getppid()))return 115;
-    uint32_t size,seconds,ack,headroomMiB;char json[16385];
-    if(get32(&size) || size>16384 || !size || read_all(json,size) || get32(&headroomMiB) || get32(&seconds))return 102;
+    uint32_t size,seconds,ack,headroomMiB,fault;char json[16385];
+    if(get32(&size) || size>16384 || !size || read_all(json,size) || get32(&headroomMiB) || get32(&seconds) || get32(&fault) || fault>1)return 102;
     json[size]=0;
     RuntimeKernelLimits limits;
     if(limit_child_files() || configure_runtime_limits((uint64_t)headroomMiB*1024*1024,(int)seconds,&limits) || fence_native_child())return 103;
     int protection=hardened(parent);if(protection!=255)return 104;
     if(put32(3) || put64(limits.before) || put64(limits.address) || put64(limits.cpu) || put32((uint32_t)protection)
             || get32(&ack) || ack)return 105;
+    if(fault==1) {
+        // The Android app policy kills setfsuid with SIGSYS; our additional denial stays installed.
+        // Exercise that fatal denial only in its dedicated negative test, never a successful probe.
+        syscall(__NR_setfsuid,getuid());return 116;
+    }
     if(PyImport_AppendInittab("_thekain_transport",PyInit__thekain_transport)<0)return 106;
     PyConfig config;PyConfig_InitIsolatedConfig(&config);config.site_import=0;config.write_bytecode=0;config.install_signal_handlers=0;
     PyStatus status=PyConfig_SetBytesString(&config,&config.home,"/");config.module_search_paths_set=1;

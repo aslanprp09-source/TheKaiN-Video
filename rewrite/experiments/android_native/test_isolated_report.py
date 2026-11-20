@@ -12,9 +12,9 @@ class IsolatedEvidenceTest(unittest.TestCase):
                 parent_pid=100,parent_uid=10001,worker_pid=200+i,worker_uid=99000+i,
                 observer_pid=400+i,observer_uid=99000+i,observer_start_ticks=50+i,observer_peak_rss_bytes=40*1024*1024,
                 observer_cpu_ticks=4,observer_python_loaded=False,observer_non_dumpable=True,child_protection=255,samples=8,peak_rss_bytes=200*1024*1024,rss_limit=(64 if error==7 else 384)*1024*1024,
-                start_ticks=100+i,python_entered=True,rlimit_as=2**32+256*1024*1024,
+                start_ticks=100+i,python_entered=error!=4,worker_exit_signal=31 if error==4 else 9,rlimit_as=2**32+256*1024*1024,
                 virtual_before=2**32,rlimit_cpu=20,cpu_ticks=7,observed_cpu_ms=70,
-                security_denials=31,mode=2 if error in (1,2) else 0,instance=str(i),resource_input_bytes=22*1024*1024))
+                security_denials=31,mode=2 if error in (1,2) else 7 if error==4 else 0,instance=str(i),resource_input_bytes=22*1024*1024))
         return rows
 
     def test_incomplete_or_contradictory_isolation_proof_is_rejected(self):

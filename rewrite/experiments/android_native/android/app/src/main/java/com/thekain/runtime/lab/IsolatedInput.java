@@ -5,7 +5,7 @@ import java.io.*;
 
 /** Three read-only, unlinked regular files. Never a directory, code string or writable FD. */
 public final class IsolatedInput implements Parcelable,AutoCloseable {
-    static final int NORMAL=0,SECURITY=1,BLOCK_MAIN=2,FAKE_PROC=3,BAD_DIGEST=4,IPC_FLOOD=5,CHILD_FRAME=6;
+    static final int NORMAL=0,SECURITY=1,BLOCK_MAIN=2,FAKE_PROC=3,BAD_DIGEST=4,IPC_FLOOD=5,CHILD_FRAME=6,PLATFORM_CREDENTIAL=7;
     final RuntimeRequest request;
     final int mode;
     final ParcelFileDescriptor resources,certificate,key;
@@ -28,7 +28,7 @@ public final class IsolatedInput implements Parcelable,AutoCloseable {
         catch(RuntimeException e) {for(ParcelFileDescriptor fd:fds)if(fd!=null)try {fd.close();}catch(IOException ignored){}throw e;}
     }
     void validate() {
-        Wire.check(request!=null);request.validate();Wire.check(mode>=NORMAL && mode<=CHILD_FRAME);
+        Wire.check(request!=null);request.validate();Wire.check(mode>=NORMAL && mode<=PLATFORM_CREDENTIAL);
         Wire.check(resources!=null && certificate!=null && key!=null && bytes>0 && bytes<=160L*1024*1024);
         Wire.check(sha256!=null && sha256.matches("[0-9a-f]{64}"));
     }

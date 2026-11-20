@@ -146,7 +146,8 @@ public final class IsolatedRuntimeService extends Service {
                     }
                     byte[] encoded=json.toString().getBytes(java.nio.charset.StandardCharsets.US_ASCII);
                     out.writeInt(encoded.length);out.write(encoded);out.writeInt((int)(request.virtualHeadroom/1024/1024));
-                    out.writeInt((int)Math.max(1,(request.deadline-SystemClock.elapsedRealtime()+999)/1000)+1);out.flush();
+                    out.writeInt((int)Math.max(1,(request.deadline-SystemClock.elapsedRealtime()+999)/1000)+1);
+                    out.writeInt(input.mode==IsolatedInput.PLATFORM_CREDENTIAL?1:0);out.flush();stage="NATIVE_PROTOCOL";
                     int messages=0,fetches=0;boolean limits=false,started=false;
                     while(!retiring && messages++<32) {
                         int tag=in.readInt();
@@ -208,23 +209,26 @@ public final class IsolatedRuntimeService extends Service {
     private boolean emit(KernelDescriptors.Sample sample,boolean dead) throws Exception {
         KernelDescriptors.Sample self=KernelDescriptors.selfSample();
         return counters.sample(request.id,++sequence,SystemClock.elapsedRealtime(),pid,android.os.Process.myUid(),kernel.start,
-            sample==null?0:sample.cpu,sample==null?0:sample.rss,sample==null?0:sample.vm,dead,self.rss,self.cpu,pythonLoaded(),protection);
+            sample==null?0:sample.cpu,sample==null?0:sample.rss,sample==null?0:sample.vm,dead,self.rss,self.cpu,pythonLoaded(),protection,dead?SupervisorNative.exitSignal(pid):-1,dead?SupervisorNative.exitCode(pid):-1);
     }
     private void poll() {
         if(terminal || kernel==null)return;
         try {
             KernelDescriptors.Sample sample=kernel.sample();
-            if(sample.zombie) {SupervisorNative.reap(pid);terminal=true;emit(null,true);return;}
+            if(sample.zombie) {SupervisorNative.reap(pid);terminal=true;emit(null,true);logExit();return;}
             procFailureSince=-1;
             if(!emit(sample,false)) {killChild();return;}
             if(sample.rss>request.rssLimit || SystemClock.elapsedRealtime()>=request.deadline)killChild();
         }catch(Exception e) {
-            if(kernel.dead()) {SupervisorNative.reap(pid);try {terminal=true;emit(null,true);}catch(Exception ignored){}return;}
+            if(kernel.dead()) {SupervisorNative.reap(pid);try {terminal=true;emit(null,true);logExit();}catch(Exception ignored){}return;}
             if(procFailureSince<0)procFailureSince=SystemClock.elapsedRealtime();
             try {counters.failed(request.id);}catch(Exception ignored) { }
             if(SystemClock.elapsedRealtime()-procFailureSince>=120)killChild();
         }
         monitor.postDelayed(this::poll,40);
+    }
+    private void logExit() {
+        android.util.Log.i("TheKaiNIsolated","CHILD_EXIT_signal="+SupervisorNative.exitSignal(pid)+"_code="+SupervisorNative.exitCode(pid));
     }
     @Override public void onCreate() {super.onCreate();thread.start();monitor=new Handler(thread.getLooper());}
     @Override public IBinder onBind(Intent intent) {if(processBinder!=null && processBinder!=binder) {die();return null;}processBinder=binder;return binder;}

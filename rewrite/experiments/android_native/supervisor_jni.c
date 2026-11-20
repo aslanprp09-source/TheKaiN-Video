@@ -14,6 +14,7 @@
 /* No libpython dependency. Trusted supervisor only; one spawned PID in this Service lifetime. */
 static pid_t child_pid;
 static int reaped;
+static int last_status=-1;
 JNIEXPORT jboolean JNICALL Java_com_thekain_runtime_lab_SupervisorNative_protect(JNIEnv *env,jclass cls) {
     (void)env;(void)cls;return getuid()%100000>=90000 && prctl(PR_SET_DUMPABLE,0)==0 && prctl(PR_GET_DUMPABLE)==0;
 }
@@ -68,9 +69,10 @@ fail:
     (*env)->ReleaseStringUTFChars(env,directory,root);failure(env);return NULL;
 }
 JNIEXPORT void JNICALL Java_com_thekain_runtime_lab_SupervisorNative_kill(JNIEnv *env,jclass cls,jint pid) {
-    (void)cls;if(pid<=0 || pid!=child_pid || reaped || getuid()%100000<90000) {failure(env);return;}
+    (void)cls;if(pid<=0 || pid!=child_pid || getuid()%100000<90000) {failure(env);return;}
+    if(reaped)return;
     int status;pid_t got=waitpid(child_pid,&status,WNOHANG);
-    if(got==child_pid) {reaped=1;return;}
+    if(got==child_pid) {last_status=status;reaped=1;return;}
     if(got<0 && errno==ECHILD) {reaped=1;return;}
     if(got!=0 || (kill(child_pid,SIGKILL) && errno!=ESRCH))failure(env);
 }
@@ -78,10 +80,19 @@ JNIEXPORT jboolean JNICALL Java_com_thekain_runtime_lab_SupervisorNative_reap(JN
     (void)cls;if(pid<=0 || pid!=child_pid) {failure(env);return JNI_FALSE;}
     if(reaped)return JNI_TRUE;
     int status;pid_t got=waitpid(child_pid,&status,WNOHANG);
-    if(got==child_pid) {reaped=1;return JNI_TRUE;}return JNI_FALSE;
+    if(got==child_pid) {last_status=status;reaped=1;return JNI_TRUE;}return JNI_FALSE;
 }
 JNIEXPORT jint JNICALL Java_com_thekain_runtime_lab_SupervisorNative_dumpable(JNIEnv *env,jclass cls) {(void)env;(void)cls;return prctl(PR_GET_DUMPABLE);}
 
 JNIEXPORT jint JNICALL Java_com_thekain_runtime_lab_SupervisorNative_flags(JNIEnv *env,jclass cls,jint fd) {
     (void)cls;int flags=fcntl(fd,F_GETFL);if(flags<0)failure(env);return flags;
+}
+
+JNIEXPORT jint JNICALL Java_com_thekain_runtime_lab_SupervisorNative_exitSignal(JNIEnv *env,jclass cls,jint pid) {
+    (void)cls;if(pid<=0 || pid!=child_pid) {failure(env);return -1;}
+    return !reaped || last_status<0?-1:WIFSIGNALED(last_status)?WTERMSIG(last_status):0;
+}
+JNIEXPORT jint JNICALL Java_com_thekain_runtime_lab_SupervisorNative_exitCode(JNIEnv *env,jclass cls,jint pid) {
+    (void)cls;if(pid<=0 || pid!=child_pid) {failure(env);return -1;}
+    return !reaped || last_status<0 || !WIFEXITED(last_status)?-1:WEXITSTATUS(last_status);
 }

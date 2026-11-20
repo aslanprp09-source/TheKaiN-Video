@@ -95,7 +95,7 @@ adb -s "$ANDROID_SERIAL" shell pidof system_server | tr -d '\r' > "$evidence/sys
 test -s "$evidence/system-server-before.txt"
 adb -s "$ANDROID_SERIAL" install -r -t "$delivery/lab.apk"
 adb -s "$ANDROID_SERIAL" install -r -t "$delivery/tests.apk"
-# A passing run still executes all original 27 and all additional 26 below.
+# A passing run still executes all original 27 and all additional 27 below.
 timeout 80 adb -s "$ANDROID_SERIAL" shell am instrument -w -e class 'com.thekain.runtime.lab.IsolatedRuntimeTest#separateUidInterpreterSealedResourcesAndOpenSsl' com.thekain.runtime.lab.test/androidx.test.runner.AndroidJUnitRunner > "$evidence/isolated-bootstrap.txt"
 python3 - "$evidence/isolated-bootstrap.txt" <<'PYBOOT'
 from pathlib import Path
