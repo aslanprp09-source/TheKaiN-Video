@@ -91,6 +91,10 @@ static int child_check(pid_t parent) {
     assert(fence_native_child()==0);
     char path[64];snprintf(path,sizeof(path),"/proc/%d/mem",parent);
     assert(open(path,O_RDONLY)==-1 && (errno==EACCES || errno==EPERM));
+    assert(fcntl(0,F_SETOWN,parent)==-1 && errno==EPERM);
+    assert(ioctl(0,FIOSETOWN,&parent)==-1 && errno==EPERM);
+    assert(syscall(__NR_setfsuid,getuid())==-1 && errno==EPERM);
+    assert(syscall(__NR_unshare,0)==-1 && errno==EPERM);
     assert(kill(parent,0)==-1 && errno==EPERM);
     assert(kill(0,0)==-1 && errno==EPERM);
     assert(kill(-1,0)==-1 && errno==EPERM);

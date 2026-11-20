@@ -1,6 +1,7 @@
 #include <Python.h>
 #include <arpa/inet.h>
 #include <fcntl.h>
+#include <dirent.h>
 #include <signal.h>
 #include <string.h>
 #include <sys/ptrace.h>
@@ -46,6 +47,10 @@ static int hardened(pid_t parent) {
     char path[64];snprintf(path,sizeof(path),"/proc/%d/mem",parent);
     int fd=open(path,O_RDONLY|O_CLOEXEC);if(fd>=0) {close(fd);return 0;}
     if(errno!=EACCES && errno!=EPERM)return 0;
+    if(fcntl(0,F_SETOWN,parent)!=-1 || errno!=EPERM)return 0;
+    if(ioctl(0,FIOSETOWN,&parent)!=-1 || errno!=EPERM)return 0;
+    if(syscall(__NR_setfsuid,getuid())!=-1 || errno!=EPERM)return 0;
+    if(syscall(__NR_unshare,0)!=-1 || errno!=EPERM)return 0;
     if(kill(parent,0)!=-1 || errno!=EPERM)return 0;
     if(kill(0,0)!=-1 || errno!=EPERM)return 0;
     if(syscall(__NR_tgkill,parent,parent,0)!=-1 || errno!=EPERM)return 0;
@@ -60,6 +65,10 @@ static int child_run(int argc,char **argv) {
     if(argc!=3 || getuid()%100000<90000 || prctl(PR_SET_NAME,"thekain-py-lab",0,0,0))return 100;
     pid_t parent=(pid_t)strtol(argv[2],NULL,10);
     if(setup_parent_lifetime(parent))return 101;
+    DIR *tasks=opendir("/proc/self/task");if(!tasks)return 113;
+    int threads=0;struct dirent *entry;
+    while((entry=readdir(tasks)))if(entry->d_name[0]>='0' && entry->d_name[0]<='9')threads++;
+    closedir(tasks);if(threads!=1)return 114;
     uint32_t size,seconds,ack,headroomMiB;char json[16385];
     if(get32(&size) || size>16384 || !size || read_all(json,size) || get32(&headroomMiB) || get32(&seconds))return 102;
     json[size]=0;

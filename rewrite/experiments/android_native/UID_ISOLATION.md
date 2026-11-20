@@ -38,7 +38,9 @@ supervisor PID; URLs/JSON travel through a bounded fixed binary protocol.
 The native child installs its fence before Python initialization, with no ART
 threads that could remain unfenced. It cannot create sockets/descendants, exec,
 ptrace, use process_vm or io_uring, change another process's limits/scheduling,
-signal the supervisor/process group, or clear parent-death protection.
+signal the supervisor/process group (including indirect SIGIO through fcntl/ioctl),
+change credentials/namespaces, or clear parent-death protection. Before filtering,
+the native bootstrap verifies that it has exactly one thread.
 `PR_SET_PDEATHSIG=SIGKILL` plus a parent-identity race check handles parent loss.
 Self-signals remain available for the real native-abort test.
 
