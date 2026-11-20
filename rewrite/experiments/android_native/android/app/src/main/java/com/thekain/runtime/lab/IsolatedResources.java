@@ -27,7 +27,7 @@ final class IsolatedResources {
         }catch(Exception e) {if(fd!=null)fd.close();throw e;}
         finally {if(file.exists())file.delete();}
     }
-    static IsolatedInput prepare(Context context,RuntimeRequest request,int mode,File fixtureHome) throws Exception {
+    static IsolatedInput prepare(Context context,RuntimeRequest request,int mode,File fixtureHome,IsolatedLease.Guard guard) throws Exception {
         if(Looper.myLooper()==Looper.getMainLooper())throw new IOException("BACKGROUND_REQUIRED");
         String abi=Build.SUPPORTED_ABIS[0];
         if(!abi.equals("x86_64") && !abi.equals("arm64-v8a"))throw new IOException("ABI");
@@ -68,7 +68,7 @@ final class IsolatedResources {
             try(InputStream in=new FileInputStream(new File(home,"fixtures/owned-key.pem"))) {key=snapshot(context,bytes(in,16384));}
             String digest=hex(hash.digest());if(mode==IsolatedInput.BAD_DIGEST)digest="0000000000000000000000000000000000000000000000000000000000000000";
             if(!zip.delete())throw new IOException("RESOURCE_UNLINK");
-            return new IsolatedInput(request,mode,resources,certificate,key,size,digest,context.getFileStreamPath("isolated-owner-canary").getAbsolutePath());
+            return new IsolatedInput(request,mode,resources,certificate,key,size,digest,context.getFileStreamPath("isolated-owner-canary").getAbsolutePath(),guard);
         }catch(Exception e) {
             for(ParcelFileDescriptor fd:new ParcelFileDescriptor[]{resources,certificate,key})if(fd!=null)fd.close();throw e;
         }finally {if(zip.exists())zip.delete();}

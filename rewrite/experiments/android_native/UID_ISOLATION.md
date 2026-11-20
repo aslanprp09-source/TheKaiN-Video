@@ -1,3 +1,5 @@
+For the subsequent explicit recovery experiment, see [LEASE_RECOVERY.md](LEASE_RECOVERY.md). Its Android/physical acceptance is separate from the PR42 baseline.
+
 # Isolated Android UID laboratory — issue #37
 
 This backend belongs only to the separate runtime lab APK, after PR35/36.
