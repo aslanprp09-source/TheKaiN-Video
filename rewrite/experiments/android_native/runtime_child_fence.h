@@ -20,6 +20,10 @@
 static int setup_parent_lifetime(pid_t parent) {
     return parent>1 && prctl(PR_SET_PDEATHSIG,SIGKILL)==0 && getppid()==parent?0:-1;
 }
+static int limit_child_files(void) {
+    struct rlimit files={64,64};
+    return setrlimit(RLIMIT_NOFILE,&files) || getrlimit(RLIMIT_NOFILE,&files) || files.rlim_cur!=64 || files.rlim_max!=64?-1:0;
+}
 static int fence_native_child(void) {
     struct sock_filter filter[]={
         BPF_STMT(BPF_LD|BPF_W|BPF_ABS,offsetof(struct seccomp_data,nr)),
@@ -49,7 +53,7 @@ static int fence_native_child(void) {
         DENY_NR(__NR_setresuid),DENY_NR(__NR_setresgid),DENY_NR(__NR_setfsuid),DENY_NR(__NR_setfsgid),
         DENY_NR(__NR_setgroups),DENY_NR(__NR_capset),DENY_NR(__NR_unshare),DENY_NR(__NR_setns),
         // No indirect SIGIO/FIOSETOWN route to the same-UID supervisor.
-        DENY_NR(__NR_ioctl),
+        DENY_NR(__NR_ioctl),DENY_NR(__NR_setsockopt),
         BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,__NR_fcntl,0,8),
         BPF_STMT(BPF_LD|BPF_W|BPF_ABS,offsetof(struct seccomp_data,args[1])),
         BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,F_SETOWN,0,1),BPF_STMT(BPF_RET|BPF_K,SECCOMP_RET_ERRNO|EPERM),

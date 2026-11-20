@@ -83,12 +83,15 @@ int main(void) {
 #include <fcntl.h>
 #include <signal.h>
 #include <sys/ptrace.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <time.h>
 static int child_check(pid_t parent) {
     assert(setup_parent_lifetime(parent)==0);
     RuntimeKernelLimits limits;assert(configure_runtime_limits(64ULL*1024*1024,5,&limits)==0);
-    assert(fence_native_child()==0);
+    assert(limit_child_files()==0);assert(fence_native_child()==0);
+    struct rlimit files;assert(getrlimit(RLIMIT_NOFILE,&files)==0 && files.rlim_cur==64 && files.rlim_max==64);
+    int tiny=1;assert(setsockopt(0,SOL_SOCKET,SO_SNDBUF,&tiny,sizeof(tiny))==-1 && errno==EPERM);
     char path[64];snprintf(path,sizeof(path),"/proc/%d/mem",parent);
     assert(open(path,O_RDONLY)==-1 && (errno==EACCES || errno==EPERM));
     assert(fcntl(0,F_SETOWN,parent)==-1 && errno==EPERM);
@@ -109,6 +112,11 @@ static int child_check(pid_t parent) {
 }
 int main(void) {
     assert(prctl(PR_SET_CHILD_SUBREAPER,1)==0);assert(prctl(PR_SET_DUMPABLE,0)==0);
+    // Kernel proc metadata + F_GETFL works without depending on fdinfo traversal policy.
+    int record=open("/proc/self/stat",O_RDONLY);assert(record>=0);struct stat held,actual;
+    assert(fstat(record,&held)==0 && stat("/proc/self/stat",&actual)==0);
+    assert(held.st_dev==actual.st_dev && held.st_ino==actual.st_ino && S_ISREG(held.st_mode));
+    assert((fcntl(record,F_GETFL)&O_ACCMODE)==O_RDONLY);close(record);
     pid_t parent=getpid(),child=fork();assert(child>=0);
     if(child==0)_exit(child_check(parent));
     int status;assert(waitpid(child,&status,0)==child && WIFEXITED(status) && WEXITSTATUS(status)==0);

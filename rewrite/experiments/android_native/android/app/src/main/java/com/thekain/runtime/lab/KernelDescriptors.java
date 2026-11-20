@@ -28,16 +28,16 @@ final class KernelDescriptors implements AutoCloseable {
     }
     static void readOnlyRegular(ParcelFileDescriptor fd,long max) throws Exception {
         StructStat info=Os.fstat(fd.getFileDescriptor());
-        long flags=-1;
-        // Public fcntlInt is API30+. Kernel fdinfo works on the API26 floor without reflection/JNI in owner.
-        for(String line:ProcessIdentity.read("/proc/self/fdinfo/"+fd.getFd(),4096).split("\n"))
-            if(line.startsWith("flags:"))flags=Long.parseLong(line.substring(6).trim(),8);
+        // Non-dumpability changes proc fd/fdinfo directory ownership to root, even for this UID.
+        // Public libc fcntl is available on API26; android.system.Os.fcntlInt is API30+.
+        long flags=SupervisorNative.flags(fd.getFd());
         if(!OsConstants.S_ISREG(info.st_mode) || flags<0 || (flags&OsConstants.O_ACCMODE)!=OsConstants.O_RDONLY
                 || info.st_size<0 || info.st_size>max)throw new IOException("READ_ONLY_REGULAR_FD_REQUIRED");
     }
     private static void validate(ParcelFileDescriptor fd,String expected) throws Exception {
         readOnlyRegular(fd,0);
-        if(!expected.equals(Os.readlink("/proc/self/fd/"+fd.getFd())))throw new IOException("NOT_KERNEL_PROC_FD");
+        StructStat held=Os.fstat(fd.getFileDescriptor()),actual=Os.stat(expected);
+        if(held.st_dev!=actual.st_dev || held.st_ino!=actual.st_ino)throw new IOException("NOT_KERNEL_PROC_FD");
     }
     static String read(ParcelFileDescriptor fd,int max) throws Exception {
         Os.lseek(fd.getFileDescriptor(),0,OsConstants.SEEK_SET);

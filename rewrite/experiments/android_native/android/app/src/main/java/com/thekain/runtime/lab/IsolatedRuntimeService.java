@@ -83,12 +83,14 @@ public final class IsolatedRuntimeService extends Service {
         return ProcessIdentity.read("/proc/self/maps",2*1024*1024).contains("libpython3.14.so");
     }
     private void run(IsolatedInput input) {
-        String stage="VERIFY_RESOURCES";
+        String stage="SUPERVISOR_IDENTITY";
         try(IsolatedInput ignored=input) {
             if(!SupervisorNative.protect() || pythonLoaded() || !counters.ready(request.id,ProcessIdentity.selfStartTicks(),true))throw new IOException("SUPERVISOR_PROTECTION");
+            stage="RESOURCE_DESCRIPTOR_METADATA";
             KernelDescriptors.readOnlyRegular(input.resources,160L*1024*1024);
             KernelDescriptors.readOnlyRegular(input.certificate,16384);KernelDescriptors.readOnlyRegular(input.key,16384);
             if(Os.fstat(input.resources.getFileDescriptor()).st_size!=input.bytes)throw new IOException("RESOURCE_SIZE");
+            stage="RESOURCE_DIGEST";
             MessageDigest hash=MessageDigest.getInstance("SHA-256");
             Os.lseek(input.resources.getFileDescriptor(),0,OsConstants.SEEK_SET);byte[] bytes=new byte[16384];int n;long total=0;
             while((n=Os.read(input.resources.getFileDescriptor(),bytes,0,bytes.length))>0) {
@@ -109,9 +111,16 @@ public final class IsolatedRuntimeService extends Service {
                 stage="EXEC_CHILD";
                 int[] spawned=SupervisorNative.spawn(getApplicationInfo().nativeLibraryDir,zip.getFd(),cert.getFd(),key.getFd());
                 pid=spawned[0];
-                try(ParcelFileDescriptor channel=ParcelFileDescriptor.adoptFd(spawned[1]);
-                        ParcelFileDescriptor stat=ParcelFileDescriptor.open(new File("/proc/"+pid+"/stat"),ParcelFileDescriptor.MODE_READ_ONLY);
-                        ParcelFileDescriptor status=ParcelFileDescriptor.open(new File("/proc/"+pid+"/status"),ParcelFileDescriptor.MODE_READ_ONLY)) {
+                try(ParcelFileDescriptor channel=ParcelFileDescriptor.adoptFd(spawned[1])) {
+                    DataInputStream in=new DataInputStream(new FileInputStream(channel.getFileDescriptor()));
+                    DataOutputStream out=new DataOutputStream(new FileOutputStream(channel.getFileDescriptor()));
+                    stage="CHILD_EXEC_READY";
+                    int hello=in.readInt();
+                    if(hello==6) {int code=in.readInt();stage="CHILD_CODE_"+(code>=100 && code<=127?code:0);throw new IOException("CHILD_STARTUP");}
+                    if(hello!=0 || in.readInt()!=pid || in.readInt()!=android.os.Process.myUid() || in.readInt()!=android.os.Process.myPid())
+                        throw new IOException("CHILD_PROTOCOL");
+                    try(ParcelFileDescriptor stat=ParcelFileDescriptor.open(new File("/proc/"+pid+"/stat"),ParcelFileDescriptor.MODE_READ_ONLY);
+                            ParcelFileDescriptor status=ParcelFileDescriptor.open(new File("/proc/"+pid+"/status"),ParcelFileDescriptor.MODE_READ_ONLY)) {
                     stage="AUTHENTICATE_KERNEL";
                     if(SupervisorNative.dumpable()!=0 || pythonLoaded() || !owner.ready(request.id,UUID.randomUUID().toString(),pid))throw new IOException("OWNER_REFUSED");
                     kernel=new KernelDescriptors(pid,android.os.Process.myUid(),stat,status,true);
@@ -123,8 +132,6 @@ public final class IsolatedRuntimeService extends Service {
                             throw new IOException("FORGED_PROC_ACCEPTED");
                         }
                     }
-                    DataInputStream in=new DataInputStream(new FileInputStream(channel.getFileDescriptor()));
-                    DataOutputStream out=new DataOutputStream(new FileOutputStream(channel.getFileDescriptor()));
                     String[] names={"","probe","analyze","block_exec","hang","crash","memory","bad_reply","output_flood","request_flood","direct_socket","byte_flood"};
                     JSONObject json=new JSONObject().put("op",input.mode==IsolatedInput.SECURITY?"isolated_security":input.mode==IsolatedInput.CHILD_FRAME?"malformed_channel":names[request.operation]);
                     if(request.url!=null)json.put("url",request.url);
@@ -168,10 +175,13 @@ public final class IsolatedRuntimeService extends Service {
                         else throw new IOException("CHILD_PROTOCOL");
                     }
                     if(!retiring)throw new IOException("CHILD_MESSAGE_BUDGET");
+                    }
                 }
             }
         }catch(Throwable e) {
-            android.util.Log.e("TheKaiNIsolated","SUPERVISOR_FAILED_"+stage+"_"+e.getClass().getSimpleName());
+            Throwable cause=e;int errno=0;
+            while(cause!=null) {if(cause instanceof ErrnoException)errno=((ErrnoException)cause).errno;cause=cause.getCause();}
+            android.util.Log.e("TheKaiNIsolated","SUPERVISOR_FAILED_"+stage+"_"+e.getClass().getSimpleName()+"_errno="+errno);
             if(!retiring && !completed)try {
                 int error="RESOURCE_HASH".equals(e.getMessage())?RuntimeResult.INVALID_REQUEST:
                     input.mode==IsolatedInput.FAKE_PROC || (e.getMessage()!=null && (e.getMessage().equals("CHILD_PROTOCOL")

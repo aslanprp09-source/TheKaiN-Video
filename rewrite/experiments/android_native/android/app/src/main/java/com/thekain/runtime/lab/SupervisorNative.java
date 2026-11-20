@@ -7,6 +7,7 @@ final class SupervisorNative {
         System.loadLibrary("thekain_supervisor");
     }
     static native boolean protect();
+    static native int flags(int fd);
     static native int seal(int source,long max);
     static native int[] spawn(String installedDirectory,int zip,int cert,int key);
     static native void kill(int pid);

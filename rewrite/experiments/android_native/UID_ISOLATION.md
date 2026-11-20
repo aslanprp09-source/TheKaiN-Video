@@ -42,7 +42,10 @@ signal the supervisor/process group (including indirect SIGIO through fcntl/ioct
 change credentials/namespaces, or clear parent-death protection. Before filtering,
 the native bootstrap verifies that it has exactly one thread.
 `PR_SET_PDEATHSIG=SIGKILL` plus a parent-identity race check handles parent loss.
-Self-signals remain available for the real native-abort test.
+Self-signals remain available for the real native-abort test. The exec child
+explicitly uses dumpable=1 so its trusted parent can inspect it; the Java Service
+remains dumpable=0. A fixed PID/UID/parent readiness handshake after exec precedes
+proc opening and Python release, avoiding a hidepid/pre-exec race.
 
 The Service and child **share** their isolated UID/SELinux category. They are
 not two independent UID sandboxes. Protection of the trusted supervisor also
@@ -100,15 +103,19 @@ A real oversized child-frame test must fail IPC and permit a fresh owned analysi
 ## Resources, retirement and recovery
 
 The trusted Service opens the native child's genuine read-only proc descriptors,
-checks PID/UID/parent/start ticks, exact FD paths, regular-file type and kernel
-fdinfo flags. It reads kernel seq-files in a thread outside Python every 40ms.
+checks PID/UID/parent/start ticks, kernel proc-path inode/device identity, regular-file type and libc F_GETFL
+read-only flags. The descriptor check avoids proc fd/fdinfo traversal after non-dumpability,
+which failed with FileNotFoundException before Python in CI171 API29. Direct
+libc flags and proc inode identity work without temporarily relaxing dumpability. It reads kernel seq-files in a thread outside Python every 40ms.
 Only authenticated, sequenced, timestamped typed snapshots reach the owner.
 Service RSS/CPU and absence of libpython mappings are recorded separately.
 CPU uses actual SC_CLK_TCK. Missing/stale observation fails closed; unknown exit
 records have at most 120ms grace and cannot authorize OK. A >1s stale observer
 fails IPC. No Python-provided RSS/CPU value is trusted.
 
-RLIMIT_AS and RLIMIT_CPU are kernel-enforced. RSS is a sampled retirement
+RLIMIT_AS and RLIMIT_CPU are kernel-enforced. The native child also has a hard
+64-descriptor limit. Each socketpair endpoint requests 32KiB send/receive buffers
+(the kernel may double these); the child cannot increase them with setsockopt. RSS is a sampled retirement
 threshold, **not an instantaneous hard memory limit**; measured overshoot is
 retained. A separate 64MiB RSS case must show a real over-budget kernel sample
 and forced retirement, independently of Python MemoryError/RLIMIT_AS. Resource

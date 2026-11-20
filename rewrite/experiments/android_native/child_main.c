@@ -47,6 +47,9 @@ static int hardened(pid_t parent) {
     char path[64];snprintf(path,sizeof(path),"/proc/%d/mem",parent);
     int fd=open(path,O_RDONLY|O_CLOEXEC);if(fd>=0) {close(fd);return 0;}
     if(errno!=EACCES && errno!=EPERM)return 0;
+    int tiny=1;
+    if(setsockopt(0,SOL_SOCKET,SO_SNDBUF,&tiny,sizeof(tiny))!=-1 || errno!=EPERM)return 0;
+    struct rlimit files;if(getrlimit(RLIMIT_NOFILE,&files) || files.rlim_cur!=64 || files.rlim_max!=64)return 0;
     if(fcntl(0,F_SETOWN,parent)!=-1 || errno!=EPERM)return 0;
     if(ioctl(0,FIOSETOWN,&parent)!=-1 || errno!=EPERM)return 0;
     if(syscall(__NR_setfsuid,getuid())!=-1 || errno!=EPERM)return 0;
@@ -64,16 +67,19 @@ static int hardened(pid_t parent) {
 static int child_run(int argc,char **argv) {
     if(argc!=3 || getuid()%100000<90000 || prctl(PR_SET_NAME,"thekain-py-lab",0,0,0))return 100;
     pid_t parent=(pid_t)strtol(argv[2],NULL,10);
-    if(setup_parent_lifetime(parent))return 101;
+    if(setup_parent_lifetime(parent) || prctl(PR_SET_DUMPABLE,1) || prctl(PR_GET_DUMPABLE)!=1)return 101;
     DIR *tasks=opendir("/proc/self/task");if(!tasks)return 113;
     int threads=0;struct dirent *entry;
     while((entry=readdir(tasks)))if(entry->d_name[0]>='0' && entry->d_name[0]<='9')threads++;
     closedir(tasks);if(threads!=1)return 114;
+    // Only this child becomes dumpable; the Java supervisor remains non-dumpable.
+    // Explicit readiness avoids racing procfs hidepid while the fork is still pre-exec.
+    if(put32(0) || put32((uint32_t)getpid()) || put32((uint32_t)getuid()) || put32((uint32_t)getppid()))return 115;
     uint32_t size,seconds,ack,headroomMiB;char json[16385];
     if(get32(&size) || size>16384 || !size || read_all(json,size) || get32(&headroomMiB) || get32(&seconds))return 102;
     json[size]=0;
     RuntimeKernelLimits limits;
-    if(configure_runtime_limits((uint64_t)headroomMiB*1024*1024,(int)seconds,&limits) || fence_native_child())return 103;
+    if(limit_child_files() || configure_runtime_limits((uint64_t)headroomMiB*1024*1024,(int)seconds,&limits) || fence_native_child())return 103;
     int protection=hardened(parent);if(protection!=255)return 104;
     if(put32(3) || put64(limits.before) || put64(limits.address) || put64(limits.cpu) || put32((uint32_t)protection)
             || get32(&ack) || ack)return 105;

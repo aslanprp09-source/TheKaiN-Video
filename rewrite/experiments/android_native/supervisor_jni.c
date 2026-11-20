@@ -39,6 +39,9 @@ JNIEXPORT jintArray JNICALL Java_com_thekain_runtime_lab_SupervisorNative_spawn(
             || snprintf(path,sizeof(path),"%s/libthekain_child.so",root)>=(int)sizeof(path)
             || snprintf(ld,sizeof(ld),"LD_LIBRARY_PATH=%s",root)>=(int)sizeof(ld)
             || socketpair(AF_UNIX,SOCK_STREAM|SOCK_CLOEXEC,0,channel))goto fail;
+    int buffer=32768;
+    for(int i=0;i<2;i++)if(setsockopt(channel[i],SOL_SOCKET,SO_SNDBUF,&buffer,sizeof(buffer))
+            || setsockopt(channel[i],SOL_SOCKET,SO_RCVBUF,&buffer,sizeof(buffer)))goto fail;
     nullfd=open("/dev/null",O_RDWR|O_CLOEXEC);if(nullfd<0)goto fail;
     int input[5]={channel[1],zip,cert,key,nullfd};
     for(int i=0;i<5;i++) {fds[i]=fcntl(input[i],F_DUPFD_CLOEXEC,10);if(fds[i]<0)goto fail;}
@@ -78,3 +81,7 @@ JNIEXPORT jboolean JNICALL Java_com_thekain_runtime_lab_SupervisorNative_reap(JN
     if(got==child_pid) {reaped=1;return JNI_TRUE;}return JNI_FALSE;
 }
 JNIEXPORT jint JNICALL Java_com_thekain_runtime_lab_SupervisorNative_dumpable(JNIEnv *env,jclass cls) {(void)env;(void)cls;return prctl(PR_GET_DUMPABLE);}
+
+JNIEXPORT jint JNICALL Java_com_thekain_runtime_lab_SupervisorNative_flags(JNIEnv *env,jclass cls,jint fd) {
+    (void)cls;int flags=fcntl(fd,F_GETFL);if(flags<0)failure(env);return flags;
+}
