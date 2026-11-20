@@ -100,13 +100,17 @@ static int child_run(int argc,char **argv) {
         if(sigaction(SIGSYS,&action,NULL))return 119;
     }
     RuntimeKernelLimits limits;
+    struct sigaction guardAction,previousAction;memset(&guardAction,0,sizeof(guardAction));
+    guardAction.sa_sigaction=lease_guard_sigsys;guardAction.sa_flags=SA_SIGINFO;sigemptyset(&guardAction.sa_mask);
+    if(sigaction(SIGSYS,&guardAction,&previousAction))return 123;
     if(put32(9) || put32(1))return 122;
     if(limit_child_files() || configure_runtime_limits((uint64_t)headroomMiB*1024*1024,(int)seconds,&limits) || fence_lease_guard() || fence_native_child())return 103;
     if(put32(9) || put32(2))return 122;
     lease_guard_probe_stage=guard_probe_stage;
     if(!lease_guard_denials())return 121;
     lease_guard_probe_stage=NULL;
-    if(put32(9) || put32(3))return 122;
+    if(sigaction(SIGSYS,&previousAction,NULL))return 123;
+    if(put32(9) || put32(3) || put32((uint32_t)lease_guard_trap_mask))return 122;
     int protection=hardened(parent);if(protection!=255)return 104;
     if(put32(9) || put32(4))return 122;
     if(put32(3) || put64(limits.before) || put64(limits.address) || put64(limits.cpu) || put32((uint32_t)protection)

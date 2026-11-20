@@ -22,6 +22,15 @@ of fd6, dup2/dup3 replacement of fd6 and all close_range variants. Existing clon
 exec, io_uring, signal, credential and supervisor protections remain. Native
 bootstrap probes require the real denials before the owner arms the journal.
 
+Denial probes use raw syscalls. A bootstrap-only SIGSYS handler accepts only a
+kernel `SYS_SECCOMP` trap for the exact in-flight denied syscall. Android's
+pre-existing seccomp TRAP has higher precedence than the additional ERRNO filter;
+an arbitrary signal or process exit never counts as denial evidence. The previous
+handler is restored before Python, including the existing dedicated credential
+negative test. Fixed protocol stages and `GUARD_KERNEL_SIGSYS_MASK` record which
+bootstrap probes encountered platform traps without exposing code, URLs or paths.
+The Linux reference also tests an overriding TRAP and rejects a non-kernel SIGSYS.
+
 A small owner-only libc JNI helper performs nonblocking flock acquisition and
 checks owner UID, exact device/inode, regular zero-length type, mode0600 and one
 link with O_NOFOLLOW. It never loads libpython, accesses a worker PID or reads keys.

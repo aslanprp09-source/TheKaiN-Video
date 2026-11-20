@@ -4,6 +4,7 @@
 #include <fcntl.h>
 #include <sys/file.h>
 #include <sys/stat.h>
+#include <signal.h>
 #define LEASE_GUARD_FD 6
 /* A read-only, zero-length regular file. The owner locks its open file
  * description before Binder transfer; dup/fork preserve that kernel lock. */
@@ -62,36 +63,53 @@ static int fence_lease_guard(void) {
 }
 /* Optional fixed bootstrap diagnostics. Never carries Python output or paths. */
 static int (*lease_guard_probe_stage)(int);
-#define GUARD_PROBE(n) do {if(lease_guard_probe_stage && lease_guard_probe_stage(n))return 0;}while(0)
+static volatile sig_atomic_t lease_guard_expected_nr=-1,lease_guard_kernel_trap,lease_guard_probe_index,lease_guard_trap_mask;
+static void lease_guard_sigsys(int signal,siginfo_t *info,void *context) {
+    (void)context;
+    /* Linux UAPI SYS_SECCOMP=1; some host libc headers omit the symbolic name. */
+    if(signal!=SIGSYS || !info || info->si_code!=1 || lease_guard_expected_nr<0
+            || info->si_syscall!=lease_guard_expected_nr || lease_guard_probe_index<1 || lease_guard_probe_index>10)_exit(123);
+    lease_guard_kernel_trap=1;lease_guard_trap_mask|=(sig_atomic_t)(1U<<lease_guard_probe_index);
+}
+/* Android's pre-existing seccomp TRAP outranks an application's ERRNO filter.
+ * The bootstrap-only signal handler must authenticate SYS_SECCOMP and this
+ * exact in-flight syscall; no exit status or arbitrary signal counts as proof. */
+static int lease_guard_denied(long nr,long a,long b,long c) {
+    lease_guard_kernel_trap=0;lease_guard_expected_nr=(sig_atomic_t)nr;
+    long result=syscall(nr,a,b,c);int error=errno;
+    lease_guard_expected_nr=-1;
+    return (result==-1 && error==EPERM) || lease_guard_kernel_trap==1;
+}
+#define GUARD_PROBE(n) do {lease_guard_probe_index=(n);if(lease_guard_probe_stage && lease_guard_probe_stage(n))return 0;}while(0)
 static int lease_guard_denials(void) {
     GUARD_PROBE(1);
-    if(syscall(__NR_close,LEASE_GUARD_FD)!=-1 || errno!=EPERM)return 0;
+    if(!lease_guard_denied(__NR_close,LEASE_GUARD_FD,0,0))return 0;
     GUARD_PROBE(2);
 #ifdef __NR_dup2
-    if(syscall(__NR_dup2,1,LEASE_GUARD_FD)!=-1 || errno!=EPERM)return 0;
+    if(!lease_guard_denied(__NR_dup2,1,LEASE_GUARD_FD,0))return 0;
 #endif
     GUARD_PROBE(3);
-    if(syscall(__NR_dup3,1,LEASE_GUARD_FD,0)!=-1 || errno!=EPERM)return 0;
+    if(!lease_guard_denied(__NR_dup3,1,LEASE_GUARD_FD,0))return 0;
     GUARD_PROBE(4);
     int copy=(int)syscall(__NR_fcntl,LEASE_GUARD_FD,F_DUPFD_CLOEXEC,7);if(copy<0)return 0;
     GUARD_PROBE(5);
-    int denied=syscall(__NR_flock,copy,LOCK_UN)==-1 && errno==EPERM;
+    int denied=lease_guard_denied(__NR_flock,copy,LOCK_UN,0);
     struct flock unlock={0};unlock.l_type=F_UNLCK;unlock.l_whence=SEEK_SET;
     GUARD_PROBE(6);
-    denied=denied && syscall(__NR_fcntl,copy,F_SETLK,&unlock)==-1 && errno==EPERM;
+    denied=denied && lease_guard_denied(__NR_fcntl,copy,F_SETLK,(long)&unlock);
     GUARD_PROBE(7);
-    denied=denied && syscall(__NR_fcntl,copy,F_SETLKW,&unlock)==-1 && errno==EPERM;
+    denied=denied && lease_guard_denied(__NR_fcntl,copy,F_SETLKW,(long)&unlock);
     GUARD_PROBE(8);
 #ifdef F_OFD_SETLK
-    denied=denied && syscall(__NR_fcntl,copy,F_OFD_SETLK,&unlock)==-1 && errno==EPERM;
-    denied=denied && syscall(__NR_fcntl,copy,F_OFD_SETLKW,&unlock)==-1 && errno==EPERM;
+    denied=denied && lease_guard_denied(__NR_fcntl,copy,F_OFD_SETLK,(long)&unlock);
+    denied=denied && lease_guard_denied(__NR_fcntl,copy,F_OFD_SETLKW,(long)&unlock);
 #endif
     GUARD_PROBE(9);
     syscall(__NR_close,copy);
     if(!denied)return 0;
     GUARD_PROBE(10);
 #ifdef __NR_close_range
-    if(syscall(__NR_close_range,0,~0U,0)!=-1 || errno!=EPERM)return 0;
+    if(!lease_guard_denied(__NR_close_range,0,~0U,0))return 0;
 #endif
     return 1;
 }

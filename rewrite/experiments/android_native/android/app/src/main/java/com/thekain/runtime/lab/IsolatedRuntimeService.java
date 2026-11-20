@@ -165,6 +165,11 @@ public final class IsolatedRuntimeService extends Service {
                         int tag=in.readInt();
                         if(tag==9 && !started) {
                             int next=in.readInt();if(next!=bootstrapStage+1 || next>6)throw new IOException("CHILD_PROTOCOL");
+                            if(next==3) {
+                                int traps=in.readInt(),allowed=(1<<1)|(1<<2)|(1<<3)|(1<<5)|(1<<6)|(1<<7)|(1<<8)|(1<<10);
+                                if(guardProbe!=10 || traps<0 || (traps&~allowed)!=0)throw new IOException("CHILD_PROTOCOL");
+                                android.util.Log.i("TheKaiNIsolated","GUARD_KERNEL_SIGSYS_MASK="+traps);
+                            }
                             bootstrapStage=next;stage="NATIVE_BOOTSTRAP_"+next;
                         }else if(tag==10 && bootstrapStage==2 && !limits && !started) {
                             int next=in.readInt();if(next!=guardProbe+1 || next>10)throw new IOException("CHILD_PROTOCOL");

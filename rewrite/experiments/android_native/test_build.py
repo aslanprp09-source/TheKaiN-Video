@@ -24,9 +24,10 @@ class NativeIntakeTests(unittest.TestCase):
 #include "runtime_child_fence.h"
 #include "lease_guard.h"
 #include <assert.h>
+#include <stdlib.h>
 #include <sys/wait.h>
 int main(int argc,char **argv) {
-    assert(argc==2);int fd=open(argv[1],O_CREAT|O_EXCL|O_RDONLY,0600);assert(fd>=0);
+    assert(argc==3);int mode=atoi(argv[2]);int fd=open(argv[1],O_CREAT|O_EXCL|O_RDONLY,0600);assert(fd>=0);
     assert(flock(fd,LOCK_EX|LOCK_NB)==0);assert(dup2(fd,LEASE_GUARD_FD)==LEASE_GUARD_FD);if(fd!=LEASE_GUARD_FD)close(fd);
     struct stat st;assert(fstat(LEASE_GUARD_FD,&st)==0);
     int probe=open(argv[1],O_RDONLY);assert(probe>=0);int ready[2];assert(pipe(ready)==0);
@@ -34,11 +35,30 @@ int main(int argc,char **argv) {
     if(!child) {
         close(probe);close(ready[0]);assert(setup_parent_lifetime(parent)==0);
         assert(lease_guard_identity(LEASE_GUARD_FD,st.st_dev,st.st_ino));
+        struct sigaction action={0};action.sa_sigaction=lease_guard_sigsys;action.sa_flags=SA_SIGINFO;sigemptyset(&action.sa_mask);
+        assert(sigaction(SIGSYS,&action,NULL)==0);
+        if(mode==1) {
+            struct sock_filter ops[]={
+                BPF_STMT(BPF_LD|BPF_W|BPF_ABS,offsetof(struct seccomp_data,nr)),
+                BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,__NR_dup2,0,1),
+                BPF_STMT(BPF_RET|BPF_K,SECCOMP_RET_TRAP),BPF_STMT(BPF_RET|BPF_K,SECCOMP_RET_ALLOW)
+            };
+            struct sock_fprog policy={sizeof(ops)/sizeof(ops[0]),ops};
+            assert(prctl(PR_SET_NO_NEW_PRIVS,1,0,0,0)==0 && prctl(PR_SET_SECCOMP,SECCOMP_MODE_FILTER,&policy)==0);
+        }
         RuntimeKernelLimits limits;assert(configure_runtime_limits(64ULL*1024*1024,5,&limits)==0);
         assert(limit_child_files()==0 && fence_lease_guard()==0 && fence_native_child()==0);
-        assert(lease_guard_denials());assert(write(ready[1],"P",1)==1);for(;;)pause();
+        if(mode==2) {lease_guard_expected_nr=__NR_dup2;lease_guard_probe_index=2;raise(SIGSYS);_exit(124);}
+        assert(lease_guard_denials());assert(lease_guard_trap_mask==(mode==1?(1<<2):0));
+        assert(write(ready[1],"P",1)==1);for(;;)pause();
     }
-    close(ready[1]);close(LEASE_GUARD_FD);char mark;assert(read(ready[0],&mark,1)==1 && mark=='P');close(ready[0]);
+    close(ready[1]);close(LEASE_GUARD_FD);char mark;ssize_t count=read(ready[0],&mark,1);close(ready[0]);
+    if(mode==2) {
+        assert(count==0);int status;assert(waitpid(child,&status,0)==child && WIFEXITED(status) && WEXITSTATUS(status)==123);
+        assert(flock(probe,LOCK_EX|LOCK_NB)==0);close(probe);assert(unlink(argv[1])==0);
+        puts("NON_KERNEL_SIGNAL_IS_NOT_DENIAL_PROOF_PASS");return 0;
+    }
+    assert(count==1 && mark=='P');
     assert(flock(probe,LOCK_EX|LOCK_NB)==-1 && (errno==EAGAIN || errno==EWOULDBLOCK));
     assert(kill(child,SIGKILL)==0);int status;assert(waitpid(child,&status,0)==child && WIFSIGNALED(status));
     assert(flock(probe,LOCK_EX|LOCK_NB)==0);close(probe);assert(unlink(argv[1])==0);
@@ -49,9 +69,11 @@ int main(int argc,char **argv) {
             root=Path(temp);(root/'test.c').write_text(source)
             subprocess.run(['gcc','-std=gnu11','-Wall','-Wextra','-Werror','-I',str(Path(__file__).parent),
                 str(root/'test.c'),'-o',str(root/'probe')],check=True,capture_output=True,timeout=30)
-            result=subprocess.run([str(root/'probe'),str(root/'guard')],capture_output=True,text=True,timeout=10)
-            self.assertEqual(result.returncode,0,result.stderr)
-            self.assertEqual(result.stdout.strip(),'IRREVERSIBLE_GUARD_RELEASE_ONLY_ON_EXIT_PASS')
+            for mode in (0,1,2):
+                with self.subTest(mode=mode):
+                    result=subprocess.run([str(root/'probe'),str(root/'guard'),str(mode)],capture_output=True,text=True,timeout=10)
+                    self.assertEqual(result.returncode,0,result.stderr)
+                    self.assertEqual(result.stdout.strip(),'NON_KERNEL_SIGNAL_IS_NOT_DENIAL_PROOF_PASS' if mode==2 else 'IRREVERSIBLE_GUARD_RELEASE_ONLY_ON_EXIT_PASS')
 
     @unittest.skipUnless(sys.platform=='linux','Hosted Android harness runs on Linux')
     def test_meminfo_sampler_survives_absent_worker_between_operations(self):
