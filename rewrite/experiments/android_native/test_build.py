@@ -91,6 +91,7 @@ static int child_check(pid_t parent) {
     RuntimeKernelLimits limits;assert(configure_runtime_limits(64ULL*1024*1024,5,&limits)==0);
     assert(limit_child_files()==0);assert(fence_native_child()==0);
     struct rlimit files;assert(getrlimit(RLIMIT_NOFILE,&files)==0 && files.rlim_cur==64 && files.rlim_max==64);
+    assert(syscall(__NR_memfd_create,"thekain-denied",0)==-1 && errno==EPERM);
     int tiny=1;assert(setsockopt(0,SOL_SOCKET,SO_SNDBUF,&tiny,sizeof(tiny))==-1 && errno==EPERM);
     char path[64];snprintf(path,sizeof(path),"/proc/%d/mem",parent);
     assert(open(path,O_RDONLY)==-1 && (errno==EACCES || errno==EPERM));

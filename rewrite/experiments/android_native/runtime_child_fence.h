@@ -47,6 +47,12 @@ static int fence_native_child(void) {
 #ifdef __NR_kcmp
         DENY_NR(__NR_kcmp),
 #endif
+        // Bootstrap memfds are created/sealed by the supervisor, never by Python.
+        // Otherwise write()+unmap could retain writable shmem outside sampled RSS/AS.
+        DENY_NR(__NR_memfd_create),
+#ifdef __NR_shmget
+        DENY_NR(__NR_shmget),DENY_NR(__NR_shmat),DENY_NR(__NR_shmctl),
+#endif
         DENY_NR(__NR_ptrace),DENY_NR(__NR_process_vm_readv),DENY_NR(__NR_process_vm_writev),
         // Do not permit credential/namespace changes that could clear PDEATHSIG.
         DENY_NR(__NR_setuid),DENY_NR(__NR_setgid),DENY_NR(__NR_setreuid),DENY_NR(__NR_setregid),

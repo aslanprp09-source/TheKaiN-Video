@@ -115,7 +115,10 @@ fails IPC. No Python-provided RSS/CPU value is trusted.
 
 RLIMIT_AS and RLIMIT_CPU are kernel-enforced. The native child also has a hard
 64-descriptor limit. Each socketpair endpoint requests 32KiB send/receive buffers
-(the kernel may double these); the child cannot increase them with setsockopt. RSS is a sampled retirement
+(the kernel may double these); the child cannot increase them with setsockopt.
+New memfd/System-V shared-memory creation is denied in the child: retaining
+writable shmem through descriptors could otherwise bypass sampled RSS/AS.
+Only the supervisor creates the bounded, sealed resource memfds before exec. RSS is a sampled retirement
 threshold, **not an instantaneous hard memory limit**; measured overshoot is
 retained. A separate 64MiB RSS case must show a real over-budget kernel sample
 and forced retirement, independently of Python MemoryError/RLIMIT_AS. Resource

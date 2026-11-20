@@ -47,6 +47,7 @@ static int hardened(pid_t parent) {
     char path[64];snprintf(path,sizeof(path),"/proc/%d/mem",parent);
     int fd=open(path,O_RDONLY|O_CLOEXEC);if(fd>=0) {close(fd);return 0;}
     if(errno!=EACCES && errno!=EPERM)return 0;
+    if(syscall(__NR_memfd_create,"thekain-denied",0)!=-1 || errno!=EPERM)return 0;
     int tiny=1;
     if(setsockopt(0,SOL_SOCKET,SO_SNDBUF,&tiny,sizeof(tiny))!=-1 || errno!=EPERM)return 0;
     struct rlimit files;if(getrlimit(RLIMIT_NOFILE,&files) || files.rlim_cur!=64 || files.rlim_max!=64)return 0;
