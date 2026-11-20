@@ -6,6 +6,7 @@
 #include <string.h>
 #include <sys/ptrace.h>
 #include "runtime_child_fence.h"
+#include "lease_guard.h"
 #include "sealed_code_hook.h"
 #include "memory_tls.h"
 /* Fixed binary socketpair protocol. No shell, argv URLs, JNI/ART, arbitrary Python or inherited Binder FDs. */
@@ -87,6 +88,10 @@ static int child_run(int argc,char **argv) {
     if(put32(0) || put32((uint32_t)getpid()) || put32((uint32_t)getuid()) || put32((uint32_t)getppid()))return 115;
     uint32_t size,seconds,ack,headroomMiB,fault;char json[16385];
     if(get32(&size) || size>16384 || !size || read_all(json,size) || get32(&headroomMiB) || get32(&seconds) || get32(&fault) || fault>1)return 102;
+    uint32_t high,low;uint64_t guardDevice,guardInode;
+    if(get32(&high) || get32(&low))return 120;guardDevice=((uint64_t)high<<32)|low;
+    if(get32(&high) || get32(&low))return 120;guardInode=((uint64_t)high<<32)|low;
+    if(!lease_guard_identity(LEASE_GUARD_FD,guardDevice,guardInode))return 120;
     json[size]=0;
     if(fault==1) {
         struct sigaction action;memset(&action,0,sizeof(action));action.sa_sigaction=credential_sigsys;
@@ -94,7 +99,8 @@ static int child_run(int argc,char **argv) {
         if(sigaction(SIGSYS,&action,NULL))return 119;
     }
     RuntimeKernelLimits limits;
-    if(limit_child_files() || configure_runtime_limits((uint64_t)headroomMiB*1024*1024,(int)seconds,&limits) || fence_native_child())return 103;
+    if(limit_child_files() || configure_runtime_limits((uint64_t)headroomMiB*1024*1024,(int)seconds,&limits) || fence_lease_guard() || fence_native_child())return 103;
+    if(!lease_guard_denials())return 121;
     int protection=hardened(parent);if(protection!=255)return 104;
     if(put32(3) || put64(limits.before) || put64(limits.address) || put64(limits.cpu) || put32((uint32_t)protection)
             || get32(&ack) || ack)return 105;

@@ -1,3 +1,5 @@
+For the subsequent explicit recovery experiment, see [LEASE_RECOVERY.md](LEASE_RECOVERY.md). Its Android/physical acceptance is separate from the PR42 baseline.
+
 # ARM64 and background QA — separate debug laboratory
 
 For the subsequent genuine isolated-UID backend, separate debug launcher and

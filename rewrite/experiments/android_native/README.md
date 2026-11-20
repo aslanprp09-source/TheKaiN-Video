@@ -1,3 +1,5 @@
+For the subsequent explicit recovery experiment, see [LEASE_RECOVERY.md](LEASE_RECOVERY.md). Its Android/physical acceptance is separate from the PR42 baseline.
+
 # Source-built Android JNI experiment
 
 Issue #5; isolated follow-up to PR31/PR33. This is a separate application

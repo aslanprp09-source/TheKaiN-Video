@@ -97,6 +97,9 @@ public final class IsolatedRuntimeService extends Service {
             if(!SupervisorNative.protect() || pythonLoaded() || !counters.ready(request.id,ProcessIdentity.selfStartTicks(),true))throw new IOException("SUPERVISOR_PROTECTION");
             stage="RESOURCE_DESCRIPTOR_METADATA";
             KernelDescriptors.readOnlyRegular(input.resources,160L*1024*1024);
+            KernelDescriptors.readOnlyRegular(input.guard,0);
+            StructStat guardInfo=Os.fstat(input.guard.getFileDescriptor());
+            if(guardInfo.st_dev!=input.guardDevice || guardInfo.st_ino!=input.guardInode || guardInfo.st_nlink!=1)throw new IOException("LEASE_GUARD_IDENTITY");
             KernelDescriptors.readOnlyRegular(input.certificate,16384);KernelDescriptors.readOnlyRegular(input.key,16384);
             if(Os.fstat(input.resources.getFileDescriptor()).st_size!=input.bytes)throw new IOException("RESOURCE_SIZE");
             stage="RESOURCE_DIGEST";
@@ -118,7 +121,7 @@ public final class IsolatedRuntimeService extends Service {
                 catch(ErrnoException expected) {if(expected.errno!=OsConstants.EPERM)throw expected;}
                 if(retiring)throw new IOException("RETIRED_BEFORE_EXEC");
                 stage="EXEC_CHILD";
-                int[] spawned=SupervisorNative.spawn(getApplicationInfo().nativeLibraryDir,zip.getFd(),cert.getFd(),key.getFd());
+                int[] spawned=SupervisorNative.spawn(getApplicationInfo().nativeLibraryDir,zip.getFd(),cert.getFd(),key.getFd(),input.guard.getFd());
                 pid=spawned[0];
                 try(ParcelFileDescriptor channel=ParcelFileDescriptor.adoptFd(spawned[1])) {
                     DataInputStream in=new DataInputStream(new FileInputStream(channel.getFileDescriptor()));
@@ -156,7 +159,7 @@ public final class IsolatedRuntimeService extends Service {
                     byte[] encoded=json.toString().getBytes(java.nio.charset.StandardCharsets.US_ASCII);
                     out.writeInt(encoded.length);out.write(encoded);out.writeInt((int)(request.virtualHeadroom/1024/1024));
                     out.writeInt((int)Math.max(1,(request.deadline-SystemClock.elapsedRealtime()+999)/1000)+1);
-                    out.writeInt(input.mode==IsolatedInput.PLATFORM_CREDENTIAL?1:0);out.flush();stage="NATIVE_PROTOCOL";
+                    out.writeInt(input.mode==IsolatedInput.PLATFORM_CREDENTIAL?1:0);out.writeLong(input.guardDevice);out.writeLong(input.guardInode);out.flush();stage="NATIVE_PROTOCOL";
                     int messages=0,fetches=0;boolean limits=false,started=false;
                     while(!retiring && messages++<32) {
                         int tag=in.readInt();
@@ -165,7 +168,7 @@ public final class IsolatedRuntimeService extends Service {
                         }else if(tag==3 && !limits && !started) {
                             long before=in.readLong(),address=in.readLong(),cpu=in.readLong();int mask=in.readInt();
                             if(before<=0 || address!=before+request.virtualHeadroom || cpu<=0 || cpu>64 || mask!=255)throw new IOException("CHILD_FENCE");
-                            protection=mask;limits=true;owner.limits(request.id,before,address,cpu,mask);out.writeInt(0);out.flush();
+                            protection=mask;limits=true;if(!owner.limits(request.id,before,address,cpu,mask))throw new IOException("OWNER_GUARD_ARM");out.writeInt(0);out.flush();
                         }else if(tag==8 && limits && !started && input.mode==IsolatedInput.PLATFORM_CREDENTIAL) {
                             int proof=in.readInt();if(proof!=1 && proof!=2)throw new IOException("CHILD_PROTOCOL");
                             owner.credentialDenied(request.id,proof);completed=true;

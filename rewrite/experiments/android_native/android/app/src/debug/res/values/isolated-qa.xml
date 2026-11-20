@@ -12,4 +12,8 @@
     <item name="uid_hang_button" type="id"/>
     <item name="uid_cancel_button" type="id"/>
     <item name="uid_export_button" type="id"/>
+    <string name="uid_recovery_test">Сбой наблюдателя и восстановление</string>
+    <string name="uid_recover">Восстановить после перезапуска</string>
+    <item name="uid_recovery_test_button" type="id"/>
+    <item name="uid_recover_button" type="id"/>
 </resources>
