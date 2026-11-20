@@ -1,225 +1,192 @@
-# Isolated Android UID experiment — issue #37
+# Isolated Android UID laboratory — issue #37
 
-This is a second backend inside the separate lab APK, after PR35/36. The original
-shared-UID backend and all 23 native + 4 lifecycle tests remain as a baseline.
-No product UI, public-site/YouTube adapter, signing, release or QA gate is changed.
+This backend belongs only to the separate runtime lab APK, after PR35/36.
+The original shared-UID backend, its 23 native + 4 lifecycle tests, and all 41
+product API35 tests remain unchanged. No product UI/site adapter, YouTube,
+release signing, publication, branch protection or existing QA gate is changed.
 `production_ready=false`, `automatic_publication=false`.
 
-## Boundary and capability transport
+## Architecture and trust boundary
 
-`IsolatedRuntimeService` is explicit, non-exported, `isolatedProcess=true`, and
-has its own Android-assigned UID. The main process never loads Python/JNI.
-The service accepts only the installed application's UID; typed AIDL replaces
-Bundles, arbitrary Python strings, paths and user-selected sources. Operations
-retain owner-generated UUID capabilities, monotonic deadlines and one process
-per operation. A different PID/UID, a fixed private Service binding, actual
-Binder calling credentials and kernel identity establish the peer. Isolated
-UIDs are ephemeral, not application permission/storage identities.
+There are **two UIDs and three PIDs**:
 
-The owner reads every Python/data asset directly from the installed APK and
-checks its pinned inventory size/SHA-256. It creates a bounded, uncompressed ZIP
-with collision/path rejection, opens it read-only and unlinks its private name.
-Only that FD, its size/digest and two read-only ephemeral owned TLS fixture files
-cross IPC. No writable FD, directory capability, app data path or release secret
-is granted. The isolated bootstrap rechecks size/digest before Python starts.
-Reopening `/proc/self/fd/N` still checks the source inode's DAC permissions:
-therefore the isolated bootstrap copies bytes from the received FD into its own
-anonymous memfd and irreversibly seals WRITE/GROW/SHRINK/SEAL. CPython zipimport
-reads this sealed FD; executable stdlib extensions remain in Android's installed
-native-library directory. There is no writable extracted Python tree in the UID.
-No new third-party dependency/version/license is introduced; README pins remain.
+| Role | UID | Executes Python | Responsibility |
+| --- | --- | --- | --- |
+| Main owner | Normal application UID | Never | Verified resources, bounded owned HTTPS, AIDL capability, global deadline |
+| Private isolated Service | Android-assigned isolated UID | Never | Non-dumpable trusted Java/libc-only supervisor, kernel observation, forced kill/reap |
+| Native exec child | Same isolated UID as Service | Yes, once | Fixed operation in the pinned CPython runtime; no ART/JNI/Binder handles |
 
-The UID itself lacks INTERNET and cannot open/read/write the owner's canary.
-These OS denials are tested before the additional Python socket seccomp fence.
-Python also attempts owner-file access and direct sockets. This is an Android
-UID/SELinux sandbox, not a claim against kernel/ART/native-library exploits.
-The APK/native libraries and OS-readable files are not confidential to the UID.
+`IsolatedRuntimeService` is explicit, non-exported and `isolatedProcess=true`.
+Only the installed package UID may submit/retire work. Owner-generated UUIDs,
+actual Binder credentials, typed AIDL and one Service lifetime per operation
+bind the channel. It never receives arbitrary Python, directory capabilities,
+user paths, cookies, credentials or public-site URLs.
 
-HTTPS runs in the trusted owner through a per-operation typed capability broker:
-numeric loopback, only the owned fixture origin/port, HTTPS, fixed GET/HEAD,
-private test CA, no proxies/cookies/user headers or public URLs. Request/body/
-aggregate limits remain 12 / 512KiB / 2MiB, output <=64KiB. One fetch at a time;
-revoked, late, wrong-capability, out-of-origin and forbidden-method requests are
-rejected before network budget is consumed. No media transfer is authorized.
-Retirement explicitly cancels the owner-side Future and disconnects active TLS,
-then observes the IO task and broker callback actually finish. Killing Python
-alone is insufficient now that network IO lives in the owner. A blocked owned
-HTTPS response/cancel/fresh-analysis regression enforces this cleanup boundary.
+The Service loads only the repository's libc-only `libthekain_supervisor.so`.
+It sets and verifies `PR_SET_DUMPABLE=0` before spawning. A minimal fork/exec
+launches the repository's `libthekain_child.so` from Android's installed native
+library directory. Only async-signal-safe operations occur between ART fork and
+exec; Python never runs in a forked ART address space. The executable and shared
+libraries are source-built with the existing pinned NDK, both ABI/ELF/16KiB
+checks, same-run APK hashes and receipt verification. No new third-party component,
+downloaded binary, dependency version or license is introduced.
 
-## Monitoring and termination without owner privileges
+Before exec, all inherited descriptors are closed except the fixed socketpair,
+three verified sealed resources and `/dev/null`. Binder and owner capabilities
+are not inherited. Arguments contain only the installed library directory and
+supervisor PID; URLs/JSON travel through a bounded fixed binary protocol.
+The native child installs its fence before Python initialization, with no ART
+threads that could remain unfenced. It cannot create sockets/descendants, exec,
+ptrace, use process_vm or io_uring, change another process's limits/scheduling,
+signal the supervisor/process group, or clear parent-death protection.
+`PR_SET_PDEATHSIG=SIGKILL` plus a parent-identity race check handles parent loss.
+Self-signals remain available for the real native-abort test.
 
-The shared-UID `/proc/PID` and direct `killProcess` design cannot be reused across
-UIDs. Android SELinux additionally prohibits passing the isolated task's proc
-FDs directly into `untrusted_app`: CI166 API26 records an actual enforcing AVC
-`untrusted_app -> isolated_app:file read` for `/proc/<worker>/stat`. Binder
-reported DeadObjectException although the owner was alive. Retaining callbacks
-cannot fix that policy boundary; no policy/permissions are relaxed.
+The Service and child **share** their isolated UID/SELinux category. They are
+not two independent UID sandboxes. Protection of the trusted supervisor also
+requires non-dumpability, the irreversible child-wide seccomp fence, no inherited
+Binder/control descriptors, and bounded protocol parsing. Before Python, native
+probes require actual kernel denials for supervisor memory, signals/group signal,
+ptrace, prlimit, clearing PDEATHSIG, clone and exec. Incomplete proof aborts before
+Python. The owner authenticates the Service PID, not worker-supplied counters.
+This model excludes compromise of Android/kernel/ART or the pinned native
+bootstrap itself; no claim of a complete kernel-exploit sandbox is made.
 
-A third process, `ResourceObserverService`, is non-exported and also
-`isolatedProcess=true`: a **different Linux UID** from both owner and Python,
-but Android's same `isolated_app` SELinux domain. It executes only pinned Java,
-never Python/JNI. Owner-only `IResourceObserver` prepares it; the worker receives
-only a single-use `IKernelSink`, with no monitor configuration/stop operation.
-Actual Binder credentials and the operation nonce authenticate both peers; the
-owner fixes the expected worker PID/UID before descriptor attachment. Before
-Python, the worker opens read-only `/proc/self/stat` and `status` and passes them
-directly to the observer, never the owner. The observer verifies exact kernel
-`/proc/<Binder PID>/{stat,status}` FD links, regular-file type, kernel fdinfo
-read-only flags, UID/PID/start ticks and reads the kernel seq-files itself.
-The worker cannot replace records with a pipe, memfd or supplied counters.
-These handles name the original task, not a future process that reuses its PID.
-The observer cannot read owner storage or use the owner's network permission;
-its separate UID prevents worker signals/ptrace under Linux DAC. No Python
-resource or HTTPS capability is given to the observer. JNI's exact-process guard
-is deliberately exercised there, and native-map absence is checked.
+## Why direct proc-FD transfer was rejected
 
-A final, separate observer-loss test deliberately removes the Android binding
-while Python spins. It requires both actual OS retirements and a responsive main,
-but refuses to claim kernel death or reuse without the lost independent proof.
-The durable refusal survives construction of a replacement supervisor; no test
-reset erases that uncertainty. It runs after the complete successful suite.
+CI166 (44537400758, f96bad1) records an enforcing AVC: `untrusted_app` cannot
+read an `isolated_app` task's `/proc/<PID>/stat`, even through a passed FD.
+Binder returned DeadObjectException while the owner was alive. Callback lifetime
+changes cannot resolve that policy restriction.
 
-Only typed kernel snapshots cross to the owner. They carry monotonic sequence,
-measurement time, task identity and observer RSS/CPU; actual sender credentials
-must match the independently bound observer. Missing/error records fail closed;
-no self-reported Python RSS fallback. A stale observer (>1s) fails IPC; transient
-exit-record errors have only the existing 120ms grace, with no OK result allowed.
-Synchronous observer setup runs outside the deadline thread and owner locks.
-CPU uses actual SC_CLK_TCK. RSS is sampled every 40ms, not an instantaneous hard
-memory cap; overshoot is retained. RLIMIT_AS/CPU remain additional kernel limits.
-The ZIP input byte count is recorded separately: owner file cache and isolated
-sealed-memfd backing pages are not fully accounted by process RSS. This bounded
-extra storage must be considered before choosing any physical-device budget.
+CI167 (44541028902, 6770009) and CI169 (44542347147, c3ab687) tried a third,
+Java-only isolated UID. API29 records another enforcing AVC: the two
+`isolated_app` processes have **different MCS categories**, so they cannot exchange
+those proc FDs either. All four UID matrices failed; these are implementation/
+platform-contract failures, not infrastructure passes. That unaccepted helper
+and direct-JNI path were removed. No SELinux relaxation, root, hidden API,
+self-reported Python RSS or fake success is used as a substitute.
 
-Cancellation/deadline revoke the broker, remove the final BIND_AUTO_CREATE and
-stop the private service. Android's isolated-process lifecycle performs the
-forced kill. No cross-UID signal permission, hidden API, root or relaxed SELinux
-is used. The worker deliberately has **no cooperative onDestroy self-kill**:
-tests block its main thread while Python spins, then require OS termination.
-The observer remains bound until original-kernel-task death is confirmed; the
-owner additionally requires worker Binder death and ServiceRecord removal.
-It then retires the Java observer and requires its rooted Binder death and
-ServiceRecord removal, plus ended owner transport/configuration callbacks,
-before releasing the lease. Losing the observer before kernel death durably poisons the
-lease rather than trusting the Python worker or pretending cleanup. Failure within 2.5s gives CLEANUP_FAILED
-and poisons the lease; uncertain state never authorizes a fresh operation.
-Owner Binder death also makes the isolated worker self-terminate as a fallback.
-The OS mechanism must be proven on each platform; AOSP source is not a timing SLA.
-Deadline supervision also requires Android to schedule the owner. Cached-process
-freezing/deep Doze can delay the Handler until wake; no real-time background SLA
-is claimed. These cases remain separate open tasks, not passed by foreground CI.
+The current native exec design keeps independent observation in a protected
+parent process within the same isolated UID/category. Its actual Android matrix
+is still **NOT_RUN** until a fresh source build and every target passes.
 
-An AtomicFile reservation survives owner death. Losing the owner also loses its
-authenticated observer channel; ordinary app process listings hide other UIDs
-and absence of a ServiceRecord alone cannot prove task death. A new owner therefore
-fails closed instead of resetting its static lease and silently proceeding. A
-strictly increased public Android BOOT_COUNT permits clearance after a real OS
-reboot, when no old task can remain. Corrupt/unreadable state stays blocked.
-Automatic recovery after owner death without reboot is **not implemented**;
-same-owner worker crash/cancel/deadline recovery is tested. This remains a lab
-limitation before product integration, not a claim that old processes are dead.
+## Verified resources and HTTPS
 
-Public AOSP15 references: [OomAdjuster](https://github.com/aosp-mirror/platform_frameworks_base/blob/android15-release/services/core/java/com/android/server/am/OomAdjuster.java)
-(isolated process without running services),
-[ActiveServices](https://github.com/aosp-mirror/platform_frameworks_base/blob/android15-release/services/core/java/com/android/server/am/ActiveServices.java)
-(service removal before teardown callback),
-[ActivityManagerService](https://github.com/aosp-mirror/platform_frameworks_base/blob/android15-release/services/core/java/com/android/server/am/ActivityManagerService.java)
-(cross-UID getProcessMemoryInfo restrictions). No privileged API is assumed.
+The main reads Python resources from installed APK assets and verifies every
+pinned inventory size/SHA-256. A collision/path-checked stored ZIP is bounded to
+150MiB input / 160MiB archive, 32MiB per file. Its private name is unlinked after
+opening read-only. Only that FD and two <=16KiB ephemeral owned TLS fixture files
+cross AIDL. These fixture credentials are unrelated to release-signing keys.
 
-## Verification protocol and current status
+The isolated supervisor rechecks read-only flags, size and digest, then copies
+the resources to anonymous memfds and irreversibly seals WRITE/GROW/SHRINK/SEAL.
+The child inherits only those sealed copies. CPython zipimport reads fd3;
+installed stdlib extensions come only from the pinned native directory. There is
+no writable extracted Python tree. The isolated UID itself lacks INTERNET and
+cannot read/write the owner's private canary; Java OS-denial checks occur before
+the additional child filter, and Python repeats the file/network negative tests.
 
-The existing default-off read-only native CI builds both ABIs from pinned source,
-runs original 27 tests and adds 24 isolated/backend/SDK-free UI/regression tests on API26/29/35 (4KiB) and
-API36 official rev7 (16KiB). Negative tests cover owner file read/write, missing
-network permission, actual OS socket denial, read-only/sealed resources, forged
-proc FDs, tampered resource hash, malformed reply allocation, invalid capability/
-method/origin, output/request/body limits, wrong CA, redirection, stale result,
-busy clients, close, native crash, memory fault and blocked-main cancellation/
-deadline with clean real-HTTPS restart. Independent external-app binding checks
-cover all three services. Kernel CPU/RSS, independent shell meminfo and cleanup
-latencies are retained in `isolated-{evidence.jsonl,resource-report.json}`.
+HTTPS stays in the trusted main owner: the owned numeric-loopback origin/port,
+HTTPS only, fixed GET/HEAD, private test CA, no proxy/cookies/user headers.
+Limits remain 12 requests, 512KiB per response, 2MiB aggregate; Python output
+<=64KiB. No media download is enabled. Redirect/method/origin/CA/capability and
+late-result checks remain mandatory. The native channel also bounds message
+count, URL/response/output lengths and state transitions before allocation.
+A real oversized child-frame test must fail IPC and permit a fresh owned analysis.
 
-Implementation-stage status: local JNI compilation x86_64/ARM64 PASS; Android
-isolated-UID matrix acceptance is **BLOCKED** until a fresh full matrix passes.
-New physical ARM64 isolated-UID execution is **NOT_RUN**. PR36's Samsung same-UID reports are historical,
-not evidence of this new boundary. Compile success is not execution.
+## Resources, retirement and recovery
 
-Initial CI154 (44522260214, source 0e74795) built both native ABIs from source,
-but lab Gradle dependency resolution failed with Maven Central HTTP429 before
-APK assembly/device tests. Product API35/29 emulator preparation separately
-failed with Ubuntu mirror timeout/HTTP503 (zero tests). Product Android JVM/Lint,
-legacy API26 and 111 host tests passed. PR CI155 separately exposed an existing
-Linux procfs test-observer race: ESRCH at read after task exit; ENOENT alone was
-caught. The test now recognizes both kernel death errors, with a regression that
-still rejects permission errors/empty records. This is separate from open
-Windows callback race #39. Infra reruns are not code or UI-stability fixes.
+The trusted Service opens the native child's genuine read-only proc descriptors,
+checks PID/UID/parent/start ticks, exact FD paths, regular-file type and kernel
+fdinfo flags. It reads kernel seq-files in a thread outside Python every 40ms.
+Only authenticated, sequenced, timestamped typed snapshots reach the owner.
+Service RSS/CPU and absence of libpython mappings are recorded separately.
+CPU uses actual SC_CLK_TCK. Missing/stale observation fails closed; unknown exit
+records have at most 120ms grace and cannot authorize OK. A >1s stale observer
+fails IPC. No Python-provided RSS/CPU value is trusted.
 
-CI160 (44527432744, source 8222b62) completed both-ABI source/APK/Lint/receipt
-verification. Original 27 tests passed on API26/29/35; API36 exposed the existing
-manual-SIGKILL classification race (expected WORKER_DIED, got IPC_ERROR). Proc
-records can become unavailable before death notification; both supervisors now
-allow at most 120ms of unknown state before failing IPC, while rejecting OK
-results during that interval. Actual kernel/Binder death still establishes death;
-no missing/permission-denied record is silently treated as a dead process.
-Three repeated validated kills with real-HTTPS recovery supplement the unchanged
-strict lifecycle assertion. This is a source fix, not a claimed rerun cure.
+RLIMIT_AS and RLIMIT_CPU are kernel-enforced. RSS is a sampled retirement
+threshold, **not an instantaneous hard memory limit**; measured overshoot is
+retained. A separate 64MiB RSS case must show a real over-budget kernel sample
+and forced retirement, independently of Python MemoryError/RLIMIT_AS. Resource
+ZIP bytes and sealed-memfd/file-cache storage are recorded separately; process
+RSS is not the complete three-process memory footprint. Physical-device budgets
+must be measured rather than copied into production.
 
-The first isolated runs on API26/29/35 failed before Python: Android names the
-process `:isolated_python:<full Service component>`, whereas the initial guard
-expected the manifest name alone. The guard and independent sampler now handle
-only those two exact names and still require an isolated UID. No prefix match or
-main-process fallback is permitted. Fresh full-matrix proof remains required.
+Cancel/deadline first revoke owner HTTPS. Typed one-way AIDL asks the trusted
+Service's separate supervisor thread to SIGKILL its recorded native child;
+Python and a deliberately blocked Service main Looper cannot prevent this.
+The Service validates/reaps only its one spawned child. It retains kernel
+handles until actual original-task death. Then the main removes the Service
+binding and requires its rooted Binder death and ServiceRecord removal, ended
+owner network tasks/callbacks and closed resources before releasing the lease.
+Unconfirmed cleanup within 2.5s yields CLEANUP_FAILED and durably poisons reuse.
 
-CI163 (44531679887, source 9cf04e6) still failed before Python during initial
-IPC (`DeadObjectException` in the worker handshake). It is not an infrastructure
-failure or accepted UID proof. Owner and worker now retain their callback Binder
-endpoints explicitly for the whole lease. Connected-but-unready IPC has a 3s
-bound, within the global deadline, and emits fixed stage/stack-location diagnostics
-without URLs/key bytes. The full matrix remains blocked until proven successful.
-An upfront real isolated JNI/OpenSSL test exposes this boundary early; successful
-runs must subsequently execute all original 27 and additional 24 tests. CI166 (44537400758, source f96bad1) confirmed the actual cross-domain proc FD
-SELinux denial. The three-UID observer design above addresses that denial; its
-fresh runtime matrix is still pending. Proc FD authentication and isolated UID
-checks are never replaced with self-reported RSS. Independent shell meminfo for
-both Python worker and Java observer, observer CPU/RSS and two-process retirement
-are mandatory evidence; compilation alone does not prove the design works.
+A final separate fault test removes the supervisor binding while Python spins.
+The main must stay responsive and refuse to claim missing kernel-death proof or
+start another operation. Independent shell evidence must confirm the native
+PDEATHSIG fallback actually ended the child. That outside evidence does **not**
+automatically clear the app's poisoned lease. The test runs last and never erases
+its uncertainty with a test-only reset.
 
-Native Windows CI161 ran 114 collected tests successfully (16 Linux-only skips),
-then the unchanged packaging guard rejected generated bytecode in two newly
-imported directories. Scoped `__pycache__/` ignores match existing repository
-practice; tracked/untracked source and workflow dirtiness are still rejected.
-The file-entrypoint package-path regression is tested from a foreign directory
-under Python `-I`, using real package-based validator tests. Callback race #39
-remains open independently. Final exact-HEAD results belong in the PR evidence.
+An AtomicFile reservation survives owner loss. A replacement owner/supervisor
+fails closed until a real OS reboot increases public BOOT_COUNT. Automatic
+recovery after losing the trusted observer/owner is not implemented. Recovery
+after native child crash/cancel/deadline/IPC/memory failures is mandatory while
+the observer remains healthy. Android freezing/Doze may delay scheduling: no
+real-time deadline or prolonged-background guarantee is claimed.
 
-## SDK-free ARM64 procedure
+## Validation and current status
 
-The debug-only **TheKaiN UID QA** launcher is separate from the retained
-shared-UID QA launcher. It uses a separate owned HTTPS fixture directory so
-certificate files do not interfere. Run only one lab at a time. No SDK or ADB
-is required: press the UID/JNI probe, then the fixed safety/recovery suite,
-then save `TheKaiN-isolated-uid-qa-report.json` through Android's document picker.
-The suite includes actual probe/OpenSSL, Python file/network denials, blocked
-main cancellation/deadline, native crash, sampled memory limit, tampered inputs
-and five fresh own-HTTPS analyses. Manual hang/cancel and Activity recreation
-are also available. It accepts no external-intent operations/URLs/code.
+The lab supports only the pinned 64-bit x86_64/ARM64 ABIs; no 32-bit runtime claim is made.
+Mandatory native targets: API26/29/35 at 4KiB and official API36 ps16k rev7 at
+**actual 16KiB**, with both x86_64 and ARM64 source builds. An upfront real
+UID native interpreter/OpenSSL probe exposes bootstrap failures
+early; success must still be followed by all original 27 tests, **26 additional**
+backend/UI tests, external-app bind rejection and the separate observer-loss test.
+Independent shell meminfo must include both native child and trusted Service.
+The resource journal/report includes identities, kernel CPU/RSS, overshoot,
+resource byte counts, hard-limit values and cleanup/cancellation latency.
+
+Local native helper compilation/ELF16KiB validation for both ABIs: PASS.
+Local AIDL/APK/app+probe Lint: PASS on the prior compile; final changes rechecked
+before commit. Linux kernel tests exercise actual non-dumpability, seccomp
+foreign-process denials and parent-death SIGKILL; Android is still mandatory.
+The new native exec runtime matrix, new physical ARM64 boundary, fresh independent
+review and product integration are **NOT_RUN / NOT_ACCEPTED** pending evidence.
+Final exact-HEAD results belong in the PR, never inferred from compilation.
+
+Historical green product/unsigned CI162/164 retained all 41 API35 tests, JVM/Lint,
+policy, host tests and native Windows packaging checks. CI154/157 Maven failures,
+Ubuntu mirror failures, and CI168's API26 runtime-identity precondition failure
+before Gradle/tests are recorded separately as infrastructure/precondition
+failures; none is a passed runtime test. The ESRCH proc-observer and legacy
+exit-classification fixes retain strict assertions. Known Windows callback race
+#39 remains open even when CI happens to pass.
+
+## SDK-free Samsung protocol and separate gates
+
+The debug-only **TheKaiN UID QA** launcher remains separate from the shared-UID
+QA launcher. Its private HTTPS fixture directory prevents certificate collisions.
+Press the probe, then the fixed **14-case** suite and export
+`TheKaiN-isolated-uid-qa-report.json` through Android's document picker.
+It includes native ARM64/OpenSSL, UID denials, blocked-main cancel/deadline,
+crash, AS and actual low-RSS retirement, tampered resources/proc descriptors,
+and five fresh owned analyses. Manual hang/cancel and Activity recreation remain.
+External intents cannot supply operations/URLs/Python. JSON is bounded to 256KiB;
+source/APK/certificate/device and both process identities accompany results.
+It is editable operator evidence requiring independent review, not attestation.
+PR36's successful Samsung reports establish only the old shared-UID backend.
 
 Lab versionCode=3 is distinct from product APK89 versionCode=3. CI debug signing
-is not release signing: compare the exact same-run source/APK/certificate receipt.
-A different CI debug certificate can require exporting prior evidence and
-uninstalling **only the separate runtime lab**, not the user's downloader.
-No actual installation or physical execution is claimed by providing a harness.
-Reports are operator evidence requiring review, never cryptographic device
-attestation or a change to the APK89 gate. Export includes device identity;
-review before sharing. No certificates' private bytes, URLs or Python are exported.
+is not protected release signing. A different debug certificate can require
+exporting old evidence and reinstalling **only the separate runtime lab**; never
+remove the user's downloader. No physical install/execution is claimed here.
 
-Reproduce with the README source-build/assemble commands and default-off dispatch
-`native_runtime_lab=true`, build/sign/verify flags false on this task branch.
-All 41 product API35 tests, Windows/JVM/Lint and CI-policy remain mandatory.
-Record infrastructure failures separately; reruns alone are not code fixes.
-
-Separate OPEN follow-ups: [APK89 independent review #38](https://github.com/aslanprp09-source/TheKaiN-Video/issues/38),
+Separate OPEN tasks remain [APK89 review #38](https://github.com/aslanprp09-source/TheKaiN-Video/issues/38),
 [Windows callback race #39](https://github.com/aslanprp09-source/TheKaiN-Video/issues/39),
 [prolonged background #40](https://github.com/aslanprp09-source/TheKaiN-Video/issues/40),
-[deep Doze #41](https://github.com/aslanprp09-source/TheKaiN-Video/issues/41).
-No production memory budget, deep-Doze guarantee or release eligibility follows.
+and [deep Doze #41](https://github.com/aslanprp09-source/TheKaiN-Video/issues/41).
+Request fresh KaiN1One review only after all final-HEAD CI passes. Do not merge
+before approval. Main, protection, signing keys, releases and QA gates stay intact.

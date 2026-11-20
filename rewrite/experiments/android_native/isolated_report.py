@@ -19,12 +19,14 @@ def validate(rows):
             assert row['worker_pid'] != row['parent_pid'] and row['worker_uid'] != row['parent_uid']
             assert 90000 <= row['worker_uid'] % 100000 < 100000, 'Not an Android isolated UID'
             assert row['observer_pid'] not in (row['parent_pid'],row['worker_pid']) and row['observer_pid']>0
-            assert row['observer_uid'] not in (row['parent_uid'],row['worker_uid'])
+            assert row['observer_uid'] == row['worker_uid'] and row['observer_uid'] != row['parent_uid']
+            assert row['observer_non_dumpable'] is True
             assert 90000 <= row['observer_uid'] % 100000 < 100000
             assert row['observer_start_ticks']>0 and row['observer_peak_rss_bytes']>0 and row['observer_cpu_ticks']>0
             assert row['observer_python_loaded'] is False, 'Python must never run in its resource observer'
             assert row['samples'] > 0 and row['peak_rss_bytes'] > 0 and row['start_ticks'] > 0
         if row['python_entered']:
+            assert row['child_protection']==255, 'Missing irreversible native-child supervisor protections'
             assert 0 < row['resource_input_bytes'] <= 160*1024*1024
             assert row['rlimit_as'] == row['virtual_before']+256*1024*1024 and 0 < row['rlimit_cpu'] <= 64
             assert row['cpu_ticks'] > 0 and row['observed_cpu_ms'] > 0
@@ -32,11 +34,12 @@ def validate(rows):
             assert row['security_denials'] == (255 if row['mode'] == 1 else 31)
         if row['mode'] in (3,4):
             assert row['python_entered'] is False, 'Unverified resource/proc FD reached Python'
+    assert any(r['error']==7 and r['rss_limit']==64*1024*1024 and r['peak_rss_bytes']>r['rss_limit'] for r in rows), 'No actual independent resident-limit retirement'
     blocked=[r for r in rows if r['mode']==2]
     assert {r['error'] for r in blocked} >= {1,2}, 'Blocked-main forced reap not demonstrated'
     assert all(r['python_entered'] for r in blocked)
     return {
-        'schema':1,'boundary':'three distinct UIDs; Java-only isolated kernel observer; Android-mediated reap',
+        'schema':1,'boundary':'two UIDs / three PIDs; non-dumpable isolated supervisor; fenced native exec child',
         'operations':len(rows),'worker_instances':len({r['instance'] for r in rows if r['worker_pid']}),
         'max_retire_to_exit_ms':max(r['retire_to_exit_ms'] for r in rows),
         'max_cancel_to_exit_ms':max(r['cancel_to_exit_ms'] for r in rows),
@@ -58,12 +61,12 @@ def main():
     parser.add_argument('--api',type=int,required=True);parser.add_argument('--pages',type=int,required=True)
     args=parser.parse_args();folder=args.evidence
     text=(folder/'isolated-instrumentation.txt').read_text()
-    assert re.search(r'^OK \(24 tests\)\s*$',text,re.M), text[-12000:]
+    assert re.search(r'^OK \(26 tests\)\s*$',text,re.M), text[-12000:]
     assert not any(s in text for s in ('FAILURES!!!','shortMsg=','INSTRUMENTATION_FAILED'))
     assert int((folder/'api.txt').read_text())==args.api
     assert int((folder/'page-size.txt').read_text())==args.pages
     rows=[json.loads(line) for line in (folder/'isolated-evidence.jsonl').read_text().splitlines()]
-    report=validate(rows);report.update(api=args.api,actual_page_size=args.pages,tests=24)
+    report=validate(rows);report.update(api=args.api,actual_page_size=args.pages,tests=26)
     snapshots=sum('MEMINFO in pid' in p.read_text(errors='replace') for p in folder.glob('meminfo-isolated-*.txt'))
     assert snapshots>0,'No independent isolated-worker dumpsys meminfo snapshot'
     report['independent_meminfo_snapshots']=snapshots

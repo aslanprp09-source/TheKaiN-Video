@@ -31,7 +31,7 @@ public final class IsolatedRuntimeTest extends RuntimeTestSupport {
         assertTrue(out.workerPid>0);assertNotEquals(parentPid,out.workerPid);
         assertNotEquals(android.os.Process.myUid(),out.workerUid);assertTrue(out.workerUid%100000>=90000);
         assertTrue(out.observerPid>0);assertNotEquals(parentPid,out.observerPid);assertNotEquals(out.workerPid,out.observerPid);
-        assertNotEquals(android.os.Process.myUid(),out.observerUid);assertNotEquals(out.workerUid,out.observerUid);
+        assertNotEquals(android.os.Process.myUid(),out.observerUid);assertEquals(out.workerUid,out.observerUid);assertTrue(out.observerNonDumpable);assertEquals(255,out.childProtection);
         assertTrue(out.observerUid%100000>=90000);assertTrue(out.observerStartTicks>0);
         assertTrue(out.observerPeakRssBytes>0);assertTrue(out.observerCpuTicks>0);assertFalse(out.observerPythonLoaded);
         assertTrue(out.startTicks>0);assertTrue(out.samples>0);assertTrue(out.peakRssBytes>0);
@@ -97,6 +97,17 @@ public final class IsolatedRuntimeTest extends RuntimeTestSupport {
         IsolatedRuntime.Outcome out=finish(isolated.submit(RuntimeRequest.MEMORY,null,1,30000,256L*1024*1024,0));
         assertEquals(RuntimeResult.MEMORY_LIMIT,out.result.error);identity(out);recovery(out);
     }
+    @Test public void lowResidentBudgetForcesIndependentSupervisorKillAndFreshRecovery() throws Exception {
+        long limit=64L*1024*1024;
+        IsolatedRuntime.Outcome out=finish(isolated.submit(RuntimeRequest.MEMORY,null,1,30000,limit,0));
+        assertEquals(RuntimeResult.MEMORY_LIMIT,out.result.error);assertTrue(out.pythonEntered);identity(out);
+        assertTrue("Independent kernel sample must actually exceed RSS budget",out.peakRssBytes>limit);
+        recovery(out);
+    }
+    @Test public void oversizedNativeChildFrameCannotAllocateInSupervisorAndFreshRecoveryWorks() throws Exception {
+        IsolatedRuntime.Outcome out=finish(submit(RuntimeRequest.PROBE,null,IsolatedInput.CHILD_FRAME,30000));
+        assertEquals(RuntimeResult.IPC_ERROR,out.result.error);assertTrue(out.pythonEntered);identity(out);recovery(out);
+    }
     @Test public void secondClientCannotShareAnInterpreter() throws Exception {
         IsolatedRuntime.Operation first=submit(RuntimeRequest.HANG,null,0,30000);
         first.whenPythonStarted().get(25,TimeUnit.SECONDS);
@@ -143,10 +154,7 @@ public final class IsolatedRuntimeTest extends RuntimeTestSupport {
         ServiceInfo info=context.getPackageManager().getServiceInfo(new ComponentName(context,IsolatedRuntimeService.class),0);
         assertFalse(info.exported);assertTrue((info.flags&ServiceInfo.FLAG_ISOLATED_PROCESS)!=0);
         assertEquals(IsolatedRuntimeService.NAME,info.processName);
-        ServiceInfo observer=context.getPackageManager().getServiceInfo(new ComponentName(context,ResourceObserverService.class),0);
-        assertFalse(observer.exported);assertTrue((observer.flags&ServiceInfo.FLAG_ISOLATED_PROCESS)!=0);
-        assertEquals(ResourceObserverService.NAME,observer.processName);
-        try {Class.forName("com.thekain.runtime.lab.IsolatedChild");fail("JNI in owner");}
+        try {Class.forName("com.thekain.runtime.lab.SupervisorNative");fail("JNI in owner");}
         catch(ExceptionInInitializerError expected) {assertTrue(expected.getCause() instanceof IllegalStateException);}
         healthyMain();
     }

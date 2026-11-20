@@ -43,10 +43,9 @@ public final class IsolatedRuntime implements AutoCloseable {
         volatile int requests;volatile long payload;
         volatile ChildNetworkGate gate;
         volatile Snapshot kernel;IBinder binder;IIsolatedOwner ownerEndpoint;
-        IBinder observerBinder;IResourceObserver observer;IResourceOwner observerEndpoint;IKernelSink sink;
-        ServiceConnection observerConnection;
+        IResourceOwner observerEndpoint;IIsolatedWorker worker;
         volatile int peerPid,peerUid,observerPid,observerUid;volatile long observerStart,lastSample,sequence,observerPeak,observerCpu;
-        volatile boolean observerBound,observerBinderDead,observerRetiring;
+        volatile boolean observerRetiring,observerNonDumpable,observerPythonLoaded,noChildConfirmed,executed;volatile int childProtection;
         ServiceConnection connection;
         boolean bound,connected,binderDead,pythonEntered;
         String instance="";int error=-1,denials;
@@ -68,7 +67,7 @@ public final class IsolatedRuntime implements AutoCloseable {
         public final RuntimeResult result;
         public final int workerPid,workerUid,observerPid,observerUid,securityDenials,requests;
         public final long observerStartTicks,observerPeakRssBytes,observerCpuTicks;
-        public final boolean observerPythonLoaded;
+        public final boolean observerPythonLoaded,observerNonDumpable;public final int childProtection;
         public final String instance;
         public final boolean deathConfirmed,pythonEntered;
         public final long startTicks,samples,peakRssBytes,cpuTicks,observedCpuMs,virtualBefore,addressLimit,cpuLimit;
@@ -78,7 +77,8 @@ public final class IsolatedRuntime implements AutoCloseable {
             workerPid=o.kernel==null?0:o.kernel.pid;workerUid=o.kernel==null?-1:o.kernel.uid;
             startTicks=o.kernel==null?0:o.kernel.start;instance=o.instance;securityDenials=o.denials;
             observerPid=o.observerPid;observerUid=o.observerUid;observerStartTicks=o.observerStart;
-            observerPeakRssBytes=o.observerPeak;observerCpuTicks=o.observerCpu;observerPythonLoaded=false;
+            observerPeakRssBytes=o.observerPeak;observerCpuTicks=o.observerCpu;observerPythonLoaded=o.observerPythonLoaded;
+            observerNonDumpable=o.observerNonDumpable;childProtection=o.childProtection;
             deathConfirmed=dead;pythonEntered=o.pythonEntered;samples=o.samples;peakRssBytes=o.peak;
             cpuTicks=o.cpu;observedCpuMs=o.cpu*1000/ProcessIdentity.CLOCK_TICKS;
             virtualBefore=o.before;addressLimit=o.address;cpuLimit=o.cpuLimit;
@@ -92,7 +92,7 @@ public final class IsolatedRuntime implements AutoCloseable {
     }
     synchronized Operation submit(int operation,String url,int ca,long timeoutMs,long rss,int mode) {
         long now=SystemClock.elapsedRealtime();
-        if(timeoutMs<100 || timeoutMs>NativeRuntime.MAX_DEADLINE_MS || mode<0 || mode>IsolatedInput.IPC_FLOOD)
+        if(timeoutMs<100 || timeoutMs>NativeRuntime.MAX_DEADLINE_MS || mode<0 || mode>IsolatedInput.CHILD_FRAME)
             throw new IllegalArgumentException("LAB_BOUNDS");
         Operation o=new Operation(new RuntimeRequest(UUID.randomUUID().toString(),operation,url,ca,now+timeoutMs,rss,RuntimeRequest.MAX_HEADROOM),mode,now);
         if(lease.uncertain()) {
@@ -135,68 +135,30 @@ public final class IsolatedRuntime implements AutoCloseable {
         final int pid,uid;final long start;final boolean dead;
         Snapshot(int pid,int uid,long start,boolean dead) {this.pid=pid;this.uid=uid;this.start=start;this.dead=dead;}
     }
-    private void bind(Operation o,IsolatedInput input) {
-        oInput.put(o,input);
-        o.observerConnection=new ServiceConnection() {
-            public void onServiceConnected(ComponentName component,IBinder binder) {
-                supervisor.post(()->{
-                    o.observerBinder=binder;
-                    try {
-                        binder.linkToDeath(()->supervisor.post(()->observerLost(o)),0);
-                        if(!current(o) || o.retiring)return;
-                        o.observer=IResourceObserver.Stub.asInterface(binder);o.observerEndpoint=observerCallback(o);
-                        IResourceObserver control=o.observer;IResourceOwner endpoint=o.observerEndpoint;o.configuring=true;
-                        // Never put a synchronous remote transaction on the deadline supervisor.
-                        preparation.execute(()->{
-                            IKernelSink prepared=null;
-                            try {prepared=control.prepare(o.id,endpoint);}catch(Exception ignored) { }
-                            IKernelSink accepted=prepared;
-                            supervisor.post(()->{
-                                o.configuring=false;
-                                if(!current(o) || o.retiring)return;
-                                if(accepted==null || o.observerPid<=0) {retire(o,RuntimeResult.IPC_ERROR);return;}
-                                o.sink=accepted;bindWorker(o,input);
-                            });
-                        });
-                    }catch(Exception e) {if(current(o) && !o.retiring)retire(o,RuntimeResult.IPC_ERROR);}
-                });
-            }
-            public void onServiceDisconnected(ComponentName component) {supervisor.post(()->observerLost(o));}
-            public void onBindingDied(ComponentName component) {onServiceDisconnected(component);}
-            public void onNullBinding(ComponentName component) {supervisor.post(()->retire(o,RuntimeResult.IPC_ERROR));}
-        };
-        try {
-            o.observerBound=context.bindService(new Intent(context,ResourceObserverService.class),o.observerConnection,Context.BIND_AUTO_CREATE);
-            if(!o.observerBound)retire(o,RuntimeResult.IPC_ERROR);
-        }catch(RuntimeException e) {retire(o,RuntimeResult.IPC_ERROR);}
-    }
-    private void observerLost(Operation o) {
-        o.observerBinderDead=true;
-        if(current(o) && !o.retiring)retire(o,RuntimeResult.IPC_ERROR);
-    }
     private boolean observerSender(Operation o,String cap) {
         return current(o) && o.id.equals(cap) && Binder.getCallingPid()==o.observerPid && Binder.getCallingUid()==o.observerUid;
     }
     private IResourceOwner observerCallback(Operation o) {
         return new IResourceOwner.Stub() {
-            public boolean ready(String cap,long start) {
+            public boolean ready(String cap,long start,boolean nonDumpable) {
                 synchronized(IsolatedRuntime.this) {
                     int pid=Binder.getCallingPid(),uid=Binder.getCallingUid();
-                    if(!current(o) || o.retiring || o.observerPid!=0 || !o.id.equals(cap) || start<=0
+                    if(!current(o) || o.observerPid!=0 || !o.id.equals(cap) || start<=0 || !nonDumpable
                             || pid<=0 || pid==android.os.Process.myPid() || uid==android.os.Process.myUid() || uid%100000<90000)return false;
-                    o.observerPid=pid;o.observerUid=uid;o.observerStart=start;return true;
+                    o.observerPid=pid;o.observerUid=uid;o.observerStart=start;o.observerNonDumpable=nonDumpable;return true;
                 }
             }
             public boolean sample(String cap,long sequence,long measuredAt,int pid,int uid,long start,long cpu,long rss,long vm,
-                    boolean dead,long observerRss,long observerCpu,boolean pythonLoaded) {
+                    boolean dead,long observerRss,long observerCpu,boolean pythonLoaded,int childProtection) {
                 synchronized(IsolatedRuntime.this) {
                     long now=SystemClock.elapsedRealtime();
+                    if(observerSender(o,cap) && pythonLoaded) {o.observerPythonLoaded=true;return false;}
                     if(!observerSender(o,cap) || o.observerRetiring || pid!=o.peerPid || uid!=o.peerUid
                             || start<=0 || sequence!=o.sequence+1 || measuredAt>now || now-measuredAt>1000
-                            || pythonLoaded || observerRss<=0 || observerCpu<0
+                            || pythonLoaded || (childProtection!=0 && childProtection!=255) || observerRss<=0 || observerCpu<0
                             || (o.kernel!=null && (start!=o.kernel.start || o.kernel.dead)))return false;
                     if(!dead && (rss<=0 || vm<=0 || cpu<0))return false;
-                    o.sequence=sequence;o.lastSample=measuredAt;o.procFailureSince=-1;
+                    o.childProtection=Math.max(o.childProtection,childProtection);o.sequence=sequence;o.lastSample=measuredAt;o.procFailureSince=-1;
                     o.kernel=new Snapshot(pid,uid,start,dead);
                     o.observerPeak=Math.max(o.observerPeak,observerRss);o.observerCpu=Math.max(o.observerCpu,observerCpu);
                     if(!dead) {o.samples++;o.peak=Math.max(o.peak,rss);o.cpu=Math.max(o.cpu,cpu);}
@@ -205,6 +167,9 @@ public final class IsolatedRuntime implements AutoCloseable {
                     return true;
                 }
             }
+            public void idle(String cap) {
+                synchronized(IsolatedRuntime.this) {if(observerSender(o,cap) && o.kernel==null)o.noChildConfirmed=true;}
+            }
             public void failed(String cap) {
                 synchronized(IsolatedRuntime.this) {
                     if(observerSender(o,cap) && o.procFailureSince<0)o.procFailureSince=SystemClock.elapsedRealtime();
@@ -212,7 +177,7 @@ public final class IsolatedRuntime implements AutoCloseable {
             }
         };
     }
-    private void bindWorker(Operation o,IsolatedInput input) {
+    private void bind(Operation o,IsolatedInput input) {
         // Keep pending descriptors owned even if binding fails or the callback never arrives.
         oInput.put(o,input);
         o.connection=new ServiceConnection() {
@@ -222,8 +187,8 @@ public final class IsolatedRuntime implements AutoCloseable {
                     try {
                         binder.linkToDeath(()->supervisor.post(()->{o.binderDead=true;if(current(o) && !o.retiring)retire(o,RuntimeResult.WORKER_DIED);}),0);
                         if(current(o) && !o.retiring) {
-                            o.ownerEndpoint=callback(o);
-                            IIsolatedWorker.Stub.asInterface(binder).execute(input,o.ownerEndpoint,o.sink);
+                            o.ownerEndpoint=callback(o);o.observerEndpoint=observerCallback(o);
+                            o.worker=IIsolatedWorker.Stub.asInterface(binder);o.executed=true;o.worker.execute(input,o.ownerEndpoint,o.observerEndpoint);
                             supervisor.postDelayed(()->{
                                 if(current(o) && !o.retiring && o.kernel==null)retire(o,RuntimeResult.IPC_ERROR);
                             },3000);
@@ -243,39 +208,32 @@ public final class IsolatedRuntime implements AutoCloseable {
     }
     private final Map<Operation,IsolatedInput> oInput=new HashMap<>();
     private synchronized boolean sender(Operation o,String capability) {
-        return current(o) && !o.retiring && !o.canceled && o.kernel!=null && o.id.equals(capability)
-            && Binder.getCallingPid()==o.kernel.pid && Binder.getCallingUid()==o.kernel.uid;
+        return current(o) && !o.retiring && !o.canceled && o.observerPid>0 && o.id.equals(capability)
+            && Binder.getCallingPid()==o.observerPid && Binder.getCallingUid()==o.observerUid;
     }
     private IIsolatedOwner callback(Operation o) {
         return new IIsolatedOwner.Stub() {
-            @Override public boolean ready(String capability,String instance) {
-                int pid=Binder.getCallingPid(),uid=Binder.getCallingUid();
+            @Override public boolean ready(String capability,String instance,int childPid) {
                 synchronized(IsolatedRuntime.this) {
-                    if(!current(o) || o.retiring || o.canceled || o.peerPid!=0 || !o.id.equals(capability)
-                            || instance==null || !instance.matches("[0-9a-f-]{36}") || pid<=0 || pid==android.os.Process.myPid()
-                            || uid==android.os.Process.myUid() || uid%100000<90000 || pid==o.observerPid || uid==o.observerUid)return false;
-                    o.peerPid=pid;o.peerUid=uid;o.instance=instance;
+                    if(!sender(o,capability) || o.peerPid!=0 || childPid<=0 || childPid==o.observerPid || childPid==android.os.Process.myPid()
+                            || instance==null || !instance.matches("[0-9a-f-]{36}"))return false;
+                    o.peerPid=childPid;o.peerUid=o.observerUid;o.instance=instance;return true;
                 }
-                try {
-                    // No owner lock across IPC: observer failure cannot block the deadline/retirement thread.
-                    if(!o.observer.expectWorker(o.id,pid,uid))return false;
-                    synchronized(IsolatedRuntime.this) {return current(o) && !o.retiring && !o.canceled;}
-                }catch(Exception e) {return false;}
             }
             @Override public void phase(String capability) {
-                synchronized(IsolatedRuntime.this) {if(sender(o,capability)) {o.pythonEntered=true;o.started.complete(o.kernel.pid);}}
+                synchronized(IsolatedRuntime.this) {if(sender(o,capability) && o.kernel!=null && o.childProtection==255) {o.pythonEntered=true;o.started.complete(o.kernel.pid);}}
             }
-            @Override public void limits(String capability,long before,long address,long cpu) {
+            @Override public void limits(String capability,long before,long address,long cpu,int childProtection) {
                 synchronized(IsolatedRuntime.this) {
-                    if(!sender(o,capability))return;
-                    if(before<=0 || address!=before+o.request.virtualHeadroom || cpu<=0 || cpu>64) {
+                    if(!sender(o,capability) || o.kernel==null)return;
+                    if(before<=0 || address!=before+o.request.virtualHeadroom || cpu<=0 || cpu>64 || childProtection!=255) {
                         supervisor.post(()->retire(o,RuntimeResult.IPC_ERROR));return;
                     }
-                    o.before=before;o.address=address;o.cpuLimit=cpu;
+                    o.before=before;o.address=address;o.cpuLimit=cpu;o.childProtection=childProtection;
                 }
             }
             @Override public IsolatedReply fetch(String capability,String url,String method) {
-                if(!sender(o,capability) || o.gate==null)return new IsolatedReply(RuntimeResult.IPC_ERROR,null);
+                if(!sender(o,capability) || o.kernel==null || o.gate==null)return new IsolatedReply(RuntimeResult.IPC_ERROR,null);
                 if(SystemClock.elapsedRealtime()>=o.request.deadline)return new IsolatedReply(RuntimeResult.TIMEOUT,null);
                 if(!("GET".equals(method)||"HEAD".equals(method)))return new IsolatedReply(RuntimeResult.INVALID_REQUEST,null);
                 try {RuntimeRequest.validateUrl(url);if(o.request.url==null || new java.net.URI(url).getPort()!=new java.net.URI(o.request.url).getPort())
@@ -295,7 +253,7 @@ public final class IsolatedRuntime implements AutoCloseable {
                     try {
                         if(result==null || !o.id.equals(result.id) || denials<0 || denials>255)throw new IllegalArgumentException();
                         result.validate();
-                        if(result.error==RuntimeResult.OK && (o.procFailureSince>=0 || SystemClock.elapsedRealtime()-o.lastSample>1000 || !o.pythonEntered || o.address<=0 || o.cpuLimit<=0
+                        if(result.error==RuntimeResult.OK && (o.childProtection!=255 || !o.observerNonDumpable || o.procFailureSince>=0 || SystemClock.elapsedRealtime()-o.lastSample>1000 || !o.pythonEntered || o.address<=0 || o.cpuLimit<=0
                                 || result.pythonCalls!=1 || denials!=(o.mode==IsolatedInput.SECURITY?255:31)))
                             throw new IllegalArgumentException("INCOMPLETE_SUCCESS_PROOF");
                         o.result=result.error==RuntimeResult.OK && o.peak>o.request.rssLimit
@@ -325,11 +283,10 @@ public final class IsolatedRuntime implements AutoCloseable {
             if(!current(o) || o.retiring)return;o.retiring=true;o.retireAt=SystemClock.elapsedRealtime();
             o.error=o.canceled?RuntimeResult.CANCELED:o.retireAt>=o.request.deadline?RuntimeResult.TIMEOUT:error;
         }
-        if(o.bound) {try {context.unbindService(o.connection);}catch(RuntimeException ignored){}o.bound=false;}
-        // No cross-UID SIGKILL and no reliance on Python, Binder or worker main-loop cooperation.
-        try {context.stopService(new Intent(context,IsolatedRuntimeService.class));}catch(RuntimeException ignored){}
+        // Keep the trusted isolated supervisor alive until it has killed/reaped the native child.
         IsolatedInput pending=oInput.remove(o);if(pending!=null)pending.close();
         if(o.gate!=null)o.gate.close();
+        try {if(o.worker!=null)o.worker.retire(o.id);}catch(Exception ignored) { }
         o.cleanupDeadline=SystemClock.elapsedRealtime()+CLEANUP;reap(o);
     }
     private boolean serviceExists(Class<?> type) {
@@ -344,23 +301,25 @@ public final class IsolatedRuntime implements AutoCloseable {
     }
     private void reap(Operation o) {
         if(!current(o))return;
-        // Keep the observer alive until its independent kernel handles confirm worker death.
-        boolean kernelDead=o.kernel!=null?o.kernel.dead:!o.pythonEntered;
-        boolean workerDead=kernelDead && (o.binder==null || o.binderDead || !o.binder.isBinderAlive())
-            && !serviceExists(IsolatedRuntimeService.class);
-        if(workerDead && !o.observerRetiring) {
+        boolean kernelDead=o.kernel!=null?o.kernel.dead:(!o.executed || o.observerPid==0 || o.noChildConfirmed);
+        if(kernelDead && !o.observerRetiring) {
             o.observerRetiring=true;
-            if(o.observerBound) {try {context.unbindService(o.observerConnection);}catch(RuntimeException ignored){}o.observerBound=false;}
-            try {context.stopService(new Intent(context,ResourceObserverService.class));}catch(RuntimeException ignored){}
+            if(o.bound) {try {context.unbindService(o.connection);}catch(RuntimeException ignored){}o.bound=false;}
+            try {context.stopService(new Intent(context,IsolatedRuntimeService.class));}catch(RuntimeException ignored){}
         }
-        boolean dead=workerDead && o.observerRetiring && (o.observerBinder==null || o.observerBinderDead || !o.observerBinder.isBinderAlive())
-            && !serviceExists(ResourceObserverService.class) && !o.preparing && !o.configuring && !o.fetching.get() && (o.gate==null || o.gate.terminated());
+        boolean dead=kernelDead && o.observerRetiring && (o.binder==null || o.binderDead || !o.binder.isBinderAlive())
+            && !serviceExists(IsolatedRuntimeService.class) && !o.preparing && !o.fetching.get() && (o.gate==null || o.gate.terminated());
+        // If monitoring is lost, still retire the Service; PDEATHSIG is a fallback, never a substitute for missing proof.
+        if(!kernelDead && SystemClock.elapsedRealtime()>=o.cleanupDeadline) {
+            if(o.bound) {try {context.unbindService(o.connection);}catch(RuntimeException ignored){}o.bound=false;}
+            try {context.stopService(new Intent(context,IsolatedRuntimeService.class));}catch(RuntimeException ignored){}
+        }
         if(!dead && SystemClock.elapsedRealtime()<o.cleanupDeadline) {supervisor.postDelayed(()->reap(o),SAMPLE);return;}
         synchronized(this) {
             if(!dead) {o.error=RuntimeResult.CLEANUP_FAILED;lease.poison();}
             else if(o.error==0 && SystemClock.elapsedRealtime()>=o.request.deadline)o.error=RuntimeResult.TIMEOUT;
             o.finished=true;Outcome out=new Outcome(o,dead);record(o,out);
-            if(dead) {o.ownerEndpoint=null;o.observerEndpoint=null;o.observer=null;o.sink=null;lease.cleared();active=null;LEASE.set(false);} // Otherwise poison: no uncertain worker reuse.
+            if(dead) {o.ownerEndpoint=null;o.observerEndpoint=null;o.worker=null;lease.cleared();active=null;LEASE.set(false);} // Otherwise poison: no uncertain worker reuse.
             o.started.completeExceptionally(new IllegalStateException("NOT_STARTED"));o.future.complete(out);
             if(closed)thread.quitSafely();
         }
@@ -378,7 +337,7 @@ public final class IsolatedRuntime implements AutoCloseable {
                 .put("resource_input_bytes",r.resourceInputBytes)
                 .put("observer_pid",r.observerPid).put("observer_uid",r.observerUid).put("observer_start_ticks",r.observerStartTicks)
                 .put("observer_peak_rss_bytes",r.observerPeakRssBytes).put("observer_cpu_ticks",r.observerCpuTicks)
-                .put("observer_python_loaded",r.observerPythonLoaded)
+                .put("observer_python_loaded",r.observerPythonLoaded).put("observer_non_dumpable",r.observerNonDumpable).put("child_protection",r.childProtection)
                 .put("elapsed_ms",r.elapsedMs).put("retire_to_exit_ms",r.retireToExitMs).put("cancel_to_exit_ms",r.cancelToExitMs);
             File file=new File(context.getFilesDir(),"isolated-evidence.jsonl");
             try(FileOutputStream out=new FileOutputStream(file,file.length()<=1024*1024)) {out.write((j+"\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));}

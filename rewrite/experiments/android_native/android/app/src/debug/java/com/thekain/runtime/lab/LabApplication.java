@@ -7,11 +7,11 @@ public final class LabApplication extends Application {
     private LabSession session;
     private IsolatedQaSession isolated;
     synchronized IsolatedQaSession isolatedSession() {
-        if(ProcessIdentity.inWorker() || IsolatedRuntimeService.inWorker() || ResourceObserverService.inObserver())throw new IllegalStateException("NO_QA_OWNER_IN_WORKER");
+        if(ProcessIdentity.inWorker() || IsolatedRuntimeService.inWorker())throw new IllegalStateException("NO_QA_OWNER_IN_WORKER");
         if(isolated==null)isolated=new IsolatedQaSession(this);return isolated;
     }
     synchronized LabSession session() {
-        if(ProcessIdentity.inWorker() || IsolatedRuntimeService.inWorker() || ResourceObserverService.inObserver())throw new IllegalStateException("NO_QA_OWNER_IN_WORKER");
+        if(ProcessIdentity.inWorker() || IsolatedRuntimeService.inWorker())throw new IllegalStateException("NO_QA_OWNER_IN_WORKER");
         if(session==null)session=new LabSession(this);
         return session;
     }

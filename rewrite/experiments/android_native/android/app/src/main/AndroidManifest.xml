@@ -5,7 +5,5 @@
             android:exported="false" android:isolatedProcess="false" android:stopWithTask="true"/>
         <service android:name=".IsolatedRuntimeService" android:process=":isolated_python"
             android:exported="false" android:isolatedProcess="true" android:stopWithTask="true"/>
-        <service android:name=".ResourceObserverService" android:process=":resource_observer"
-            android:exported="false" android:isolatedProcess="true" android:stopWithTask="true"/>
     </application>
 </manifest>

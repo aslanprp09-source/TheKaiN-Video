@@ -12,9 +12,9 @@ export ANDROID_AVD_HOME="$RUNNER_TEMP/native-lab-avd"
 export PATH="$ANDROID_HOME/platform-tools:$PATH"
 cleanup() {
   result=$?
-  adb -s "$ANDROID_SERIAL" logcat -d > "$evidence/logcat.txt" 2>/dev/null || true
-  adb -s "$ANDROID_SERIAL" logcat -b crash -d > "$evidence/crash.txt" 2>/dev/null || true
-  adb -s "$ANDROID_SERIAL" shell dumpsys activity exit-info com.thekain.runtime.lab > "$evidence/exit-info.txt" 2>/dev/null || true
+  timeout 8 adb -s "$ANDROID_SERIAL" logcat -d > "$evidence/logcat.txt" 2>/dev/null || true
+  timeout 8 adb -s "$ANDROID_SERIAL" logcat -b crash -d > "$evidence/crash.txt" 2>/dev/null || true
+  timeout 8 adb -s "$ANDROID_SERIAL" shell dumpsys activity exit-info com.thekain.runtime.lab > "$evidence/exit-info.txt" 2>/dev/null || true
   if [ "$result" -ne 0 ]; then
     # Full window dump includes both mCurrentFocus and mFocusedApp on all matrix APIs.
     timeout 8 adb -s "$ANDROID_SERIAL" shell dumpsys window > "$evidence/failure-window.txt" 2>/dev/null || true
@@ -36,7 +36,7 @@ terms=('thekain.runtime.lab','lmkd','lowmemorykiller','python.stderr','AndroidRu
 for line in [s for s in lines if any(term in s for term in terms)][-120:]: print(line)
 PY
   fi
-  adb -s "$ANDROID_SERIAL" shell am force-stop com.thekain.runtime.lab >/dev/null 2>&1 || true
+  timeout 8 adb -s "$ANDROID_SERIAL" shell am force-stop com.thekain.runtime.lab >/dev/null 2>&1 || true
   exit "$result"
 }
 trap cleanup EXIT
@@ -95,7 +95,7 @@ adb -s "$ANDROID_SERIAL" shell pidof system_server | tr -d '\r' > "$evidence/sys
 test -s "$evidence/system-server-before.txt"
 adb -s "$ANDROID_SERIAL" install -r -t "$delivery/lab.apk"
 adb -s "$ANDROID_SERIAL" install -r -t "$delivery/tests.apk"
-# A passing run still executes all original 27 and all additional 24 below.
+# A passing run still executes all original 27 and all additional 26 below.
 timeout 80 adb -s "$ANDROID_SERIAL" shell am instrument -w -e class 'com.thekain.runtime.lab.IsolatedRuntimeTest#separateUidInterpreterSealedResourcesAndOpenSsl' com.thekain.runtime.lab.test/androidx.test.runner.AndroidJUnitRunner > "$evidence/isolated-bootstrap.txt"
 python3 - "$evidence/isolated-bootstrap.txt" <<'PYBOOT'
 from pathlib import Path
@@ -165,9 +165,21 @@ text=Path(sys.argv[1]).read_text();print(text)
 assert re.search(r'^OK \(1 test\)\s*$',text,re.M), 'Observer-loss fail-closed test must execute'
 assert not any(s in text for s in ('FAILURES!!!','shortMsg=','INSTRUMENTATION_FAILED'))
 proof=json.loads(Path(sys.argv[2]).read_text())
-assert all(proof[k] is True for k in ('observer_lost','worker_binder_dead','observer_binder_dead','kernel_death_not_claimed','main_responsive','durable_reuse_refused'))
-assert proof['worker_uid']!=proof['observer_uid'] and proof['production_ready'] is False
+assert all(proof[k] is True for k in ('observer_lost','supervisor_binder_dead','kernel_death_not_claimed','main_responsive','durable_reuse_refused'))
+assert proof['worker_uid']==proof['observer_uid'] and proof['production_ready'] is False
 print('::notice::'+json.dumps(proof))
 PYOBSERVER
+python3 - "$evidence/observer-failure.json" "$evidence" <<'PYPDEATH'
+import json,subprocess,sys,time,os
+from pathlib import Path
+proof=json.loads(Path(sys.argv[1]).read_text());pid=proof['worker_pid'];assert isinstance(pid,int) and pid>0
+for attempt in range(30):
+    proc=subprocess.run(['adb','-s',os.environ['ANDROID_SERIAL'],'shell','cat',f'/proc/{pid}/stat'],capture_output=True,text=True,timeout=5)
+    if proc.returncode!=0 and 'No such file or directory' in proc.stderr+proc.stdout:
+        print('::notice::Independent shell confirmed native child absent after supervisor death (PDEATHSIG fallback; app lease remains blocked)')
+        break
+    time.sleep(.1)
+else:raise AssertionError('Native child death after supervisor loss is not independently confirmed')
+PYPDEATH
 adb -s "$ANDROID_SERIAL" shell pidof system_server | tr -d '\r' > "$evidence/system-server-after-observer-fault.txt"
 cmp "$evidence/system-server-before.txt" "$evidence/system-server-after-observer-fault.txt"

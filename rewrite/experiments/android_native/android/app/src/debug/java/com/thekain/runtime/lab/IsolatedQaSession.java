@@ -97,6 +97,7 @@ final class IsolatedQaSession {
                     one(RuntimeRequest.HANG,IsolatedInput.BLOCK_MAIN,12000,false,2);
                     one(RuntimeRequest.CRASH,0,30000,false,4);
                     one(RuntimeRequest.MEMORY,0,30000,false,7);
+                    one(RuntimeRequest.MEMORY,0,30000,false,7,64L*1024*1024);
                     one(RuntimeRequest.PROBE,IsolatedInput.BAD_DIGEST,30000,false,6);
                     one(RuntimeRequest.PROBE,IsolatedInput.FAKE_PROC,30000,false,5);
                     for(int i=0;i<5;i++)one(RuntimeRequest.ANALYZE,0,30000,false,0);
@@ -111,9 +112,12 @@ final class IsolatedQaSession {
         });
     }
     private void one(int kind,int mode,long deadline,boolean cancel,int expected) throws Exception {
+        one(kind,mode,deadline,cancel,expected,kind==RuntimeRequest.MEMORY?256L*1024*1024:RuntimeRequest.MAX_RSS);
+    }
+    private void one(int kind,int mode,long deadline,boolean cancel,int expected,long rssLimit) throws Exception {
         JSONObject before=power();
         operation=runtime.submit(kind,kind==RuntimeRequest.ANALYZE?fixture.url:null,1,deadline,
-            kind==RuntimeRequest.MEMORY?256L*1024*1024:RuntimeRequest.MAX_RSS,mode);
+            rssLimit,mode);
         state.put("pending",new JSONObject().put("id",operation.id).put("operation",kind).put("mode",mode));save();
         IsolatedRuntime.Operation running=operation;
         publish("Операция UID запущена. Отмена доступна.");
@@ -127,13 +131,13 @@ final class IsolatedQaSession {
             .put("parent_pid",android.os.Process.myPid()).put("parent_uid",android.os.Process.myUid()).put("instance",out.instance)
             .put("observer_pid",out.observerPid).put("observer_uid",out.observerUid).put("observer_start_ticks",out.observerStartTicks)
             .put("observer_peak_rss_bytes",out.observerPeakRssBytes).put("observer_cpu_ticks",out.observerCpuTicks)
-            .put("observer_python_loaded",out.observerPythonLoaded)
+            .put("observer_python_loaded",out.observerPythonLoaded).put("observer_non_dumpable",out.observerNonDumpable).put("child_protection",out.childProtection)
             .put("start_ticks",out.startTicks).put("death_confirmed",out.deathConfirmed).put("security_denials",out.securityDenials)
             .put("python_entered",out.pythonEntered).put("python_calls",out.result.pythonCalls).put("machine",out.result.machine)
             .put("pointer_bits",out.result.pointerBits).put("pages",out.result.pages).put("openssl_handshake",out.result.opensslHandshake)
             .put("samples",out.samples).put("peak_rss_bytes",out.peakRssBytes).put("observed_cpu_ms",out.observedCpuMs)
             .put("cpu_ticks",out.cpuTicks).put("clock_ticks_per_second",ProcessIdentity.CLOCK_TICKS)
-            .put("resource_input_bytes",out.resourceInputBytes).put("rss_limit_bytes",kind==RuntimeRequest.MEMORY?256L*1024*1024:RuntimeRequest.MAX_RSS)
+            .put("resource_input_bytes",out.resourceInputBytes).put("rss_limit_bytes",rssLimit)
             .put("rlimit_as",out.addressLimit).put("virtual_before",out.virtualBefore).put("rlimit_cpu",out.cpuLimit)
             .put("elapsed_ms",out.elapsedMs).put("cancel_to_exit_ms",out.cancelToExitMs).put("retire_to_exit_ms",out.retireToExitMs)
             .put("requests",out.requests).put("payload_bytes",out.payloadBytes).put("power_before",before).put("power_after",power())

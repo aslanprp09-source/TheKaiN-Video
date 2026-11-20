@@ -75,6 +75,63 @@ int main(void) {
             self.assertEqual(result.returncode,0,result.stderr)
             self.assertEqual(result.stdout.strip(),'KERNEL_BUDGET_PASS')
 
+    @unittest.skipUnless(sys.platform=='linux' and platform.machine()=='x86_64','Linux/x86_64 kernel contract; Android matrix remains mandatory')
+    def test_exec_child_cannot_attack_supervisor_or_disable_parent_death_and_is_killed_with_it(self):
+        source=r"""
+#include "runtime_child_fence.h"
+#include <assert.h>
+#include <fcntl.h>
+#include <signal.h>
+#include <sys/ptrace.h>
+#include <sys/wait.h>
+#include <time.h>
+static int child_check(pid_t parent) {
+    assert(setup_parent_lifetime(parent)==0);
+    RuntimeKernelLimits limits;assert(configure_runtime_limits(64ULL*1024*1024,5,&limits)==0);
+    assert(fence_native_child()==0);
+    char path[64];snprintf(path,sizeof(path),"/proc/%d/mem",parent);
+    assert(open(path,O_RDONLY)==-1 && (errno==EACCES || errno==EPERM));
+    assert(kill(parent,0)==-1 && errno==EPERM);
+    assert(kill(0,0)==-1 && errno==EPERM);
+    assert(kill(-1,0)==-1 && errno==EPERM);
+    assert(kill(getpid(),0)==0);
+    assert(syscall(__NR_tgkill,parent,parent,0)==-1 && errno==EPERM);
+    assert(syscall(__NR_ptrace,PTRACE_PEEKDATA,parent,0,0)==-1 && errno==EPERM);
+    assert(syscall(__NR_prlimit64,parent,RLIMIT_CPU,NULL,NULL)==-1 && errno==EPERM);
+    assert(prctl(PR_SET_PDEATHSIG,0)==-1 && errno==EPERM);
+    assert(syscall(__NR_clone,~0UL,0,0,0,0)==-1 && errno==EPERM);
+    assert(syscall(__NR_execve,"/thekain-missing",NULL,NULL)==-1 && errno==EPERM);
+    return 0;
+}
+int main(void) {
+    assert(prctl(PR_SET_CHILD_SUBREAPER,1)==0);assert(prctl(PR_SET_DUMPABLE,0)==0);
+    pid_t parent=getpid(),child=fork();assert(child>=0);
+    if(child==0)_exit(child_check(parent));
+    int status;assert(waitpid(child,&status,0)==child && WIFEXITED(status) && WEXITSTATUS(status)==0);
+    int channel[2];assert(pipe(channel)==0);
+    pid_t monitor=fork();assert(monitor>=0);
+    if(monitor==0) {
+        close(channel[0]);pid_t self=getpid();pid_t worker=fork();assert(worker>=0);
+        if(worker==0) {assert(setup_parent_lifetime(self)==0);assert(write(channel[1],&((pid_t){getpid()}),sizeof(pid_t))==sizeof(pid_t));for(;;)pause();}
+        close(channel[1]);for(;;)pause();
+    }
+    close(channel[1]);pid_t worker=0;assert(read(channel[0],&worker,sizeof(worker))==sizeof(worker) && worker>0);close(channel[0]);
+    assert(kill(monitor,SIGKILL)==0);assert(waitpid(monitor,&status,0)==monitor && WIFSIGNALED(status));
+    struct timespec tick={0,10000000};int dead=0;
+    for(int i=0;i<300;i++) {if(waitpid(worker,&status,WNOHANG)==worker) {dead=1;break;}nanosleep(&tick,NULL);}
+    if(!dead)kill(worker,SIGKILL);
+    assert(dead && WIFSIGNALED(status) && WTERMSIG(status)==SIGKILL);
+    puts("FENCED_CHILD_AND_PARENT_DEATH_PASS");
+}
+"""
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);(root/'test.c').write_text(source)
+            subprocess.run(['gcc','-std=gnu11','-Wall','-Wextra','-Werror','-I',str(Path(__file__).parent),
+                str(root/'test.c'),'-o',str(root/'probe')],check=True,capture_output=True,timeout=30)
+            result=subprocess.run([str(root/'probe')],capture_output=True,text=True,timeout=10)
+            self.assertEqual(result.returncode,0,result.stderr)
+            self.assertEqual(result.stdout.strip(),'FENCED_CHILD_AND_PARENT_DEATH_PASS')
+
     def test_apk_missing_tampered_or_extra_python_assets_are_rejected_before_device(self):
         payload=b'# own Python package fixture\n';name='lib/python3.14/__phello__/__init__.py'
         raw=json.dumps({name:{'bytes':len(payload),'sha256':hashlib.sha256(payload).hexdigest()}}).encode()

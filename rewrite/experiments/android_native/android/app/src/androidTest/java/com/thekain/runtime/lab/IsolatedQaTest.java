@@ -57,7 +57,7 @@ public final class IsolatedQaTest {
             screenshot("entry");click(scenario,R.id.uid_suite_button);idle();
             JSONObject j=report();assertEquals(BuildConfig.QA_SOURCE_COMMIT,j.getString("source_commit"));
             assertFalse(j.getBoolean("production_ready"));assertFalse(j.getBoolean("physical_device_attested"));
-            JSONArray cases=j.getJSONArray("cases");assertEquals(13,cases.length());
+            JSONArray cases=j.getJSONArray("cases");assertEquals(14,cases.length());
             for(int i=0;i<cases.length();i++) {
                 JSONObject row=cases.getJSONObject(i);assertEquals(row.toString(),row.getInt("expected_error"),row.getInt("error"));
                 assertTrue(row.getBoolean("death_confirmed"));assertFalse(row.getBoolean("main_python_loaded"));

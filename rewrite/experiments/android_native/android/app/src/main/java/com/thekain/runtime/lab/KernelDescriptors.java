@@ -11,7 +11,10 @@ final class KernelDescriptors implements AutoCloseable {
     final long start;
     final ParcelFileDescriptor stat,status;
     KernelDescriptors(int pid,int uid,ParcelFileDescriptor stat,ParcelFileDescriptor status) throws Exception {
-        if(pid<=0 || pid==android.os.Process.myPid() || uid==android.os.Process.myUid()
+        this(pid,uid,stat,status,false);
+    }
+    KernelDescriptors(int pid,int uid,ParcelFileDescriptor stat,ParcelFileDescriptor status,boolean spawnedChild) throws Exception {
+        if(pid<=0 || pid==android.os.Process.myPid() || (!spawnedChild && uid==android.os.Process.myUid())
                 || uid%100000<90000 || uid%100000>=100000)throw new IOException("NOT_ISOLATED_PEER");
         this.pid=pid;this.uid=uid;
         this.stat=ParcelFileDescriptor.dup(stat.getFileDescriptor());
@@ -19,7 +22,7 @@ final class KernelDescriptors implements AutoCloseable {
             this.status=ParcelFileDescriptor.dup(status.getFileDescriptor());
             try {
                 validate(this.stat,"/proc/"+pid+"/stat");validate(this.status,"/proc/"+pid+"/status");
-                Sample s=sample();start=s.start;if(s.zombie || s.uid!=uid)throw new IOException("PROC_IDENTITY");
+                Sample s=sample();start=s.start;if(s.zombie || s.uid!=uid || (spawnedChild && s.parent!=android.os.Process.myPid()))throw new IOException("PROC_IDENTITY");
             }catch(Exception e) {this.status.close();throw e;}
         }catch(Exception e) {this.stat.close();throw e;}
     }
@@ -45,7 +48,7 @@ final class KernelDescriptors implements AutoCloseable {
         return new String(out.toByteArray(),StandardCharsets.US_ASCII);
     }
     static final class Sample {
-        long start,rss,vm,cpu;int uid;boolean zombie;
+        long start,rss,vm,cpu;int uid,parent;boolean zombie;
     }
     synchronized Sample sample() throws Exception {
         return parse(pid,uid,read(stat,8192),read(status,32768));
@@ -60,7 +63,7 @@ final class KernelDescriptors implements AutoCloseable {
         String[] f=raw.substring(end+2).trim().split(" +");
         if(f.length<22)throw new IOException("PROC_STAT_FIELDS");
         Sample s=new Sample();s.start=Long.parseLong(f[19]);s.cpu=Long.parseLong(f[11])+Long.parseLong(f[12]);
-        s.zombie=f[0].equals("Z") || f[0].equals("X");s.uid=-1;s.rss=-1;s.vm=-1;
+        s.parent=Integer.parseInt(f[1]);s.zombie=f[0].equals("Z") || f[0].equals("X");s.uid=-1;s.rss=-1;s.vm=-1;
         if(s.zombie)return s;
         for(String line:statusText.split("\n")) {
             String[] v=line.trim().split("\\s+");

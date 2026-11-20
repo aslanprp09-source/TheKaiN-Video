@@ -107,6 +107,9 @@ def dispatch(raw):
             except MemoryError:
                 del chunks
                 result={'status':'FAIL','error_code':'MEMORY_LIMIT'}
+        elif request.get('op')=='malformed_channel':
+            _thekain_transport.malformed()  # Fixed lab-only oversized frame; never arbitrary code.
+            raise RuntimeError('MALFORMED_CHILD_FRAME_ACCEPTED')
         elif request.get('op')=='output_flood':
             return 'x'*70000
         elif request.get('op') in ('request_flood','byte_flood'):

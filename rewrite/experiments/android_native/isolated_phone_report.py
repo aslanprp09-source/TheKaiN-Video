@@ -24,7 +24,7 @@ def inspect(report,receipt):
     assert device['hardware'] not in ('ranchu','goldfish') and not device['fingerprint'].startswith('generic'), 'Emulator is not a phone'
     serialized=json.dumps(report)
     assert '-----BEGIN' not in serialized and 'https://' not in serialized and 'http://' not in serialized, 'Unexpected sensitive/URL payload'
-    rows=report['cases'];assert 13<=len(rows)<=64
+    rows=report['cases'];assert 14<=len(rows)<=64
     instances=[]
     for row in rows:
         assert row['error']==row['expected_error'] or (row['expected_error']==-1 and row['error'] in (1,2)), 'Unexpected failure'
@@ -34,7 +34,8 @@ def inspect(report,receipt):
             assert row['worker_pid']!=row['parent_pid'] and row['worker_uid']!=row['parent_uid']
             assert 90000<=row['worker_uid']%100000<100000 and row['start_ticks']>0
             assert row['observer_pid'] not in (row['parent_pid'],row['worker_pid']) and row['observer_pid']>0
-            assert row['observer_uid'] not in (row['parent_uid'],row['worker_uid'])
+            assert row['observer_uid'] == row['worker_uid'] and row['observer_uid'] != row['parent_uid']
+            assert row['observer_non_dumpable'] is True
             assert 90000 <= row['observer_uid'] % 100000 < 100000
             assert row['observer_start_ticks']>0 and row['observer_peak_rss_bytes']>0 and row['observer_cpu_ticks']>0
             assert row['observer_python_loaded'] is False, 'Python must never run in its resource observer'
@@ -42,12 +43,14 @@ def inspect(report,receipt):
             instances.append(row['instance'])
         assert row['requests']<=12 and row['payload_bytes']<=2*1024*1024+1
         if row['python_entered']:
+            assert row['child_protection']==255, 'Missing irreversible native-child supervisor protections'
             assert 0 < row['resource_input_bytes'] <= 160*1024*1024
             assert row['observed_cpu_ms']==row['cpu_ticks']*1000//row['clock_ticks_per_second']
             assert row['observed_cpu_ms']>0 and row['rlimit_cpu']>0
             assert row['rlimit_as']==row['virtual_before']+256*1024*1024
         if row['error']==0:
             assert row['python_calls']==1 and row['security_denials']==(255 if row['mode']==1 else 31)
+    assert any(r['error']==7 and r['rss_limit_bytes']==64*1024*1024 and r['peak_rss_bytes']>r['rss_limit_bytes'] for r in rows), 'No independent RSS retirement proof'
     assert len(instances)==len(set(instances)), 'Interpreter reused'
     probes=[r for r in rows if r['operation']==1 and r['mode']==0 and r['error']==0]
     assert probes and all(r['machine']=='aarch64' and r['pointer_bits']==64 and r['pages'] in (4096,16384)

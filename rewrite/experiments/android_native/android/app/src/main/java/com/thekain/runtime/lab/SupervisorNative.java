@@ -1,0 +1,16 @@
+package com.thekain.runtime.lab;
+
+/** libc-only JNI; never links libpython or executes Python inside ART. */
+final class SupervisorNative {
+    static {
+        if(!IsolatedRuntimeService.inWorker())throw new IllegalStateException("ISOLATED_SUPERVISOR_REQUIRED");
+        System.loadLibrary("thekain_supervisor");
+    }
+    static native boolean protect();
+    static native int seal(int source,long max);
+    static native int[] spawn(String installedDirectory,int zip,int cert,int key);
+    static native void kill(int pid);
+    static native boolean reap(int pid);
+    static native int dumpable();
+    private SupervisorNative() { }
+}
