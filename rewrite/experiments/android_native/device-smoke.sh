@@ -12,22 +12,31 @@ export ANDROID_AVD_HOME="$RUNNER_TEMP/native-lab-avd"
 export PATH="$ANDROID_HOME/platform-tools:$PATH"
 cleanup() {
   result=$?
-  adb -s "$ANDROID_SERIAL" logcat -d > "$evidence/logcat.txt" 2>/dev/null || true
-  adb -s "$ANDROID_SERIAL" logcat -b crash -d > "$evidence/crash.txt" 2>/dev/null || true
-  adb -s "$ANDROID_SERIAL" shell dumpsys activity exit-info com.thekain.runtime.lab > "$evidence/exit-info.txt" 2>/dev/null || true
+  timeout 8 adb -s "$ANDROID_SERIAL" logcat -d > "$evidence/logcat.txt" 2>/dev/null || true
+  timeout 8 adb -s "$ANDROID_SERIAL" logcat -b crash -d > "$evidence/crash.txt" 2>/dev/null || true
+  timeout 8 adb -s "$ANDROID_SERIAL" shell dumpsys activity exit-info com.thekain.runtime.lab > "$evidence/exit-info.txt" 2>/dev/null || true
   if [ "$result" -ne 0 ]; then
+    # Full window dump includes both mCurrentFocus and mFocusedApp on all matrix APIs.
+    timeout 8 adb -s "$ANDROID_SERIAL" shell dumpsys window > "$evidence/failure-window.txt" 2>/dev/null || true
+    timeout 8 adb -s "$ANDROID_SERIAL" shell dumpsys activity activities > "$evidence/failure-activities.txt" 2>/dev/null || true
+    timeout 10 adb -s "$ANDROID_SERIAL" shell uiautomator dump /sdcard/thekain-uid-failure.xml > "$evidence/failure-hierarchy-command.txt" 2>&1 || true
+    timeout 8 adb -s "$ANDROID_SERIAL" exec-out cat /sdcard/thekain-uid-failure.xml > "$evidence/failure-ui.xml" 2>/dev/null || true
+    timeout 8 adb -s "$ANDROID_SERIAL" exec-out screencap -p > "$evidence/failure-screen.png" 2>/dev/null || true
     if [ -f "$evidence/instrumentation.txt" ]; then tail -120 "$evidence/instrumentation.txt"; fi
+    if [ -f "$evidence/isolated-instrumentation.txt" ]; then tail -160 "$evidence/isolated-instrumentation.txt"; fi
+    if [ -f "$evidence/observer-failure-instrumentation.txt" ]; then tail -100 "$evidence/observer-failure-instrumentation.txt"; fi
+    if [ -f "$evidence/isolated-bootstrap.txt" ]; then tail -100 "$evidence/isolated-bootstrap.txt"; fi
     tail -120 "$evidence/crash.txt"
     tail -100 "$evidence/exit-info.txt"
     python3 - "$evidence/logcat.txt" <<'PY'
 from pathlib import Path
 import sys
 lines=Path(sys.argv[1]).read_text(errors='replace').splitlines()
-terms=('thekain.runtime.lab','lmkd','lowmemorykiller','python.stderr','AndroidRuntime','Fatal signal','TheKaiNRuntime')
+terms=('thekain.runtime.lab','lmkd','lowmemorykiller','python.stderr','AndroidRuntime','Fatal signal','TheKaiNRuntime','TheKaiNIsolated','avc: denied','transaction failed','Failed reply')
 for line in [s for s in lines if any(term in s for term in terms)][-120:]: print(line)
 PY
   fi
-  adb -s "$ANDROID_SERIAL" shell am force-stop com.thekain.runtime.lab >/dev/null 2>&1 || true
+  timeout 8 adb -s "$ANDROID_SERIAL" shell am force-stop com.thekain.runtime.lab >/dev/null 2>&1 || true
   exit "$result"
 }
 trap cleanup EXIT
@@ -86,6 +95,15 @@ adb -s "$ANDROID_SERIAL" shell pidof system_server | tr -d '\r' > "$evidence/sys
 test -s "$evidence/system-server-before.txt"
 adb -s "$ANDROID_SERIAL" install -r -t "$delivery/lab.apk"
 adb -s "$ANDROID_SERIAL" install -r -t "$delivery/tests.apk"
+# A passing run still executes all original 27 and all additional 27 below.
+timeout 80 adb -s "$ANDROID_SERIAL" shell am instrument -w -e class 'com.thekain.runtime.lab.IsolatedRuntimeTest#separateUidInterpreterSealedResourcesAndOpenSsl' com.thekain.runtime.lab.test/androidx.test.runner.AndroidJUnitRunner > "$evidence/isolated-bootstrap.txt"
+python3 - "$evidence/isolated-bootstrap.txt" <<'PYBOOT'
+from pathlib import Path
+import re,sys
+text=Path(sys.argv[1]).read_text();print(text)
+assert re.search(r'^OK \(1 test\)\s*$',text,re.M), 'Isolated UID real JNI/IPC bootstrap failed; full matrix is NOT passed'
+assert not any(s in text for s in ('FAILURES!!!','shortMsg=','INSTRUMENTATION_FAILED'))
+PYBOOT
 timeout 600 adb -s "$ANDROID_SERIAL" shell am instrument -w -e class com.thekain.runtime.lab.NativeLabTest,com.thekain.runtime.lab.RuntimeProcessTest,com.thekain.runtime.lab.LabLifecycleTest com.thekain.runtime.lab.test/androidx.test.runner.AndroidJUnitRunner > "$evidence/instrumentation.txt" &
 driver=$!
 bash rewrite/experiments/android_native/sample-meminfo.sh "$driver" "$evidence" &
@@ -114,3 +132,54 @@ assert not any(s in text for s in ('FAILURES!!!','shortMsg=','INSTRUMENTATION_FA
 print('::notice::'+json.dumps({'native_JNI_smoke':'PASS','api':int(sys.argv[2]),'actual_page_size':int(sys.argv[3]),'tests':27,'production_ready':False}))
 PY
 python3 rewrite/experiments/android_native/lifecycle-smoke.py --evidence "$evidence" --delivery "$delivery"
+timeout 600 adb -s "$ANDROID_SERIAL" shell am instrument -w -e class com.thekain.runtime.lab.IsolatedRuntimeTest,com.thekain.runtime.lab.IsolatedQaTest com.thekain.runtime.lab.test/androidx.test.runner.AndroidJUnitRunner > "$evidence/isolated-instrumentation.txt" &
+driver=$!
+bash rewrite/experiments/android_native/sample-meminfo.sh "$driver" "$evidence" isolated &
+sampler=$!
+bash rewrite/experiments/android_native/sample-meminfo.sh "$driver" "$evidence" observer &
+observer_sampler=$!
+result=0
+wait "$driver" || result=$?
+kill "$sampler" 2>/dev/null || true
+wait "$sampler" 2>/dev/null || true
+kill "$observer_sampler" 2>/dev/null || true
+wait "$observer_sampler" 2>/dev/null || true
+adb -s "$ANDROID_SERIAL" exec-out run-as com.thekain.runtime.lab cat files/isolated-evidence.jsonl > "$evidence/isolated-evidence.jsonl"
+test "$result" = 0
+adb -s "$ANDROID_SERIAL" exec-out run-as com.thekain.runtime.lab cat files/isolated-qa-report.json > "$evidence/isolated-qa-report.json" 2>/dev/null || true
+for label in entry suite-result recreated-cancelled; do
+  adb -s "$ANDROID_SERIAL" exec-out run-as com.thekain.runtime.lab cat "files/isolated-qa-evidence/$label.png" > "$evidence/isolated-qa-$label.png" 2>/dev/null || true
+done
+python3 rewrite/experiments/android_native/isolated_report.py --evidence "$evidence" --api "$api" --pages "$pages"
+adb -s "$ANDROID_SERIAL" shell pidof system_server | tr -d '\r' > "$evidence/system-server-after-isolated.txt"
+cmp "$evidence/system-server-before.txt" "$evidence/system-server-after-isolated.txt"
+
+# Deliberately poison the final isolated lease: no further runtime operation follows.
+# Successful kernel proof from the full suite above is retained separately.
+timeout 80 adb -s "$ANDROID_SERIAL" shell am instrument -w -e class com.thekain.runtime.lab.ObserverFailureTest com.thekain.runtime.lab.test/androidx.test.runner.AndroidJUnitRunner > "$evidence/observer-failure-instrumentation.txt"
+adb -s "$ANDROID_SERIAL" exec-out run-as com.thekain.runtime.lab cat files/observer-failure.json > "$evidence/observer-failure.json"
+python3 - "$evidence/observer-failure-instrumentation.txt" "$evidence/observer-failure.json" <<'PYOBSERVER'
+from pathlib import Path
+import re,sys,json
+text=Path(sys.argv[1]).read_text();print(text)
+assert re.search(r'^OK \(1 test\)\s*$',text,re.M), 'Observer-loss fail-closed test must execute'
+assert not any(s in text for s in ('FAILURES!!!','shortMsg=','INSTRUMENTATION_FAILED'))
+proof=json.loads(Path(sys.argv[2]).read_text())
+assert all(proof[k] is True for k in ('observer_lost','supervisor_binder_dead','kernel_death_not_claimed','main_responsive','durable_reuse_refused'))
+assert proof['worker_uid']==proof['observer_uid'] and proof['production_ready'] is False
+print('::notice::'+json.dumps(proof))
+PYOBSERVER
+python3 - "$evidence/observer-failure.json" "$evidence" <<'PYPDEATH'
+import json,subprocess,sys,time,os
+from pathlib import Path
+proof=json.loads(Path(sys.argv[1]).read_text());pid=proof['worker_pid'];assert isinstance(pid,int) and pid>0
+for attempt in range(30):
+    proc=subprocess.run(['adb','-s',os.environ['ANDROID_SERIAL'],'shell','cat',f'/proc/{pid}/stat'],capture_output=True,text=True,timeout=5)
+    if proc.returncode!=0 and 'No such file or directory' in proc.stderr+proc.stdout:
+        print('::notice::Independent shell confirmed native child absent after supervisor death (PDEATHSIG fallback; app lease remains blocked)')
+        break
+    time.sleep(.1)
+else:raise AssertionError('Native child death after supervisor loss is not independently confirmed')
+PYPDEATH
+adb -s "$ANDROID_SERIAL" shell pidof system_server | tr -d '\r' > "$evidence/system-server-after-observer-fault.txt"
+cmp "$evidence/system-server-before.txt" "$evidence/system-server-after-observer-fault.txt"

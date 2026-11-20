@@ -3,5 +3,7 @@
     <application android:label="TheKaiN Runtime Lab" android:icon="@drawable/lab_icon" android:allowBackup="false" android:fullBackupContent="false" android:dataExtractionRules="@xml/no_data_transfer" android:usesCleartextTraffic="false">
         <service android:name=".RuntimeService" android:process=":python_runtime"
             android:exported="false" android:isolatedProcess="false" android:stopWithTask="true"/>
+        <service android:name=".IsolatedRuntimeService" android:process=":isolated_python"
+            android:exported="false" android:isolatedProcess="true" android:stopWithTask="true"/>
     </application>
 </manifest>

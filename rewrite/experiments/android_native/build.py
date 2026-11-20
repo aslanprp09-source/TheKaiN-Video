@@ -225,6 +225,15 @@ def build(work, abis, source_cache=None, ndk_archive=None):
              '-Wl,--no-rosegment','-Wl,-z,max-page-size=16384','-Wl,--no-undefined','-o',native/'libthekain_lab.so'],work,target_env,work/(abi+'-jni.log'))
         observed['libthekain_lab.so'] = elf_report(native/'libthekain_lab.so',pin['machine'],tools/'llvm-readelf')
         observed['libthekain_lab.so']['packaged_name'] = 'libthekain_lab.so'
+        # Own source only: libc-only trusted JNI supervisor and standalone exec child (no ART).
+        for source,name,extra in (
+                ('supervisor_jni.c','libthekain_supervisor.so',['-shared','-fPIC']),
+                ('child_main.c','libthekain_child.so',['-fPIE','-pie','-I'+str(prefix/'include/python3.14'),'-L'+str(prefix/'lib'),'-lpython3.14','-I'+str(sslprefix/'include'),'-L'+str(sslprefix/'lib'),'-lssl','-lcrypto','-lm','-ldl'])):
+            run([tools/(pin['triplet']+'26-clang'),'-O2',ROOT/source,*extra,
+                 '-Wl,--no-rosegment','-Wl,-z,max-page-size=16384','-Wl,--no-undefined',
+                 '-o',native/name],work,target_env,work/(abi+'-'+source+'.log'))
+            observed[name]=elf_report(native/name,pin['machine'],tools/'llvm-readelf')
+            observed[name]['packaged_name']=name
         files = {str(p.relative_to(dest)):{'bytes':p.stat().st_size,'sha256':digest(p)}
                  for p in sorted(dest.rglob('*')) if p.is_file()}
         (package/'assets'/('inventory-'+abi+'.json')).write_text(json.dumps(files,sort_keys=True)+'\n')

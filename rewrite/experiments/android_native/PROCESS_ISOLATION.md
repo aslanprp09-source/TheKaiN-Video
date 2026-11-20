@@ -1,5 +1,9 @@
 # Runtime process, cancellation and resource experiment
 
+The subsequent genuine isolated-UID backend is specified in
+[UID_ISOLATION.md](UID_ISOLATION.md). The shared-UID baseline below is retained
+unchanged for comparison; its successful phone runs do not prove the new boundary.
+
 The subsequent standalone debug QA harness and physical ARM64/background protocol
 are specified in [DEVICE_QA.md](DEVICE_QA.md). It adds four lifecycle tests plus
 independent UID/owner-restart probes; all original 23 below remain. Phone results

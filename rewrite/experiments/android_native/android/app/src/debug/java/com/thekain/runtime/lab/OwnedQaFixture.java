@@ -18,7 +18,10 @@ final class OwnedQaFixture implements AutoCloseable {
     final String url;
     private volatile boolean closed;
     OwnedQaFixture(Context context) throws Exception {
-        File home=RuntimeAssets.prepare(context),folder=new File(home,"fixtures");
+        this(context,RuntimeAssets.prepare(context));
+    }
+    OwnedQaFixture(Context context,File home) throws Exception {
+        File folder=new File(home,"fixtures");
         if(!folder.mkdirs() && !folder.isDirectory())throw new IOException("FIXTURE_DIRECTORY");
         HeldCertificate cert=new HeldCertificate.Builder().commonName("owned QA fixture")
             .addSubjectAlternativeName("127.0.0.1").build();

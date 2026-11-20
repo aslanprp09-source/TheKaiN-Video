@@ -27,10 +27,14 @@ sys.addaudithook(audit)
 
 def openssl_memory_handshake():
     """Real OpenSSL client/server handshake without granting Python a socket."""
+    if hasattr(_thekain_transport,'memory_tls'):
+        return _thekain_transport.memory_tls(ssl.OPENSSL_VERSION)
     root=Path(sys.prefix)/'fixtures'
     server=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    server.load_cert_chain(root/'owned-ca.pem',root/'owned-key.pem')
-    client=ssl.create_default_context(cafile=root/'owned-ca.pem')
+    certificate=getattr(sys,'_thekain_fixture_cert',root/'owned-ca.pem')
+    key=getattr(sys,'_thekain_fixture_key',root/'owned-key.pem')
+    server.load_cert_chain(certificate,key)
+    client=ssl.create_default_context(cafile=certificate)
     ci,co,si,so=(ssl.MemoryBIO() for _ in range(4))
     peers=(client.wrap_bio(ci,co,server_hostname='127.0.0.1'),server.wrap_bio(si,so,server_side=True))
     done=[False,False]
@@ -105,6 +109,9 @@ def dispatch(raw):
             except MemoryError:
                 del chunks
                 result={'status':'FAIL','error_code':'MEMORY_LIMIT'}
+        elif request.get('op')=='malformed_channel':
+            _thekain_transport.malformed()  # Fixed lab-only oversized frame; never arbitrary code.
+            raise RuntimeError('MALFORMED_CHILD_FRAME_ACCEPTED')
         elif request.get('op')=='output_flood':
             return 'x'*70000
         elif request.get('op') in ('request_flood','byte_flood'):
@@ -112,6 +119,20 @@ def dispatch(raw):
             network=FixtureNetwork()
             for _ in range(13): network.open(request['url'])
             raise RuntimeError('JAVA_REQUEST_BUDGET_WAS_NOT_ENFORCED')
+        elif request.get('op')=='isolated_security':
+            import errno
+            denied=0
+            canary=Path(request['owner_canary'])
+            for bit,mode in ((1,'rb'),(2,'ab')):
+                try:
+                    with canary.open(mode): pass
+                except (PermissionError,FileNotFoundError): denied |= bit
+            # posix.open is a real kernel path open, not an audit-hook simulation.
+            if denied!=3: raise RuntimeError('OWNER_FILES_ACCESSIBLE')
+            import _socket
+            try: _socket.socket()
+            except (SpikeError,PermissionError): denied |= 4
+            result={'status':'PASS','security_denials':denied}
         elif request.get('op')=='direct_socket':
             import socket
             try: socket.socket()

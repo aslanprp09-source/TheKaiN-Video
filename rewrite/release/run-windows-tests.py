@@ -18,7 +18,11 @@ class Result(unittest.TextTestResult):
         print('::error title=Native desktop test::' + value.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A'))
 
 
-root = Path(__file__).parents[1] / 'windows'
+repository = Path(__file__).resolve().parents[2]
+root = repository / 'rewrite' / 'windows'
+# File entrypoints do not automatically put the repository working directory on
+# sys.path (unlike `python -m unittest`); experiment suites are package imports.
+sys.path.insert(0, str(repository))
 sys.path.insert(0, str(root))
 suite = unittest.defaultTestLoader.discover(str(root), pattern='test_*.py')
 result = unittest.TextTestRunner(verbosity=2, resultclass=Result).run(suite)

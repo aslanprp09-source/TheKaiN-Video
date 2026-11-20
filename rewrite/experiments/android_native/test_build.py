@@ -8,6 +8,7 @@ from pathlib import Path
 import struct
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import unittest
 import zipfile
@@ -30,15 +31,24 @@ if [ "$4" = pidof ]; then
   if [ "$n" -lt 3 ]; then exit 1; fi
   echo 4321
 else
-  echo 'MEMINFO in pid 4321 [own test fixture, not a device measurement]'
+  # Match Android's native branch: the heading is absent without explicit details.
+  if [ "$4" = dumpsys ] && [ "$5" = meminfo ] && [ "$6" = -a ]; then
+    n=0; if [ -f "$MEMINFO_TEST_DUMPS" ]; then n=$(cat "$MEMINFO_TEST_DUMPS"); fi
+    n=$((n+1)); echo "$n" > "$MEMINFO_TEST_DUMPS"
+    if [ "$n" -lt 3 ]; then echo 'No process found for: 4321'; exit 0; fi
+    echo 'MEMINFO in pid 4321 [own test fixture, not a device measurement]'
+  else
+    echo 'Native memory table without per-PID heading'
+  fi
 fi
 ''')
             adb.chmod(0o755)
             env={**os.environ,'PATH':str(folder)+os.pathsep+os.environ['PATH'],
-                 'ANDROID_SERIAL':'emulator-test','MEMINFO_TEST_STATE':str(folder/'state')}
+                 'ANDROID_SERIAL':'emulator-test','MEMINFO_TEST_STATE':str(folder/'state'),
+                 'MEMINFO_TEST_DUMPS':str(folder/'dumps')}
             with subprocess.Popen(['sleep','2']) as driver:
                 with subprocess.Popen(['bash',str(Path(__file__).with_name('sample-meminfo.sh')),
-                                       str(driver.pid),str(folder)],env=env,stdout=subprocess.PIPE,
+                                       str(driver.pid),str(folder),'isolated'],env=env,stdout=subprocess.PIPE,
                                       stderr=subprocess.PIPE,text=True) as sampler:
                     driver.wait(timeout=3)
                     stdout,stderr=sampler.communicate(timeout=3)
@@ -47,6 +57,7 @@ fi
             self.assertEqual(len(snapshots),1)
             self.assertIn('MEMINFO in pid 4321',snapshots[0].read_text())
             self.assertGreaterEqual(int((folder/'state').read_text()),3)
+            self.assertEqual(int((folder/'dumps').read_text()),3)
 
     @unittest.skipUnless(sys.platform=='linux' and platform.machine()=='x86_64','Linux/x86_64 kernel reference test')
     def test_native_kernel_blocks_sockets_and_rejects_allocation_above_address_space_limit(self):
@@ -74,6 +85,136 @@ int main(void) {
             result=subprocess.run([str(root/'probe')],capture_output=True,text=True,timeout=10)
             self.assertEqual(result.returncode,0,result.stderr)
             self.assertEqual(result.stdout.strip(),'KERNEL_BUDGET_PASS')
+
+    @unittest.skipUnless(sys.platform=='linux' and platform.machine()=='x86_64','Linux/x86_64 kernel contract; Android matrix remains mandatory')
+    def test_exec_child_cannot_attack_supervisor_or_disable_parent_death_and_is_killed_with_it(self):
+        source=r"""
+#include "runtime_child_fence.h"
+#include <assert.h>
+#include <fcntl.h>
+#include <signal.h>
+#include <sys/ptrace.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
+#include <time.h>
+static int child_check(pid_t parent) {
+    assert(setup_parent_lifetime(parent)==0);
+    RuntimeKernelLimits limits;assert(configure_runtime_limits(64ULL*1024*1024,5,&limits)==0);
+    assert(limit_child_files()==0);assert(fence_native_child()==0);
+    struct rlimit files;assert(getrlimit(RLIMIT_NOFILE,&files)==0 && files.rlim_cur==64 && files.rlim_max==64);
+    assert(syscall(__NR_memfd_create,"thekain-denied",0)==-1 && errno==EPERM);
+    int tiny=1;assert(setsockopt(0,SOL_SOCKET,SO_SNDBUF,&tiny,sizeof(tiny))==-1 && errno==EPERM);
+    char path[64];snprintf(path,sizeof(path),"/proc/%d/mem",parent);
+    assert(open(path,O_RDONLY)==-1 && (errno==EACCES || errno==EPERM));
+    assert(fcntl(0,F_SETOWN,parent)==-1 && errno==EPERM);
+    assert(ioctl(0,FIOSETOWN,&parent)==-1 && errno==EPERM);
+    assert(syscall(__NR_setfsuid,getuid())==-1 && errno==EPERM);
+    assert(syscall(__NR_unshare,0)==-1 && errno==EPERM);
+    assert(kill(parent,0)==-1 && errno==EPERM);
+    assert(kill(0,0)==-1 && errno==EPERM);
+    assert(kill(-1,0)==-1 && errno==EPERM);
+    assert(kill(getpid(),0)==0);
+    assert(syscall(__NR_tgkill,parent,parent,0)==-1 && errno==EPERM);
+    assert(syscall(__NR_ptrace,PTRACE_PEEKDATA,parent,0,0)==-1 && errno==EPERM);
+    assert(syscall(__NR_prlimit64,parent,RLIMIT_CPU,NULL,NULL)==-1 && errno==EPERM);
+    assert(prctl(PR_SET_PDEATHSIG,0)==-1 && errno==EPERM);
+    assert(syscall(__NR_clone,~0UL,0,0,0,0)==-1 && errno==EPERM);
+    assert(syscall(__NR_execve,"/thekain-missing",NULL,NULL)==-1 && errno==EPERM);
+    return 0;
+}
+int main(void) {
+    assert(prctl(PR_SET_CHILD_SUBREAPER,1)==0);assert(prctl(PR_SET_DUMPABLE,0)==0);
+    // Kernel proc metadata + F_GETFL works without depending on fdinfo traversal policy.
+    int record=open("/proc/self/stat",O_RDONLY);assert(record>=0);struct stat held,actual;
+    assert(fstat(record,&held)==0 && stat("/proc/self/stat",&actual)==0);
+    assert(held.st_dev==actual.st_dev && held.st_ino==actual.st_ino && S_ISREG(held.st_mode));
+    assert((fcntl(record,F_GETFL)&O_ACCMODE)==O_RDONLY);close(record);
+    pid_t parent=getpid(),child=fork();assert(child>=0);
+    if(child==0)_exit(child_check(parent));
+    int status;assert(waitpid(child,&status,0)==child && WIFEXITED(status) && WEXITSTATUS(status)==0);
+    int channel[2];assert(pipe(channel)==0);
+    pid_t monitor=fork();assert(monitor>=0);
+    if(monitor==0) {
+        close(channel[0]);pid_t self=getpid();pid_t worker=fork();assert(worker>=0);
+        if(worker==0) {assert(setup_parent_lifetime(self)==0);assert(write(channel[1],&((pid_t){getpid()}),sizeof(pid_t))==sizeof(pid_t));for(;;)pause();}
+        close(channel[1]);for(;;)pause();
+    }
+    close(channel[1]);pid_t worker=0;assert(read(channel[0],&worker,sizeof(worker))==sizeof(worker) && worker>0);close(channel[0]);
+    assert(kill(monitor,SIGKILL)==0);assert(waitpid(monitor,&status,0)==monitor && WIFSIGNALED(status));
+    struct timespec tick={0,10000000};int dead=0;
+    for(int i=0;i<300;i++) {if(waitpid(worker,&status,WNOHANG)==worker) {dead=1;break;}nanosleep(&tick,NULL);}
+    if(!dead)kill(worker,SIGKILL);
+    assert(dead && WIFSIGNALED(status) && WTERMSIG(status)==SIGKILL);
+    puts("FENCED_CHILD_AND_PARENT_DEATH_PASS");
+}
+"""
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);(root/'test.c').write_text(source)
+            subprocess.run(['gcc','-std=gnu11','-Wall','-Wextra','-Werror','-I',str(Path(__file__).parent),
+                str(root/'test.c'),'-o',str(root/'probe')],check=True,capture_output=True,timeout=30)
+            result=subprocess.run([str(root/'probe')],capture_output=True,text=True,timeout=10)
+            self.assertEqual(result.returncode,0,result.stderr)
+            self.assertEqual(result.stdout.strip(),'FENCED_CHILD_AND_PARENT_DEATH_PASS')
+
+    @unittest.skipUnless(sys.platform=='linux' and platform.machine()=='x86_64','Actual embedded-Python/sealed-FD contract on Linux; Android matrix remains mandatory')
+    def test_zipimport_bootstraps_from_sealed_fd_when_all_file_reopens_are_denied(self):
+        source=r"""
+#define _GNU_SOURCE
+#include "sealed_code_hook.h"
+#include <linux/memfd.h>
+#include <assert.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <linux/filter.h>
+#include <linux/seccomp.h>
+#include <stddef.h>
+#include <sys/prctl.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+int main(int argc,char **argv) {
+    assert(argc==2);int fd=open(argv[1],O_RDONLY);assert(fd>=0);
+    int sealed=(int)syscall(__NR_memfd_create,"sealed-test",MFD_CLOEXEC|MFD_ALLOW_SEALING);assert(sealed>=0);
+    char buffer[4096];ssize_t n;while((n=read(fd,buffer,sizeof(buffer)))>0)assert(write(sealed,buffer,(size_t)n)==n);assert(n==0);close(fd);
+    assert(fcntl(sealed,F_ADD_SEALS,F_SEAL_WRITE|F_SEAL_GROW|F_SEAL_SHRINK|F_SEAL_SEAL)==0);
+    assert(dup2(sealed,3)==3);if(sealed!=3)close(sealed);
+    assert(unlink(argv[1])==0);assert(PyFile_SetOpenCodeHook(sealed_code_open,NULL)==0);
+    PyPreConfig pre;PyPreConfig_InitIsolatedConfig(&pre);pre.configure_locale=0;pre.utf8_mode=1;
+    PyStatus status=Py_PreInitialize(&pre);assert(!PyStatus_Exception(status));
+    struct sock_filter ops[]={
+        BPF_STMT(BPF_LD|BPF_W|BPF_ABS,offsetof(struct seccomp_data,nr)),
+        BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,__NR_open,2,0),
+        BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,__NR_openat,1,0),
+        BPF_STMT(BPF_RET|BPF_K,SECCOMP_RET_ALLOW),BPF_STMT(BPF_RET|BPF_K,SECCOMP_RET_ERRNO|EACCES)
+    };
+    struct sock_fprog policy={sizeof(ops)/sizeof(ops[0]),ops};
+    assert(prctl(PR_SET_NO_NEW_PRIVS,1,0,0,0)==0 && prctl(PR_SET_SECCOMP,SECCOMP_MODE_FILTER,&policy)==0);
+    PyConfig cfg;PyConfig_InitIsolatedConfig(&cfg);cfg.site_import=0;cfg.write_bytecode=0;cfg.install_signal_handlers=0;
+    status=PyConfig_SetBytesString(&cfg,&cfg.home,"/");assert(!PyStatus_Exception(status));cfg.module_search_paths_set=1;
+    status=PyWideStringList_Append(&cfg.module_search_paths,L"/proc/self/fd/3");assert(!PyStatus_Exception(status));
+    status=Py_InitializeFromConfig(&cfg);PyConfig_Clear(&cfg);
+    if(PyStatus_Exception(status)) {fprintf(stderr,"%s\n",status.err_msg);return 2;}
+    PyObject *module=PyImport_ImportModule("sealed_demo");if(!module) {PyErr_Print();return 3;}
+    PyObject *value=PyObject_GetAttrString(module,"VALUE");assert(value && PyLong_AsLong(value)==42 && sealed_code_reads>0);
+    PyObject *path=PyUnicode_FromString("/tmp/unverified.py");assert(sealed_code_open(path,NULL)==NULL && PyErr_ExceptionMatches(PyExc_PermissionError));PyErr_Clear();
+    puts("FD_IMPORT_WITHOUT_REOPEN_PASS");return 0;
+}
+"""
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);archive=root/'runtime.zip'
+            stdlib=Path(sysconfig.get_path('stdlib'))
+            with zipfile.ZipFile(archive,'w',compression=zipfile.ZIP_STORED) as z:
+                for name in ('__init__.py','aliases.py','utf_8.py','ascii.py','latin_1.py'):
+                    z.write(stdlib/'encodings'/name,'encodings/'+name)
+                z.writestr('sealed_demo.py','VALUE = 6 * 7\n')
+            (root/'test.c').write_text(source)
+            base=Path(sys.base_prefix);version=f'{sys.version_info.major}.{sys.version_info.minor}'
+            include=Path(sysconfig.get_path('include'));lib=base/'lib'
+            subprocess.run(['gcc','-std=gnu11','-Wall','-Wextra','-Werror','-I',str(Path(__file__).parent),
+                '-I',str(include),str(root/'test.c'),'-L',str(lib),'-lpython'+version,
+                '-Wl,-rpath,'+str(lib),'-lm','-ldl','-o',str(root/'probe')],check=True,capture_output=True,timeout=30)
+            result=subprocess.run([str(root/'probe'),str(archive)],capture_output=True,text=True,timeout=15)
+            self.assertEqual(result.returncode,0,result.stderr)
+            self.assertEqual(result.stdout.strip(),'FD_IMPORT_WITHOUT_REOPEN_PASS')
 
     def test_apk_missing_tampered_or_extra_python_assets_are_rejected_before_device(self):
         payload=b'# own Python package fixture\n';name='lib/python3.14/__phello__/__init__.py'

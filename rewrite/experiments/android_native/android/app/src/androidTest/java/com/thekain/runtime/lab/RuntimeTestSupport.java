@@ -31,6 +31,7 @@ public abstract class RuntimeTestSupport {
         server.useHttps(new HandshakeCertificates.Builder().heldCertificate(cert).build().sslSocketFactory(),false);
         server.setDispatcher(new Dispatcher() {
             @Override public MockResponse dispatch(RecordedRequest request) {
+                if("/stall".equals(request.getPath()))return new MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE);
                 if("/large".equals(request.getPath()))return new MockResponse().setHeader("Content-Type","text/html").setBody(repeat(600*1024));
                 if("/bytes".equals(request.getPath()))return new MockResponse().setHeader("Content-Type","text/html").setBody(repeat(400*1024));
                 if("/escape".equals(request.getPath()))return new MockResponse().setResponseCode(302).setHeader("Location","https://127.0.0.1:1/forbidden");
