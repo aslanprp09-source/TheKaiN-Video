@@ -10,15 +10,15 @@ public final class IsolatedInput implements Parcelable,AutoCloseable {
     final int mode;
     final ParcelFileDescriptor resources,certificate,key;
     final long bytes;
-    final String sha256;
+    final String sha256,canaryPath;
     IsolatedInput(RuntimeRequest request,int mode,ParcelFileDescriptor resources,
-            ParcelFileDescriptor certificate,ParcelFileDescriptor key,long bytes,String sha256) {
+            ParcelFileDescriptor certificate,ParcelFileDescriptor key,long bytes,String sha256,String canaryPath) {
         this.request=request;this.mode=mode;this.resources=resources;this.certificate=certificate;this.key=key;
-        this.bytes=bytes;this.sha256=sha256;validate();
+        this.bytes=bytes;this.sha256=sha256;this.canaryPath=canaryPath;validate();
     }
     private IsolatedInput(Parcel p) {
         request=RuntimeRequest.CREATOR.createFromParcel(p);mode=p.readInt();bytes=p.readLong();
-        sha256=Wire.string(p,64,false);
+        sha256=Wire.string(p,64,false);canaryPath=Wire.string(p,512,false);
         ParcelFileDescriptor[] fds=readDescriptors(p);resources=fds[0];certificate=fds[1];key=fds[2];
         try {validate();}catch(RuntimeException e) {close();throw e;}
     }
@@ -30,10 +30,12 @@ public final class IsolatedInput implements Parcelable,AutoCloseable {
     void validate() {
         Wire.check(request!=null);request.validate();Wire.check(mode>=NORMAL && mode<=PLATFORM_CREDENTIAL);
         Wire.check(resources!=null && certificate!=null && key!=null && bytes>0 && bytes<=160L*1024*1024);
+        Wire.check(canaryPath!=null && canaryPath.length()<=512 && canaryPath.startsWith("/")
+            && canaryPath.endsWith("/com.thekain.runtime.lab/files/isolated-owner-canary") && !canaryPath.contains("..") && canaryPath.indexOf(0)<0);
         Wire.check(sha256!=null && sha256.matches("[0-9a-f]{64}"));
     }
     @Override public void writeToParcel(Parcel p,int flags) {
-        validate();request.writeToParcel(p,flags);p.writeInt(mode);p.writeLong(bytes);p.writeString(sha256);
+        validate();request.writeToParcel(p,flags);p.writeInt(mode);p.writeLong(bytes);p.writeString(sha256);p.writeString(canaryPath);
         resources.writeToParcel(p,flags);certificate.writeToParcel(p,flags);key.writeToParcel(p,flags);
     }
     @Override public int describeContents() {return CONTENTS_FILE_DESCRIPTOR;}

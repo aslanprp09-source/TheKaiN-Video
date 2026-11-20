@@ -54,9 +54,9 @@ public final class IsolatedRuntimeService extends Service {
             retiring=true;monitor.post(IsolatedRuntimeService.this::killChild);
         }
     };
-    private int javaDenials() throws Exception {
+    private int javaDenials(String canaryPath) throws Exception {
         int flags=0;
-        File canary=new File(getApplicationInfo().dataDir,"files/isolated-owner-canary");
+        File canary=new File(canaryPath);
         try(InputStream ignored=new FileInputStream(canary)) {throw new IOException("OWNER_READ_ALLOWED");}
         catch(FileNotFoundException expected) {if(!deniedOrHidden(expected))throw expected;flags|=1;}
         try(OutputStream ignored=new FileOutputStream(canary,true)) {throw new IOException("OWNER_WRITE_ALLOWED");}
@@ -111,7 +111,7 @@ public final class IsolatedRuntimeService extends Service {
             try(ParcelFileDescriptor zip=ParcelFileDescriptor.adoptFd(SupervisorNative.seal(input.resources.getFd(),input.bytes));
                     ParcelFileDescriptor cert=ParcelFileDescriptor.adoptFd(SupervisorNative.seal(input.certificate.getFd(),16384));
                     ParcelFileDescriptor key=ParcelFileDescriptor.adoptFd(SupervisorNative.seal(input.key.getFd(),16384))) {
-                stage="ANDROID_UID_DENIALS";denials=javaDenials();
+                stage="ANDROID_UID_DENIALS";denials=javaDenials(input.canaryPath);
                 try {Os.write(input.resources.getFileDescriptor(),new byte[]{0},0,1);throw new IOException("WRITABLE_INPUT");}
                 catch(ErrnoException expected) {if(expected.errno!=OsConstants.EBADF)throw expected;denials|=16;}
                 try {Os.write(zip.getFileDescriptor(),new byte[]{0},0,1);throw new IOException("WRITABLE_SEALED_INPUT");}
@@ -144,7 +144,7 @@ public final class IsolatedRuntimeService extends Service {
                     String[] names={"","probe","analyze","block_exec","hang","crash","memory","bad_reply","output_flood","request_flood","direct_socket","byte_flood"};
                     JSONObject json=new JSONObject().put("op",input.mode==IsolatedInput.SECURITY?"isolated_security":input.mode==IsolatedInput.CHILD_FRAME?"malformed_channel":names[request.operation]);
                     if(request.url!=null)json.put("url",request.url);
-                    if(input.mode==IsolatedInput.SECURITY)json.put("owner_data",getApplicationInfo().dataDir);
+                    if(input.mode==IsolatedInput.SECURITY)json.put("owner_canary",input.canaryPath);
                     if(input.mode==IsolatedInput.IPC_FLOOD && (owner.fetch(UUID.randomUUID().toString(),request.url,"GET").error!=RuntimeResult.IPC_ERROR
                             || owner.fetch(request.id,"file:///etc/passwd","GET").error!=RuntimeResult.OUT_OF_SCOPE
                             || owner.fetch(request.id,request.url,"POST").error!=RuntimeResult.INVALID_REQUEST))throw new IOException("BROKER_BOUNDARY");

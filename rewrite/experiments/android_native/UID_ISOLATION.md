@@ -103,6 +103,9 @@ no writable extracted Python tree. The isolated UID itself lacks INTERNET and
 cannot read/write the owner's private canary; Java OS-denial checks occur before
 the additional child filter, and Python repeats the file/network negative tests.
 On API35 app-data namespace isolation can return ENOENT for a real owner file.
+The owner supplies only its fixed canary filename from its own Context; the
+bounded typed metadata cannot select another filename. This prevents a different
+Service data-directory view from accidentally probing an unrelated path.
 Only kernel EACCES/EPERM/ENOENT are accepted; the main owner must independently
 prove its unique canary exists and remains unchanged before clearing the lease.
 Missing or changed owner data poisons reuse rather than authorizing success.

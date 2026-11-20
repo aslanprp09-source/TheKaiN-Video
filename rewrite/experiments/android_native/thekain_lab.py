@@ -122,7 +122,7 @@ def dispatch(raw):
         elif request.get('op')=='isolated_security':
             import errno
             denied=0
-            canary=Path(request['owner_data'])/'files'/'isolated-owner-canary'
+            canary=Path(request['owner_canary'])
             for bit,mode in ((1,'rb'),(2,'ab')):
                 try:
                     with canary.open(mode): pass

@@ -68,7 +68,7 @@ final class IsolatedResources {
             try(InputStream in=new FileInputStream(new File(home,"fixtures/owned-key.pem"))) {key=snapshot(context,bytes(in,16384));}
             String digest=hex(hash.digest());if(mode==IsolatedInput.BAD_DIGEST)digest="0000000000000000000000000000000000000000000000000000000000000000";
             if(!zip.delete())throw new IOException("RESOURCE_UNLINK");
-            return new IsolatedInput(request,mode,resources,certificate,key,size,digest);
+            return new IsolatedInput(request,mode,resources,certificate,key,size,digest,context.getFileStreamPath("isolated-owner-canary").getAbsolutePath());
         }catch(Exception e) {
             for(ParcelFileDescriptor fd:new ParcelFileDescriptor[]{resources,certificate,key})if(fd!=null)fd.close();throw e;
         }finally {if(zip.exists())zip.delete();}
