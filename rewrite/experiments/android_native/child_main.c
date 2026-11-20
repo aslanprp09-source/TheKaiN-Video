@@ -14,6 +14,14 @@ static int write_all(const void *buffer,size_t count) {const char *p=buffer;whil
 static int put32(uint32_t n) {n=htonl(n);return write_all(&n,4);}
 static int get32(uint32_t *n) {if(read_all(n,4))return -1;*n=ntohl(*n);return 0;}
 static int put64(uint64_t n) {return put32((uint32_t)(n>>32)) || put32((uint32_t)n);}
+/* Only the dedicated pre-Python negative operation installs this handler.
+ * Verify the kernel's syscall number/code; do not classify an arbitrary exit as a denial. */
+static void credential_sigsys(int signal,siginfo_t *info,void *context) {
+    (void)context;uint32_t ack;
+    if(signal!=SIGSYS || !info || info->si_code!=SYS_SECCOMP || info->si_syscall!=__NR_setfsuid)_exit(119);
+    if(put32(8) || put32(2))_exit(119);
+    get32(&ack);_exit(118);
+}
 static PyObject *transport_error;
 static PyObject *gate_error(const char *code) {PyErr_SetString(transport_error,code);return NULL;}
 static PyObject *fetch(PyObject *module,PyObject *args) {
@@ -80,15 +88,23 @@ static int child_run(int argc,char **argv) {
     uint32_t size,seconds,ack,headroomMiB,fault;char json[16385];
     if(get32(&size) || size>16384 || !size || read_all(json,size) || get32(&headroomMiB) || get32(&seconds) || get32(&fault) || fault>1)return 102;
     json[size]=0;
+    if(fault==1) {
+        struct sigaction action;memset(&action,0,sizeof(action));action.sa_sigaction=credential_sigsys;
+        action.sa_flags=SA_SIGINFO|SA_RESETHAND;sigemptyset(&action.sa_mask);
+        if(sigaction(SIGSYS,&action,NULL))return 119;
+    }
     RuntimeKernelLimits limits;
     if(limit_child_files() || configure_runtime_limits((uint64_t)headroomMiB*1024*1024,(int)seconds,&limits) || fence_native_child())return 103;
     int protection=hardened(parent);if(protection!=255)return 104;
     if(put32(3) || put64(limits.before) || put64(limits.address) || put64(limits.cpu) || put32((uint32_t)protection)
             || get32(&ack) || ack)return 105;
     if(fault==1) {
-        // The Android app policy kills setfsuid with SIGSYS; our additional denial stays installed.
-        // Exercise that fatal denial only in its dedicated negative test, never a successful probe.
-        syscall(__NR_setfsuid,getuid());return 116;
+        // Android can trap setfsuid with SIGSYS; our additional EPERM denial remains installed.
+        // Exercise it only in this dedicated pre-Python negative operation.
+        long result=syscall(__NR_setfsuid,getuid());
+        if(result!=-1 || errno!=EPERM)return 116;
+        if(put32(8) || put32(1))return 119;
+        get32(&ack);return 117;
     }
     if(PyFile_SetOpenCodeHook(sealed_code_open,NULL))return 117;
     if(PyImport_AppendInittab("_thekain_transport",PyInit__thekain_transport)<0)return 106;

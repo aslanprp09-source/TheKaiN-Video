@@ -37,7 +37,9 @@ def validate(rows):
             assert row['python_entered'] is False, 'Unverified resource/proc FD reached Python'
     assert any(r['error']==7 and r['rss_limit']==64*1024*1024 and r['peak_rss_bytes']>r['rss_limit'] for r in rows), 'No actual independent resident-limit retirement'
     credential=[r for r in rows if r['mode']==7]
-    assert credential and all(r['error']==4 and not r['python_entered'] and r['worker_exit_signal']==31 for r in credential), 'Missing real Android SIGSYS credential denial/recovery'
+    assert credential and all(r['child_protection']==255 and not r['python_entered'] and r['credential_denial_proof'] in (1,2,3)
+        and r['error']==(6 if r['credential_denial_proof']==1 else 4)
+        and (r['credential_denial_proof']!=3 or r['worker_exit_signal']==31) for r in credential), 'Missing measured kernel credential denial/recovery'
     blocked=[r for r in rows if r['mode']==2]
     assert {r['error'] for r in blocked} >= {1,2}, 'Blocked-main forced reap not demonstrated'
     assert all(r['python_entered'] for r in blocked)

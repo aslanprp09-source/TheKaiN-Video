@@ -166,6 +166,10 @@ public final class IsolatedRuntimeService extends Service {
                             long before=in.readLong(),address=in.readLong(),cpu=in.readLong();int mask=in.readInt();
                             if(before<=0 || address!=before+request.virtualHeadroom || cpu<=0 || cpu>64 || mask!=255)throw new IOException("CHILD_FENCE");
                             protection=mask;limits=true;owner.limits(request.id,before,address,cpu,mask);out.writeInt(0);out.flush();
+                        }else if(tag==8 && limits && !started && input.mode==IsolatedInput.PLATFORM_CREDENTIAL) {
+                            int proof=in.readInt();if(proof!=1 && proof!=2)throw new IOException("CHILD_PROTOCOL");
+                            owner.credentialDenied(request.id,proof);completed=true;
+                            owner.completed(request.id,new RuntimeResult(request.id,proof==1?RuntimeResult.INVALID_REQUEST:RuntimeResult.WORKER_DIED),0);return;
                         }else if(tag==2 && limits && !started) {
                             started=true;owner.phase(request.id);out.writeInt(0);out.flush();
                         }else if(tag==1 && started && ++fetches<=13) {

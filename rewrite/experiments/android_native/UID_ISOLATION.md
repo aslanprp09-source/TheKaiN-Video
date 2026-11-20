@@ -73,8 +73,10 @@ and direct-JNI path were removed. No SELinux relaxation, root, hidden API,
 self-reported Python RSS or fake success is used as a substitute.
 
 The current native exec design keeps independent observation in a protected
-parent process within the same isolated UID/category. Its actual Android matrix
-is still **NOT_RUN** until a fresh source build and every target passes.
+parent process within the same isolated UID/category. Its complete Android matrix remains **NOT_ACCEPTED** until every target and
+strict evidence validator passes on the final HEAD. CI183 proved interpreter/
+OpenSSL bootstrap, all original 27 and 26/27 new tests on each of API26/29/35/36;
+the one remaining new credential-denial assertion is corrected below.
 
 ## Verified resources and HTTPS
 
@@ -184,8 +186,9 @@ Local AIDL/APK/app+probe Lint: PASS. Host checks include real embedded-Python
 imports from a sealed FD with all file reopens denied, in addition to the kernel
 process/fence/lifetime checks. Final exact-HEAD CI is still required. Linux kernel tests exercise actual non-dumpability, seccomp
 foreign-process denials and parent-death SIGKILL; Android is still mandatory.
-The new native exec runtime matrix, new physical ARM64 boundary, fresh independent
-review and product integration are **NOT_RUN / NOT_ACCEPTED** pending evidence.
+The complete native exec matrix is **NOT_ACCEPTED** pending final-HEAD evidence.
+The new physical ARM64 boundary and fresh independent review remain **NOT_RUN**;
+product integration is disabled.
 Final exact-HEAD results belong in the PR, never inferred from compilation.
 
 Historical green product/unsigned CI162/164 retained all 41 API35 tests, JVM/Lint,
@@ -225,7 +228,12 @@ before approval. Main, protection, signing keys, releases and QA gates stay inta
 The successful bootstrap does not invoke Android-blacklisted `setfsuid`: AOSP's
 [app blacklist](https://github.com/aosp-mirror/platform_bionic/blob/android10-release/libc/SECCOMP_BLACKLIST_APP.TXT)
 kills it, overriding an additional ERRNO filter with the stronger SIGSYS action.
-A dedicated negative test now requires actual waitpid SIGSYS evidence, no Python
-entry and successful fresh analysis. Linux host tests retain the direct ERRNO
+A dedicated negative test requires measured denial, no Python entry and fresh
+analysis: (1) actual syscall EPERM, (2) SIGSYS with kernel siginfo confirming
+SYS_SECCOMP and the exact setfsuid syscall, or (3) waitpid SIGSYS. A dedicated
+pre-Python handler records case 2 with async-signal-safe channel IO; unknown
+signals/exits are never accepted. API26 CI181 returned EPERM, while API29's
+default handler converted the signal to exit code1, demonstrating why a generic
+exit or one assumed signal number cannot substitute for measured denial. Linux host tests retain the direct ERRNO
 probe; credential denials remain in the native filter. Exit signal/code are
 recorded from the trusted supervisor's waitpid result, never inferred from EOF.
