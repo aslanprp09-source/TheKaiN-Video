@@ -19,8 +19,11 @@ public final class ObserverFailureTest extends RuntimeTestSupport {
             running.whenPythonStarted().get(25,TimeUnit.SECONDS);
             assertTrue(running.observerPid>0);assertEquals(running.peerUid,running.observerUid);
             // Real Android OS teardown of the private observer; no cooperative worker/monitor command.
-            context.unbindService(running.connection);running.bound=false;
-            context.stopService(new Intent(context,IsolatedRuntimeService.class));
+            // Android keys ServiceDispatcher registrations by the binding Context.
+            // IsolatedRuntime binds with Application Context, not target test Context.
+            Context bindingContext=context.getApplicationContext();
+            bindingContext.unbindService(running.connection);running.bound=false;
+            bindingContext.stopService(new Intent(bindingContext,IsolatedRuntimeService.class));
             IsolatedRuntime.Outcome failed=running.completion().get(10,TimeUnit.SECONDS);
             assertEquals(RuntimeResult.CLEANUP_FAILED,failed.result.error);assertFalse(failed.deathConfirmed);
             assertTrue(failed.pythonEntered);assertTrue(failed.samples>0);

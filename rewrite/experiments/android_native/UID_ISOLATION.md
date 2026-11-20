@@ -161,6 +161,11 @@ start another operation. Independent shell evidence must confirm the native
 PDEATHSIG fallback actually ended the child. That outside evidence does **not**
 automatically clear the app's poisoned lease. The test runs last and never erases
 its uncertainty with a test-only reset.
+The fault test must unbind through the same Application Context used by the
+runtime: Android keys ServiceDispatcher registrations by Context. CI193 API26
+passed the full runtime/resource gate but rejected the test's target-Context
+unbind as unregistered, before observer loss was injected. The test uses the
+actual binding Context; missing-death/reuse-refusal assertions remain intact.
 
 An AtomicFile reservation survives owner loss. A replacement owner/supervisor
 fails closed until a real OS reboot increases public BOOT_COUNT. Automatic
