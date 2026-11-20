@@ -39,13 +39,14 @@ public final class IsolatedRuntime implements AutoCloseable {
         final CompletableFuture<Outcome> future=new CompletableFuture<>();
         final CompletableFuture<Integer> started=new CompletableFuture<>();
         final AtomicBoolean fetching=new AtomicBoolean();
-        volatile boolean canceled,retiring,finished,preparing,configuring;
+        volatile boolean canceled,retiring,finished,preparing,configuring,canaryWritten;
         volatile int requests;volatile long payload;
         volatile ChildNetworkGate gate;
         volatile Snapshot kernel;IBinder binder;IIsolatedOwner ownerEndpoint;
         IResourceOwner observerEndpoint;IIsolatedWorker worker;
         volatile int peerPid,peerUid,observerPid,observerUid;volatile long observerStart,lastSample,sequence,observerPeak,observerCpu;
-        volatile boolean observerRetiring,observerNonDumpable,observerPythonLoaded,noChildConfirmed,executed;volatile int childProtection;volatile int exitSignal=-1,exitCode=-1;
+        volatile boolean observerRetiring,observerNonDumpable,observerPythonLoaded,noChildConfirmed,executed;
+        boolean canaryIntact=true;volatile int childProtection;volatile int exitSignal=-1,exitCode=-1;
         ServiceConnection connection;
         boolean bound,connected,binderDead,pythonEntered;
         String instance="";int error=-1,denials;
@@ -67,7 +68,7 @@ public final class IsolatedRuntime implements AutoCloseable {
         public final RuntimeResult result;
         public final int workerPid,workerUid,observerPid,observerUid,securityDenials,requests;
         public final long observerStartTicks,observerPeakRssBytes,observerCpuTicks;
-        public final boolean observerPythonLoaded,observerNonDumpable;public final int childProtection,workerExitSignal,workerExitCode;
+        public final boolean observerPythonLoaded,observerNonDumpable,ownerCanaryIntact;public final int childProtection,workerExitSignal,workerExitCode;
         public final String instance;
         public final boolean deathConfirmed,pythonEntered;
         public final long startTicks,samples,peakRssBytes,cpuTicks,observedCpuMs,virtualBefore,addressLimit,cpuLimit;
@@ -78,7 +79,7 @@ public final class IsolatedRuntime implements AutoCloseable {
             startTicks=o.kernel==null?0:o.kernel.start;instance=o.instance;securityDenials=o.denials;
             observerPid=o.observerPid;observerUid=o.observerUid;observerStartTicks=o.observerStart;
             observerPeakRssBytes=o.observerPeak;observerCpuTicks=o.observerCpu;observerPythonLoaded=o.observerPythonLoaded;
-            observerNonDumpable=o.observerNonDumpable;childProtection=o.childProtection;workerExitSignal=o.exitSignal;workerExitCode=o.exitCode;
+            observerNonDumpable=o.observerNonDumpable;ownerCanaryIntact=o.canaryIntact;childProtection=o.childProtection;workerExitSignal=o.exitSignal;workerExitCode=o.exitCode;
             deathConfirmed=dead;pythonEntered=o.pythonEntered;samples=o.samples;peakRssBytes=o.peak;
             cpuTicks=o.cpu;observedCpuMs=o.cpu*1000/ProcessIdentity.CLOCK_TICKS;
             virtualBefore=o.before;addressLimit=o.address;cpuLimit=o.cpuLimit;
@@ -110,6 +111,7 @@ public final class IsolatedRuntime implements AutoCloseable {
             try(FileOutputStream out=context.openFileOutput("isolated-owner-canary",Context.MODE_PRIVATE)) {
                 out.write(("owner-only-"+o.id).getBytes(java.nio.charset.StandardCharsets.US_ASCII));
             }
+            o.canaryWritten=true;
             input=IsolatedResources.prepare(context,o.request,o.mode,fixtureHome);
             // Counters and all HTTPS IO belong to the trusted owner, not the isolated UID.
             gate=new ChildNetworkGate(o.request,new IRuntimeCallback.Stub() {
@@ -318,10 +320,13 @@ public final class IsolatedRuntime implements AutoCloseable {
         }
         if(!dead && SystemClock.elapsedRealtime()<o.cleanupDeadline) {supervisor.postDelayed(()->reap(o),SAMPLE);return;}
         synchronized(this) {
-            if(!dead) {o.error=RuntimeResult.CLEANUP_FAILED;lease.poison();}
+            if(o.canaryWritten)try {
+                o.canaryIntact=("owner-only-"+o.id).equals(ProcessIdentity.read(new File(context.getFilesDir(),"isolated-owner-canary").getPath(),128));
+            }catch(IOException e) {o.canaryIntact=false;}
+            if(!dead || !o.canaryIntact) {o.error=RuntimeResult.CLEANUP_FAILED;lease.poison();}
             else if(o.error==0 && SystemClock.elapsedRealtime()>=o.request.deadline)o.error=RuntimeResult.TIMEOUT;
             o.finished=true;Outcome out=new Outcome(o,dead);record(o,out);
-            if(dead) {o.ownerEndpoint=null;o.observerEndpoint=null;o.worker=null;lease.cleared();active=null;LEASE.set(false);} // Otherwise poison: no uncertain worker reuse.
+            if(dead && o.canaryIntact) {o.ownerEndpoint=null;o.observerEndpoint=null;o.worker=null;lease.cleared();active=null;LEASE.set(false);} // Otherwise poison: no uncertain worker reuse.
             o.started.completeExceptionally(new IllegalStateException("NOT_STARTED"));o.future.complete(out);
             if(closed)thread.quitSafely();
         }
@@ -336,7 +341,7 @@ public final class IsolatedRuntime implements AutoCloseable {
                 .put("clock_ticks_per_second",ProcessIdentity.CLOCK_TICKS).put("observed_cpu_ms",r.observedCpuMs)
                 .put("virtual_before",r.virtualBefore).put("rlimit_as",r.addressLimit).put("rlimit_cpu",r.cpuLimit)
                 .put("requests",r.requests).put("payload_bytes",r.payloadBytes).put("death_confirmed",r.deathConfirmed)
-                .put("resource_input_bytes",r.resourceInputBytes)
+                .put("resource_input_bytes",r.resourceInputBytes).put("owner_canary_intact",r.ownerCanaryIntact)
                 .put("observer_pid",r.observerPid).put("observer_uid",r.observerUid).put("observer_start_ticks",r.observerStartTicks)
                 .put("observer_peak_rss_bytes",r.observerPeakRssBytes).put("observer_cpu_ticks",r.observerCpuTicks)
                 .put("observer_python_loaded",r.observerPythonLoaded).put("observer_non_dumpable",r.observerNonDumpable).put("child_protection",r.childProtection).put("worker_exit_signal",r.workerExitSignal).put("worker_exit_code",r.workerExitCode)

@@ -7,7 +7,7 @@ class IsolatedEvidenceTest(unittest.TestCase):
     def fixture(self):
         rows=[]
         for i,error in enumerate((0,1,2,4,5,6,7,8,9,10,11,14)):
-            rows.append(dict(id=str(i),error=error,death_confirmed=True,retire_to_exit_ms=80,
+            rows.append(dict(id=str(i),error=error,death_confirmed=True,owner_canary_intact=True,retire_to_exit_ms=80,
                 cancel_to_exit_ms=80 if error==1 else -1,requests=1,payload_bytes=128,
                 parent_pid=100,parent_uid=10001,worker_pid=200+i,worker_uid=99000+i,
                 observer_pid=400+i,observer_uid=99000+i,observer_start_ticks=50+i,observer_peak_rss_bytes=40*1024*1024,
@@ -19,7 +19,7 @@ class IsolatedEvidenceTest(unittest.TestCase):
 
     def test_incomplete_or_contradictory_isolation_proof_is_rejected(self):
         rows=self.fixture();self.assertFalse(validate(rows)['production_ready'])
-        mutations=(('observer_uid',10001),('observer_uid',98000),('observer_non_dumpable',False),('child_protection',0),('observer_pid',200),('observer_python_loaded',True),('observer_peak_rss_bytes',0),('worker_uid',10001),('worker_uid',10002),('worker_pid',100),
+        mutations=(('owner_canary_intact',False),('observer_uid',10001),('observer_uid',98000),('observer_non_dumpable',False),('child_protection',0),('observer_pid',200),('observer_python_loaded',True),('observer_peak_rss_bytes',0),('worker_uid',10001),('worker_uid',10002),('worker_pid',100),
             ('death_confirmed',False),('samples',0),('cpu_ticks',0),('rlimit_cpu',0),
             ('security_denials',0),('retire_to_exit_ms',9999),('payload_bytes',3*1024*1024))
         for field,value in mutations:

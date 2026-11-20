@@ -27,6 +27,8 @@ sys.addaudithook(audit)
 
 def openssl_memory_handshake():
     """Real OpenSSL client/server handshake without granting Python a socket."""
+    if hasattr(_thekain_transport,'memory_tls'):
+        return _thekain_transport.memory_tls(ssl.OPENSSL_VERSION)
     root=Path(sys.prefix)/'fixtures'
     server=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     certificate=getattr(sys,'_thekain_fixture_cert',root/'owned-ca.pem')
@@ -124,7 +126,7 @@ def dispatch(raw):
             for bit,mode in ((1,'rb'),(2,'ab')):
                 try:
                     with canary.open(mode): pass
-                except PermissionError: denied |= bit
+                except (PermissionError,FileNotFoundError): denied |= bit
             # posix.open is a real kernel path open, not an audit-hook simulation.
             if denied!=3: raise RuntimeError('OWNER_FILES_ACCESSIBLE')
             import _socket

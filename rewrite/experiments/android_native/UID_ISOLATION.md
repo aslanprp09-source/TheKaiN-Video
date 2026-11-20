@@ -86,11 +86,26 @@ cross AIDL. These fixture credentials are unrelated to release-signing keys.
 
 The isolated supervisor rechecks read-only flags, size and digest, then copies
 the resources to anonymous memfds and irreversibly seals WRITE/GROW/SHRINK/SEAL.
-The child inherits only those sealed copies. CPython zipimport reads fd3;
+The child inherits only those sealed copies. Android denies reopening even an
+inherited memfd through `/proc/self/fd`: CI179 API26/29 reached interpreter
+initialization but recorded an enforcing tmpfs `open` denial. The child installs
+the public CPython `PyFile_SetOpenCodeHook` before initialization. Only the exact
+verified fd3 archive is accepted; `PyFile_FromFd(..., closefd=False)` reads it
+without reopening a pathname, including encodings bootstrap. A host embedded-
+Python test imports real modules while all open/openat calls are denied.
+The child is single-threaded and zipimport seeks for each archive access.
+The OpenSSL memory self-test reads existing sealed PEM FDs directly and uses BIO
+pairs; it verifies the pinned _ssl/OpenSSL version, trusted certificate, IP SAN
+and negotiated TLS, without reopening a certificate path or granting sockets.
+CPython zipimport reads fd3;
 installed stdlib extensions come only from the pinned native directory. There is
 no writable extracted Python tree. The isolated UID itself lacks INTERNET and
 cannot read/write the owner's private canary; Java OS-denial checks occur before
 the additional child filter, and Python repeats the file/network negative tests.
+On API35 app-data namespace isolation can return ENOENT for a real owner file.
+Only kernel EACCES/EPERM/ENOENT are accepted; the main owner must independently
+prove its unique canary exists and remains unchanged before clearing the lease.
+Missing or changed owner data poisons reuse rather than authorizing success.
 
 HTTPS stays in the trusted main owner: the owned numeric-loopback origin/port,
 HTTPS only, fixed GET/HEAD, private test CA, no proxy/cookies/user headers.
@@ -162,8 +177,9 @@ The resource journal/report includes identities, kernel CPU/RSS, overshoot,
 resource byte counts, hard-limit values and cleanup/cancellation latency.
 
 Local native helper compilation/ELF16KiB validation for both ABIs: PASS.
-Local AIDL/APK/app+probe Lint: PASS on the prior compile; final changes rechecked
-before commit. Linux kernel tests exercise actual non-dumpability, seccomp
+Local AIDL/APK/app+probe Lint: PASS. Host checks include real embedded-Python
+imports from a sealed FD with all file reopens denied, in addition to the kernel
+process/fence/lifetime checks. Final exact-HEAD CI is still required. Linux kernel tests exercise actual non-dumpability, seccomp
 foreign-process denials and parent-death SIGKILL; Android is still mandatory.
 The new native exec runtime matrix, new physical ARM64 boundary, fresh independent
 review and product integration are **NOT_RUN / NOT_ACCEPTED** pending evidence.

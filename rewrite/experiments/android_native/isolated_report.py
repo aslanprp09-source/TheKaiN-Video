@@ -15,6 +15,7 @@ def validate(rows):
         assert row['requests'] <= 12 and row['payload_bytes'] <= 2*1024*1024+1
         assert row['id'] not in seen, 'Duplicate operation'
         seen.add(row['id'])
+        assert row['owner_canary_intact'] is True, 'Owner canary absent or modified'
         if row['worker_pid']:
             assert row['worker_pid'] != row['parent_pid'] and row['worker_uid'] != row['parent_uid']
             assert 90000 <= row['worker_uid'] % 100000 < 100000, 'Not an Android isolated UID'

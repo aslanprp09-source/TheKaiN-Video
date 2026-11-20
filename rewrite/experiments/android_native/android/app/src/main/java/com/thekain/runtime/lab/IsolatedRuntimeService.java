@@ -58,9 +58,9 @@ public final class IsolatedRuntimeService extends Service {
         int flags=0;
         File canary=new File(getApplicationInfo().dataDir,"files/isolated-owner-canary");
         try(InputStream ignored=new FileInputStream(canary)) {throw new IOException("OWNER_READ_ALLOWED");}
-        catch(FileNotFoundException expected) {if(!permissionDenied(expected))throw expected;flags|=1;}
+        catch(FileNotFoundException expected) {if(!deniedOrHidden(expected))throw expected;flags|=1;}
         try(OutputStream ignored=new FileOutputStream(canary,true)) {throw new IOException("OWNER_WRITE_ALLOWED");}
-        catch(FileNotFoundException expected) {if(!permissionDenied(expected))throw expected;flags|=2;}
+        catch(FileNotFoundException expected) {if(!deniedOrHidden(expected))throw expected;flags|=2;}
         // Before the additional Python seccomp fence: prove the Android UID itself lacks network.
         try(java.net.Socket socket=new java.net.Socket()) {socket.connect(new InetSocketAddress("127.0.0.1",9),500);
             throw new IOException("ISOLATED_SOCKET_ALLOWED");}
@@ -74,6 +74,15 @@ public final class IsolatedRuntimeService extends Service {
         if(checkSelfPermission(android.Manifest.permission.INTERNET)!=PackageManager.PERMISSION_DENIED)
             throw new IOException("ISOLATED_INTERNET_PERMISSION");
         return flags|8;
+    }
+    private static boolean deniedOrHidden(Exception e) {
+        // Android app-data mount isolation may hide a real owner file as ENOENT.
+        // The owner proves its own unique canary exists and is unchanged before clearing the lease.
+        for(Throwable cause=e;cause!=null;cause=cause.getCause())if(cause instanceof ErrnoException) {
+            int errno=((ErrnoException)cause).errno;
+            return errno==OsConstants.EACCES || errno==OsConstants.EPERM || errno==OsConstants.ENOENT;
+        }
+        return permissionDenied(e);
     }
     private static boolean permissionDenied(Exception e) {
         String m=e.getMessage();return m!=null && (m.contains("EACCES") || m.contains("EPERM") || m.contains("Permission denied") || m.contains("Operation not permitted"));
@@ -102,7 +111,7 @@ public final class IsolatedRuntimeService extends Service {
             try(ParcelFileDescriptor zip=ParcelFileDescriptor.adoptFd(SupervisorNative.seal(input.resources.getFd(),input.bytes));
                     ParcelFileDescriptor cert=ParcelFileDescriptor.adoptFd(SupervisorNative.seal(input.certificate.getFd(),16384));
                     ParcelFileDescriptor key=ParcelFileDescriptor.adoptFd(SupervisorNative.seal(input.key.getFd(),16384))) {
-                denials=javaDenials();
+                stage="ANDROID_UID_DENIALS";denials=javaDenials();
                 try {Os.write(input.resources.getFileDescriptor(),new byte[]{0},0,1);throw new IOException("WRITABLE_INPUT");}
                 catch(ErrnoException expected) {if(expected.errno!=OsConstants.EBADF)throw expected;denials|=16;}
                 try {Os.write(zip.getFileDescriptor(),new byte[]{0},0,1);throw new IOException("WRITABLE_SEALED_INPUT");}

@@ -8,6 +8,7 @@ from pathlib import Path
 import struct
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import unittest
 import zipfile
@@ -144,6 +145,66 @@ int main(void) {
             result=subprocess.run([str(root/'probe')],capture_output=True,text=True,timeout=10)
             self.assertEqual(result.returncode,0,result.stderr)
             self.assertEqual(result.stdout.strip(),'FENCED_CHILD_AND_PARENT_DEATH_PASS')
+
+    @unittest.skipUnless(sys.platform=='linux' and platform.machine()=='x86_64','Actual embedded-Python/sealed-FD contract on Linux; Android matrix remains mandatory')
+    def test_zipimport_bootstraps_from_sealed_fd_when_all_file_reopens_are_denied(self):
+        source=r"""
+#define _GNU_SOURCE
+#include "sealed_code_hook.h"
+#include <linux/memfd.h>
+#include <assert.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <linux/filter.h>
+#include <linux/seccomp.h>
+#include <stddef.h>
+#include <sys/prctl.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+int main(int argc,char **argv) {
+    assert(argc==2);int fd=open(argv[1],O_RDONLY);assert(fd>=0);
+    int sealed=(int)syscall(__NR_memfd_create,"sealed-test",MFD_CLOEXEC|MFD_ALLOW_SEALING);assert(sealed>=0);
+    char buffer[4096];ssize_t n;while((n=read(fd,buffer,sizeof(buffer)))>0)assert(write(sealed,buffer,(size_t)n)==n);assert(n==0);close(fd);
+    assert(fcntl(sealed,F_ADD_SEALS,F_SEAL_WRITE|F_SEAL_GROW|F_SEAL_SHRINK|F_SEAL_SEAL)==0);
+    assert(dup2(sealed,3)==3);if(sealed!=3)close(sealed);
+    assert(unlink(argv[1])==0);assert(PyFile_SetOpenCodeHook(sealed_code_open,NULL)==0);
+    PyPreConfig pre;PyPreConfig_InitIsolatedConfig(&pre);pre.configure_locale=0;pre.utf8_mode=1;
+    PyStatus status=Py_PreInitialize(&pre);assert(!PyStatus_Exception(status));
+    struct sock_filter ops[]={
+        BPF_STMT(BPF_LD|BPF_W|BPF_ABS,offsetof(struct seccomp_data,nr)),
+        BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,__NR_open,2,0),
+        BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,__NR_openat,1,0),
+        BPF_STMT(BPF_RET|BPF_K,SECCOMP_RET_ALLOW),BPF_STMT(BPF_RET|BPF_K,SECCOMP_RET_ERRNO|EACCES)
+    };
+    struct sock_fprog policy={sizeof(ops)/sizeof(ops[0]),ops};
+    assert(prctl(PR_SET_NO_NEW_PRIVS,1,0,0,0)==0 && prctl(PR_SET_SECCOMP,SECCOMP_MODE_FILTER,&policy)==0);
+    PyConfig cfg;PyConfig_InitIsolatedConfig(&cfg);cfg.site_import=0;cfg.write_bytecode=0;cfg.install_signal_handlers=0;
+    status=PyConfig_SetBytesString(&cfg,&cfg.home,"/");assert(!PyStatus_Exception(status));cfg.module_search_paths_set=1;
+    status=PyWideStringList_Append(&cfg.module_search_paths,L"/proc/self/fd/3");assert(!PyStatus_Exception(status));
+    status=Py_InitializeFromConfig(&cfg);PyConfig_Clear(&cfg);
+    if(PyStatus_Exception(status)) {fprintf(stderr,"%s\n",status.err_msg);return 2;}
+    PyObject *module=PyImport_ImportModule("sealed_demo");if(!module) {PyErr_Print();return 3;}
+    PyObject *value=PyObject_GetAttrString(module,"VALUE");assert(value && PyLong_AsLong(value)==42 && sealed_code_reads>0);
+    PyObject *path=PyUnicode_FromString("/tmp/unverified.py");assert(sealed_code_open(path,NULL)==NULL && PyErr_ExceptionMatches(PyExc_PermissionError));PyErr_Clear();
+    puts("FD_IMPORT_WITHOUT_REOPEN_PASS");return 0;
+}
+"""
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);archive=root/'runtime.zip'
+            stdlib=Path(sysconfig.get_path('stdlib'))
+            with zipfile.ZipFile(archive,'w',compression=zipfile.ZIP_STORED) as z:
+                for name in ('__init__.py','aliases.py','utf_8.py','ascii.py','latin_1.py'):
+                    z.write(stdlib/'encodings'/name,'encodings/'+name)
+                z.writestr('sealed_demo.py','VALUE = 6 * 7\n')
+            (root/'test.c').write_text(source)
+            base=Path(sys.base_prefix);version=f'{sys.version_info.major}.{sys.version_info.minor}'
+            include=Path(sysconfig.get_path('include'));lib=base/'lib'
+            subprocess.run(['gcc','-std=gnu11','-Wall','-Wextra','-Werror','-I',str(Path(__file__).parent),
+                '-I',str(include),str(root/'test.c'),'-L',str(lib),'-lpython'+version,
+                '-Wl,-rpath,'+str(lib),'-lm','-ldl','-o',str(root/'probe')],check=True,capture_output=True,timeout=30)
+            result=subprocess.run([str(root/'probe'),str(archive)],capture_output=True,text=True,timeout=15)
+            self.assertEqual(result.returncode,0,result.stderr)
+            self.assertEqual(result.stdout.strip(),'FD_IMPORT_WITHOUT_REOPEN_PASS')
 
     def test_apk_missing_tampered_or_extra_python_assets_are_rejected_before_device(self):
         payload=b'# own Python package fixture\n';name='lib/python3.14/__phello__/__init__.py'

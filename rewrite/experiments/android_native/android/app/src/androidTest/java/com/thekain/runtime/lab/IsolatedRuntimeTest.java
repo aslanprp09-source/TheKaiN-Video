@@ -21,7 +21,7 @@ public final class IsolatedRuntimeTest extends RuntimeTestSupport {
         assertTrue("Confirmed OS retirement, error="+out.result.error,out.deathConfirmed);
         File[] leftovers=context.getCacheDir().listFiles((folder,name)->name.startsWith("isolated-python-") || name.startsWith("isolated-fixture-"));
         assertNotNull(leftovers);assertEquals("No retained IPC resource files",0,leftovers.length);
-        healthyMain();return out;
+        assertTrue("Owner canary must exist and stay unchanged",out.ownerCanaryIntact);healthyMain();return out;
     }
     private IsolatedRuntime.Operation submit(int op,String address,int mode,long timeout) {
         return isolated.submit(op,address,RuntimeRequest.CA_OWN,timeout,RuntimeRequest.MAX_RSS,mode);

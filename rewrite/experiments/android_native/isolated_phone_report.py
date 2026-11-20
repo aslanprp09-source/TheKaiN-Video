@@ -30,6 +30,7 @@ def inspect(report,receipt):
         assert row['error']==row['expected_error'] or (row['expected_error']==-1 and row['error'] in (1,2)), 'Unexpected failure'
         assert row['death_confirmed'] is True and row['main_python_loaded'] is False
         assert row['owned_ipc_temp_files']==0, 'Retained resource files'
+        assert row['owner_canary_intact'] is True, 'Owner canary absent or modified'
         if row['worker_pid']:
             assert row['worker_pid']!=row['parent_pid'] and row['worker_uid']!=row['parent_uid']
             assert 90000<=row['worker_uid']%100000<100000 and row['start_ticks']>0

@@ -228,7 +228,7 @@ def build(work, abis, source_cache=None, ndk_archive=None):
         # Own source only: libc-only trusted JNI supervisor and standalone exec child (no ART).
         for source,name,extra in (
                 ('supervisor_jni.c','libthekain_supervisor.so',['-shared','-fPIC']),
-                ('child_main.c','libthekain_child.so',['-fPIE','-pie','-I'+str(prefix/'include/python3.14'),'-L'+str(prefix/'lib'),'-lpython3.14','-lm','-ldl'])):
+                ('child_main.c','libthekain_child.so',['-fPIE','-pie','-I'+str(prefix/'include/python3.14'),'-L'+str(prefix/'lib'),'-lpython3.14','-I'+str(sslprefix/'include'),'-L'+str(sslprefix/'lib'),'-lssl','-lcrypto','-lm','-ldl'])):
             run([tools/(pin['triplet']+'26-clang'),'-O2',ROOT/source,*extra,
                  '-Wl,--no-rosegment','-Wl,-z,max-page-size=16384','-Wl,--no-undefined',
                  '-o',native/name],work,target_env,work/(abi+'-'+source+'.log'))

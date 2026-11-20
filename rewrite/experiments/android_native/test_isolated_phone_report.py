@@ -13,7 +13,7 @@ class IsolatedPhoneIntakeTest(unittest.TestCase):
                 instance=str(i),observer_pid=400+i,observer_uid=99000+i,observer_start_ticks=50+i,
                 observer_peak_rss_bytes=40*1024*1024,observer_cpu_ticks=4,observer_python_loaded=False,observer_non_dumpable=True,child_protection=255,samples=4,peak_rss_bytes=200*1024*1024,rss_limit_bytes=64*1024*1024 if i==6 else 384*1024*1024,observed_cpu_ms=80,
                 virtual_before=2**32,rlimit_as=2**32+256*1024*1024,rlimit_cpu=20,
-                death_confirmed=True,main_python_loaded=False,python_entered=mode not in (3,4),
+                death_confirmed=True,owner_canary_intact=True,main_python_loaded=False,python_entered=mode not in (3,4),
                 python_calls=1,security_denials=255 if mode==1 else 31,requests=1,payload_bytes=128,
                 machine='aarch64',pointer_bits=64,pages=4096,openssl_handshake=True,retire_to_exit_ms=80,
                 resource_input_bytes=22*1024*1024,cpu_ticks=8,clock_ticks_per_second=100,owned_ipc_temp_files=0))

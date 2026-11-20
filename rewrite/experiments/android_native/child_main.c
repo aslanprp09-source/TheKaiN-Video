@@ -6,6 +6,8 @@
 #include <string.h>
 #include <sys/ptrace.h>
 #include "runtime_child_fence.h"
+#include "sealed_code_hook.h"
+#include "memory_tls.h"
 /* Fixed binary socketpair protocol. No shell, argv URLs, JNI/ART, arbitrary Python or inherited Binder FDs. */
 static int read_all(void *buffer,size_t count) {char *p=buffer;while(count) {ssize_t n=read(0,p,count);if(n<0 && errno==EINTR)continue;if(n<=0)return -1;p+=n;count-=(size_t)n;}return 0;}
 static int write_all(const void *buffer,size_t count) {const char *p=buffer;while(count) {ssize_t n=write(0,p,count);if(n<0 && errno==EINTR)continue;if(n<=0)return -1;p+=n;count-=(size_t)n;}return 0;}
@@ -36,7 +38,7 @@ static PyObject *malformed(PyObject *module,PyObject *unused) {
     if(put32(4) || put32(INT32_MAX))return gate_error("TOOL_FAILED");
     get32(&ack);return gate_error("TOOL_FAILED");
 }
-static PyMethodDef methods[]={{"malformed",malformed,METH_NOARGS,NULL},{"fetch",fetch,METH_VARARGS,NULL},{"started",started,METH_NOARGS,NULL},{NULL,NULL,0,NULL}};
+static PyMethodDef methods[]={{"memory_tls",memory_tls,METH_VARARGS,NULL},{"malformed",malformed,METH_NOARGS,NULL},{"fetch",fetch,METH_VARARGS,NULL},{"started",started,METH_NOARGS,NULL},{NULL,NULL,0,NULL}};
 static struct PyModuleDef transport={PyModuleDef_HEAD_INIT,"_thekain_transport",NULL,-1,methods};
 PyMODINIT_FUNC PyInit__thekain_transport(void) {
     PyObject *m=PyModule_Create(&transport);if(!m)return NULL;
@@ -88,12 +90,13 @@ static int child_run(int argc,char **argv) {
         // Exercise that fatal denial only in its dedicated negative test, never a successful probe.
         syscall(__NR_setfsuid,getuid());return 116;
     }
+    if(PyFile_SetOpenCodeHook(sealed_code_open,NULL))return 117;
     if(PyImport_AppendInittab("_thekain_transport",PyInit__thekain_transport)<0)return 106;
     PyConfig config;PyConfig_InitIsolatedConfig(&config);config.site_import=0;config.write_bytecode=0;config.install_signal_handlers=0;
     PyStatus status=PyConfig_SetBytesString(&config,&config.home,"/");config.module_search_paths_set=1;
     if(!PyStatus_Exception(status))status=PyWideStringList_Append(&config.module_search_paths,L"/proc/self/fd/3");
     if(!PyStatus_Exception(status))status=Py_InitializeFromConfig(&config);PyConfig_Clear(&config);
-    if(PyStatus_Exception(status))return 107;
+    if(PyStatus_Exception(status) || !sealed_code_reads)return 107;
     PyObject *cert=PyUnicode_FromString("/proc/self/fd/4"),*key=PyUnicode_FromString("/proc/self/fd/5");
     if(!cert || !key || PySys_SetObject("_thekain_fixture_cert",cert) || PySys_SetObject("_thekain_fixture_key",key))return 108;
     Py_DECREF(cert);Py_DECREF(key);

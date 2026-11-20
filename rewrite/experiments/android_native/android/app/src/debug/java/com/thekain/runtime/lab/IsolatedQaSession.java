@@ -137,7 +137,7 @@ final class IsolatedQaSession {
             .put("pointer_bits",out.result.pointerBits).put("pages",out.result.pages).put("openssl_handshake",out.result.opensslHandshake)
             .put("samples",out.samples).put("peak_rss_bytes",out.peakRssBytes).put("observed_cpu_ms",out.observedCpuMs)
             .put("cpu_ticks",out.cpuTicks).put("clock_ticks_per_second",ProcessIdentity.CLOCK_TICKS)
-            .put("resource_input_bytes",out.resourceInputBytes).put("rss_limit_bytes",rssLimit)
+            .put("resource_input_bytes",out.resourceInputBytes).put("owner_canary_intact",out.ownerCanaryIntact).put("rss_limit_bytes",rssLimit)
             .put("rlimit_as",out.addressLimit).put("virtual_before",out.virtualBefore).put("rlimit_cpu",out.cpuLimit)
             .put("elapsed_ms",out.elapsedMs).put("cancel_to_exit_ms",out.cancelToExitMs).put("retire_to_exit_ms",out.retireToExitMs)
             .put("requests",out.requests).put("payload_bytes",out.payloadBytes).put("power_before",before).put("power_after",power())
