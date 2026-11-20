@@ -15,6 +15,7 @@ static int write_all(const void *buffer,size_t count) {const char *p=buffer;whil
 static int put32(uint32_t n) {n=htonl(n);return write_all(&n,4);}
 static int get32(uint32_t *n) {if(read_all(n,4))return -1;*n=ntohl(*n);return 0;}
 static int put64(uint64_t n) {return put32((uint32_t)(n>>32)) || put32((uint32_t)n);}
+static int guard_probe_stage(int stage) {return put32(10) || put32((uint32_t)stage);}
 /* Only the dedicated pre-Python negative operation installs this handler.
  * Verify the kernel's syscall number/code; do not classify an arbitrary exit as a denial. */
 static void credential_sigsys(int signal,siginfo_t *info,void *context) {
@@ -102,7 +103,9 @@ static int child_run(int argc,char **argv) {
     if(put32(9) || put32(1))return 122;
     if(limit_child_files() || configure_runtime_limits((uint64_t)headroomMiB*1024*1024,(int)seconds,&limits) || fence_lease_guard() || fence_native_child())return 103;
     if(put32(9) || put32(2))return 122;
+    lease_guard_probe_stage=guard_probe_stage;
     if(!lease_guard_denials())return 121;
+    lease_guard_probe_stage=NULL;
     if(put32(9) || put32(3))return 122;
     int protection=hardened(parent);if(protection!=255)return 104;
     if(put32(9) || put32(4))return 122;

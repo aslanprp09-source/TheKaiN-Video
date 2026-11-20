@@ -160,12 +160,15 @@ public final class IsolatedRuntimeService extends Service {
                     out.writeInt(encoded.length);out.write(encoded);out.writeInt((int)(request.virtualHeadroom/1024/1024));
                     out.writeInt((int)Math.max(1,(request.deadline-SystemClock.elapsedRealtime()+999)/1000)+1);
                     out.writeInt(input.mode==IsolatedInput.PLATFORM_CREDENTIAL?1:0);out.writeLong(input.guardDevice);out.writeLong(input.guardInode);out.flush();stage="NATIVE_PROTOCOL";
-                    int messages=0,fetches=0,bootstrapStage=0;boolean limits=false,started=false;
+                    int messages=0,fetches=0,bootstrapStage=0,guardProbe=0;boolean limits=false,started=false;
                     while(!retiring && messages++<32) {
                         int tag=in.readInt();
                         if(tag==9 && !started) {
                             int next=in.readInt();if(next!=bootstrapStage+1 || next>6)throw new IOException("CHILD_PROTOCOL");
                             bootstrapStage=next;stage="NATIVE_BOOTSTRAP_"+next;
+                        }else if(tag==10 && bootstrapStage==2 && !limits && !started) {
+                            int next=in.readInt();if(next!=guardProbe+1 || next>10)throw new IOException("CHILD_PROTOCOL");
+                            guardProbe=next;stage="NATIVE_GUARD_PROBE_"+next;
                         }else if(tag==6) {
                             int code=in.readInt();stage="CHILD_CODE_"+(code>=100 && code<=127?code:0);throw new IOException("CHILD_STARTUP");
                         }else if(tag==3 && !limits && !started) {

@@ -60,26 +60,40 @@ static int fence_lease_guard(void) {
     struct sock_fprog p={(unsigned short)(sizeof(ops)/sizeof(ops[0])),ops};
     return prctl(PR_SET_SECCOMP,SECCOMP_MODE_FILTER,&p);
 }
+/* Optional fixed bootstrap diagnostics. Never carries Python output or paths. */
+static int (*lease_guard_probe_stage)(int);
+#define GUARD_PROBE(n) do {if(lease_guard_probe_stage && lease_guard_probe_stage(n))return 0;}while(0)
 static int lease_guard_denials(void) {
-    if(close(LEASE_GUARD_FD)!=-1 || errno!=EPERM)return 0;
+    GUARD_PROBE(1);
+    if(syscall(__NR_close,LEASE_GUARD_FD)!=-1 || errno!=EPERM)return 0;
+    GUARD_PROBE(2);
 #ifdef __NR_dup2
     if(syscall(__NR_dup2,1,LEASE_GUARD_FD)!=-1 || errno!=EPERM)return 0;
 #endif
+    GUARD_PROBE(3);
     if(syscall(__NR_dup3,1,LEASE_GUARD_FD,0)!=-1 || errno!=EPERM)return 0;
-    int copy=dup(LEASE_GUARD_FD);if(copy<0)return 0;
-    int denied=flock(copy,LOCK_UN)==-1 && errno==EPERM;
+    GUARD_PROBE(4);
+    int copy=(int)syscall(__NR_fcntl,LEASE_GUARD_FD,F_DUPFD_CLOEXEC,7);if(copy<0)return 0;
+    GUARD_PROBE(5);
+    int denied=syscall(__NR_flock,copy,LOCK_UN)==-1 && errno==EPERM;
     struct flock unlock={0};unlock.l_type=F_UNLCK;unlock.l_whence=SEEK_SET;
-    denied=denied && fcntl(copy,F_SETLK,&unlock)==-1 && errno==EPERM;
-    denied=denied && fcntl(copy,F_SETLKW,&unlock)==-1 && errno==EPERM;
+    GUARD_PROBE(6);
+    denied=denied && syscall(__NR_fcntl,copy,F_SETLK,&unlock)==-1 && errno==EPERM;
+    GUARD_PROBE(7);
+    denied=denied && syscall(__NR_fcntl,copy,F_SETLKW,&unlock)==-1 && errno==EPERM;
+    GUARD_PROBE(8);
 #ifdef F_OFD_SETLK
-    denied=denied && fcntl(copy,F_OFD_SETLK,&unlock)==-1 && errno==EPERM;
-    denied=denied && fcntl(copy,F_OFD_SETLKW,&unlock)==-1 && errno==EPERM;
+    denied=denied && syscall(__NR_fcntl,copy,F_OFD_SETLK,&unlock)==-1 && errno==EPERM;
+    denied=denied && syscall(__NR_fcntl,copy,F_OFD_SETLKW,&unlock)==-1 && errno==EPERM;
 #endif
-    close(copy);
+    GUARD_PROBE(9);
+    syscall(__NR_close,copy);
     if(!denied)return 0;
+    GUARD_PROBE(10);
 #ifdef __NR_close_range
     if(syscall(__NR_close_range,0,~0U,0)!=-1 || errno!=EPERM)return 0;
 #endif
     return 1;
 }
+#undef GUARD_PROBE
 #endif
