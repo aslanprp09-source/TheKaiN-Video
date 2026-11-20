@@ -25,7 +25,11 @@ class NativeIntakeTests(unittest.TestCase):
 #include "lease_guard.h"
 #include <assert.h>
 #include <stdlib.h>
+#include <pthread.h>
+#include <string.h>
 #include <sys/wait.h>
+static int ready_writer;
+static void *owner_io(void *unused) {(void)unused;assert(write(ready_writer,"P",1)==1);for(;;)pause();return NULL;}
 int main(int argc,char **argv) {
     assert(argc==3);int mode=atoi(argv[2]);int fd=open(argv[1],O_CREAT|O_EXCL|O_RDONLY,0600);assert(fd>=0);
     assert(flock(fd,LOCK_EX|LOCK_NB)==0);assert(dup2(fd,LEASE_GUARD_FD)==LEASE_GUARD_FD);if(fd!=LEASE_GUARD_FD)close(fd);
@@ -35,6 +39,7 @@ int main(int argc,char **argv) {
     if(!child) {
         close(probe);close(ready[0]);assert(setup_parent_lifetime(parent)==0);
         assert(lease_guard_identity(LEASE_GUARD_FD,st.st_dev,st.st_ino));
+        if(mode==3) {ready_writer=ready[1];pthread_t io;assert(pthread_create(&io,NULL,owner_io,NULL)==0);pthread_exit(NULL);}
         struct sigaction action={0};action.sa_sigaction=lease_guard_sigsys;action.sa_flags=SA_SIGINFO;sigemptyset(&action.sa_mask);
         assert(sigaction(SIGSYS,&action,NULL)==0);
         if(mode==1) {
@@ -59,6 +64,14 @@ int main(int argc,char **argv) {
         puts("NON_KERNEL_SIGNAL_IS_NOT_DENIAL_PROOF_PASS");return 0;
     }
     assert(count==1 && mark=='P');
+    if(mode==3) {
+        char path[64],bytes[4096];snprintf(path,sizeof(path),"/proc/%d/stat",child);int zombie=0;
+        for(int i=0;i<200 && !zombie;i++) {
+            FILE *stat=fopen(path,"r");assert(stat);assert(fgets(bytes,sizeof(bytes),stat));fclose(stat);
+            char *end=strrchr(bytes,')');assert(end);zombie=end[2]=='Z';if(!zombie)usleep(10000);
+        }
+        assert(zombie);int status;assert(waitpid(child,&status,WNOHANG)==0); // The IO thread is still alive.
+    }
     assert(flock(probe,LOCK_EX|LOCK_NB)==-1 && (errno==EAGAIN || errno==EWOULDBLOCK));
     assert(kill(child,SIGKILL)==0);int status;assert(waitpid(child,&status,0)==child && WIFSIGNALED(status));
     assert(flock(probe,LOCK_EX|LOCK_NB)==0);close(probe);assert(unlink(argv[1])==0);
@@ -67,9 +80,9 @@ int main(int argc,char **argv) {
 """
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp);(root/'test.c').write_text(source)
-            subprocess.run(['gcc','-std=gnu11','-Wall','-Wextra','-Werror','-I',str(Path(__file__).parent),
+            subprocess.run(['gcc','-std=gnu11','-Wall','-Wextra','-Werror','-pthread','-I',str(Path(__file__).parent),
                 str(root/'test.c'),'-o',str(root/'probe')],check=True,capture_output=True,timeout=30)
-            for mode in (0,1,2):
+            for mode in (0,1,2,3):
                 with self.subTest(mode=mode):
                     result=subprocess.run([str(root/'probe'),str(root/'guard'),str(mode)],capture_output=True,text=True,timeout=10)
                     self.assertEqual(result.returncode,0,result.stderr)

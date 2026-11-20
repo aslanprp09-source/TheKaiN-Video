@@ -53,6 +53,8 @@ uncertainty. Ordinary submit remains refused. Explicit recovery verifies:
 - No unfinished owner preparation, callback or HTTPS task; no old ServiceRecord.
   A changed owner PID must additionally have a positively established old task
   exit/reused start identity. Denied or malformed proc reads do not prove death.
+  A zombie owner group leader is also insufficient: other threads can still run.
+  Its proc identity must disappear or change before recovery can proceed.
 - The owner's unique canary still exists and matches the interrupted operation.
 - A separate open file description obtains **exclusive nonblocking flock** on
   the exact inode. Every guard reference in transit, supervisor and native child

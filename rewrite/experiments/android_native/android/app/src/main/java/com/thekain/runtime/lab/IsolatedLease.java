@@ -130,7 +130,10 @@ final class IsolatedLease {
             if(!raw.startsWith(pid+" (") || end<0)throw new IOException("OWNER_PROC_RECORD");
             String[] fields=raw.substring(end+2).trim().split(" +");
             if(fields.length<20)throw new IOException("OWNER_PROC_FIELDS");
-            return Long.parseLong(fields[19])!=start || fields[0].equals("Z") || fields[0].equals("X");
+            // A multithreaded owner's group leader can be a zombie while its IO
+            // threads still run. Only disappearance or a reused start identity
+            // proves that this old owner cannot retain work in another thread.
+            return Long.parseLong(fields[19])!=start;
         }catch(IOException e) {
             for(Throwable cause=e;cause!=null;cause=cause.getCause())if(cause instanceof ErrnoException) {
                 int code=((ErrnoException)cause).errno;if(code==OsConstants.ENOENT || code==OsConstants.ESRCH)return true;
