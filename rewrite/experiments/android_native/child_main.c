@@ -99,9 +99,13 @@ static int child_run(int argc,char **argv) {
         if(sigaction(SIGSYS,&action,NULL))return 119;
     }
     RuntimeKernelLimits limits;
+    if(put32(9) || put32(1))return 122;
     if(limit_child_files() || configure_runtime_limits((uint64_t)headroomMiB*1024*1024,(int)seconds,&limits) || fence_lease_guard() || fence_native_child())return 103;
+    if(put32(9) || put32(2))return 122;
     if(!lease_guard_denials())return 121;
+    if(put32(9) || put32(3))return 122;
     int protection=hardened(parent);if(protection!=255)return 104;
+    if(put32(9) || put32(4))return 122;
     if(put32(3) || put64(limits.before) || put64(limits.address) || put64(limits.cpu) || put32((uint32_t)protection)
             || get32(&ack) || ack)return 105;
     if(fault==1) {
@@ -114,11 +118,13 @@ static int child_run(int argc,char **argv) {
     }
     if(PyFile_SetOpenCodeHook(sealed_code_open,NULL))return 117;
     if(PyImport_AppendInittab("_thekain_transport",PyInit__thekain_transport)<0)return 106;
+    if(put32(9) || put32(5))return 122;
     PyConfig config;PyConfig_InitIsolatedConfig(&config);config.site_import=0;config.write_bytecode=0;config.install_signal_handlers=0;
     PyStatus status=PyConfig_SetBytesString(&config,&config.home,"/");config.module_search_paths_set=1;
     if(!PyStatus_Exception(status))status=PyWideStringList_Append(&config.module_search_paths,L"/proc/self/fd/3");
     if(!PyStatus_Exception(status))status=Py_InitializeFromConfig(&config);PyConfig_Clear(&config);
     if(PyStatus_Exception(status) || !sealed_code_reads)return 107;
+    if(put32(9) || put32(6))return 122;
     PyObject *cert=PyUnicode_FromString("/proc/self/fd/4"),*key=PyUnicode_FromString("/proc/self/fd/5");
     if(!cert || !key || PySys_SetObject("_thekain_fixture_cert",cert) || PySys_SetObject("_thekain_fixture_key",key))return 108;
     Py_DECREF(cert);Py_DECREF(key);
