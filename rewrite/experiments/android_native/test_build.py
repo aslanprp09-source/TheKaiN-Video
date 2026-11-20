@@ -31,15 +31,24 @@ if [ "$4" = pidof ]; then
   if [ "$n" -lt 3 ]; then exit 1; fi
   echo 4321
 else
-  echo 'MEMINFO in pid 4321 [own test fixture, not a device measurement]'
+  # Match Android's native branch: the heading is absent without explicit details.
+  if [ "$4" = dumpsys ] && [ "$5" = meminfo ] && [ "$6" = -a ]; then
+    n=0; if [ -f "$MEMINFO_TEST_DUMPS" ]; then n=$(cat "$MEMINFO_TEST_DUMPS"); fi
+    n=$((n+1)); echo "$n" > "$MEMINFO_TEST_DUMPS"
+    if [ "$n" -lt 3 ]; then echo 'No process found for: 4321'; exit 0; fi
+    echo 'MEMINFO in pid 4321 [own test fixture, not a device measurement]'
+  else
+    echo 'Native memory table without per-PID heading'
+  fi
 fi
 ''')
             adb.chmod(0o755)
             env={**os.environ,'PATH':str(folder)+os.pathsep+os.environ['PATH'],
-                 'ANDROID_SERIAL':'emulator-test','MEMINFO_TEST_STATE':str(folder/'state')}
+                 'ANDROID_SERIAL':'emulator-test','MEMINFO_TEST_STATE':str(folder/'state'),
+                 'MEMINFO_TEST_DUMPS':str(folder/'dumps')}
             with subprocess.Popen(['sleep','2']) as driver:
                 with subprocess.Popen(['bash',str(Path(__file__).with_name('sample-meminfo.sh')),
-                                       str(driver.pid),str(folder)],env=env,stdout=subprocess.PIPE,
+                                       str(driver.pid),str(folder),'isolated'],env=env,stdout=subprocess.PIPE,
                                       stderr=subprocess.PIPE,text=True) as sampler:
                     driver.wait(timeout=3)
                     stdout,stderr=sampler.communicate(timeout=3)
@@ -48,6 +57,7 @@ fi
             self.assertEqual(len(snapshots),1)
             self.assertIn('MEMINFO in pid 4321',snapshots[0].read_text())
             self.assertGreaterEqual(int((folder/'state').read_text()),3)
+            self.assertEqual(int((folder/'dumps').read_text()),3)
 
     @unittest.skipUnless(sys.platform=='linux' and platform.machine()=='x86_64','Linux/x86_64 kernel reference test')
     def test_native_kernel_blocks_sockets_and_rejects_allocation_above_address_space_limit(self):

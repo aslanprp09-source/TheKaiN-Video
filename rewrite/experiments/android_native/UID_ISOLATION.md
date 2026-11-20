@@ -178,6 +178,14 @@ UID native interpreter/OpenSSL probe exposes bootstrap failures
 early; success must still be followed by all original 27 tests, **27 additional**
 backend/UI tests, external-app bind rejection and the separate observer-loss test.
 Independent shell meminfo must include both native child and trusted Service.
+The sampler explicitly requests `dumpsys meminfo -a PID`: Android's native-process
+branch prints the per-PID heading only when details are requested, unlike a Java
+ProcessRecord. CI187 completed both sets of 27 tests on API26/29 but its strict
+report gate rejected the missing native heading. The sampler regression models
+this distinction; the required independent snapshot is not made optional.
+Fresh native PIDs can also be absent from Android's cached native-process tracker.
+The sampler retries a PID until a successful, matching per-PID dump, reusing the
+same failed-attempt slot and retaining at most 32 successful snapshots per role.
 The resource journal/report includes identities, kernel CPU/RSS, overshoot,
 resource byte counts, hard-limit values and cleanup/cancellation latency.
 
