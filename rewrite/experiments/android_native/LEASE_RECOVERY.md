@@ -16,7 +16,8 @@ The owner creates a private zero-length, mode0600 regular file and acquires Linu
 `flock(LOCK_EX|LOCK_NB)` on a read-only descriptor. Binder transfer, fork and dup
 preserve the same open file description. The native child receives it at fd6;
 other inherited descriptors remain closed. Before Python, an additional irreversible
-filter rejects all flock operations (including unlock through a duplicate), close
+filter rejects all flock and POSIX/OFD lock-changing fcntl operations (including
+unlock through a duplicate), close
 of fd6, dup2/dup3 replacement of fd6 and all close_range variants. Existing clone,
 exec, io_uring, signal, credential and supervisor protections remain. Native
 bootstrap probes require the real denials before the owner arms the journal.

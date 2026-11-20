@@ -40,6 +40,21 @@ static int fence_lease_guard(void) {
         BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,LEASE_GUARD_FD,0,1),
         BPF_STMT(BPF_RET|BPF_K,SECCOMP_RET_ERRNO|EPERM),
         BPF_STMT(BPF_RET|BPF_K,SECCOMP_RET_ALLOW),
+        /* Keep POSIX/OFD lock-changing APIs out as well; duplicated guard
+         * descriptors must not provide an alternate unlock/downgrade route. */
+        BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,__NR_fcntl,1,0),
+        BPF_STMT(BPF_RET|BPF_K,SECCOMP_RET_ALLOW),
+        BPF_STMT(BPF_LD|BPF_W|BPF_ABS,offsetof(struct seccomp_data,args[1])),
+        BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,F_SETLK,0,1),
+        BPF_STMT(BPF_RET|BPF_K,SECCOMP_RET_ERRNO|EPERM),
+        BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,F_SETLKW,0,1),
+        BPF_STMT(BPF_RET|BPF_K,SECCOMP_RET_ERRNO|EPERM),
+#ifdef F_OFD_SETLK
+        BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,F_OFD_SETLK,0,1),
+        BPF_STMT(BPF_RET|BPF_K,SECCOMP_RET_ERRNO|EPERM),
+        BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,F_OFD_SETLKW,0,1),
+        BPF_STMT(BPF_RET|BPF_K,SECCOMP_RET_ERRNO|EPERM),
+#endif
         BPF_STMT(BPF_RET|BPF_K,SECCOMP_RET_ALLOW)
     };
     struct sock_fprog p={(unsigned short)(sizeof(ops)/sizeof(ops[0])),ops};
@@ -52,7 +67,15 @@ static int lease_guard_denials(void) {
 #endif
     if(syscall(__NR_dup3,1,LEASE_GUARD_FD,0)!=-1 || errno!=EPERM)return 0;
     int copy=dup(LEASE_GUARD_FD);if(copy<0)return 0;
-    int denied=flock(copy,LOCK_UN)==-1 && errno==EPERM;close(copy);
+    int denied=flock(copy,LOCK_UN)==-1 && errno==EPERM;
+    struct flock unlock={0};unlock.l_type=F_UNLCK;unlock.l_whence=SEEK_SET;
+    denied=denied && fcntl(copy,F_SETLK,&unlock)==-1 && errno==EPERM;
+    denied=denied && fcntl(copy,F_SETLKW,&unlock)==-1 && errno==EPERM;
+#ifdef F_OFD_SETLK
+    denied=denied && fcntl(copy,F_OFD_SETLK,&unlock)==-1 && errno==EPERM;
+    denied=denied && fcntl(copy,F_OFD_SETLKW,&unlock)==-1 && errno==EPERM;
+#endif
+    close(copy);
     if(!denied)return 0;
 #ifdef __NR_close_range
     if(syscall(__NR_close_range,0,~0U,0)!=-1 || errno!=EPERM)return 0;
