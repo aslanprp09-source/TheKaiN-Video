@@ -10,8 +10,13 @@ import java.util.zip.*;
 
 /** Inventory comes from this installed APK; bytes come from assets, never a mutable Python cache. */
 final class IsolatedResources {
+    private static final char[] HEX_DIGITS="0123456789abcdef".toCharArray();
     static String hex(byte[] data) {
-        StringBuilder s=new StringBuilder();for(byte b:data)s.append(String.format(java.util.Locale.ROOT,"%02x",b&255));return s.toString();
+        // Called for every verified asset before the operation deadline. Avoid
+        // allocating a Formatter and format parser for each digest byte.
+        char[] out=new char[data.length*2];
+        for(int i=0;i<data.length;i++) {int value=data[i]&255;out[i*2]=HEX_DIGITS[value>>>4];out[i*2+1]=HEX_DIGITS[value&15];}
+        return new String(out);
     }
     static byte[] bytes(InputStream in,int max) throws Exception {
         ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] b=new byte[16384];int n;

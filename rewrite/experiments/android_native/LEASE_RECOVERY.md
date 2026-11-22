@@ -86,6 +86,12 @@ RSS remains sampled, not an instantaneous hard cap. Zip/memfd/file-cache storage
 and the main owner's memory are additional to child RSS. No laboratory number is
 promoted into a product budget.
 
+Resource preparation remains inside the unchanged operation deadline. Digest
+encoding uses a fixed nibble lookup instead of allocating a Formatter for every
+byte of every asset hash. The lowercase SHA-256 representation and all inventory
+checks are unchanged; this reduces preparation work without extending deadlines
+or warming up Python outside the measured operation.
+
 ## Additional tests and SDK-free QA
 
 The old observer-loss test runs unchanged and must still refuse ordinary reuse.
