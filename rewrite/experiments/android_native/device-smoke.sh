@@ -95,6 +95,12 @@ adb -s "$ANDROID_SERIAL" shell pidof system_server | tr -d '\r' > "$evidence/sys
 test -s "$evidence/system-server-before.txt"
 adb -s "$ANDROID_SERIAL" install -r -t "$delivery/lab.apk"
 adb -s "$ANDROID_SERIAL" install -r -t "$delivery/tests.apk"
+if [ "$pages" = 16384 ]; then
+  # The official image can still be processing first-boot package broadcasts
+  # and killing even foreground system apps after sys.boot_completed. This is
+  # infrastructure readiness, not a Python warmup or an operation retry.
+  python3 rewrite/experiments/android_native/emulator_ready.py --evidence "$evidence"
+fi
 # A passing run still executes all original 27 and all additional 27 below.
 timeout 80 adb -s "$ANDROID_SERIAL" shell am instrument -w -e class 'com.thekain.runtime.lab.IsolatedRuntimeTest#separateUidInterpreterSealedResourcesAndOpenSsl' com.thekain.runtime.lab.test/androidx.test.runner.AndroidJUnitRunner > "$evidence/isolated-bootstrap.txt"
 python3 - "$evidence/isolated-bootstrap.txt" <<'PYBOOT'

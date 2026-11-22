@@ -92,6 +92,13 @@ byte of every asset hash. The lowercase SHA-256 representation and all inventory
 checks are unchanged; this reduces preparation work without extending deadlines
 or warming up Python outside the measured operation.
 
+The official API36 image must also finish first-boot package broadcasts and show
+five seconds without new LMKD output before its first timed app operation. This
+bounded CI-only readiness check records meminfo and pressure logs, fails if the
+image never settles, and starts no application or Python process. It does not
+stop packages, change emulator RAM, retry an operation, relax counter freshness
+or extend any application deadline. Cold app/interpreter startup is still tested.
+
 ## Additional tests and SDK-free QA
 
 The old observer-loss test runs unchanged and must still refuse ordinary reuse.
