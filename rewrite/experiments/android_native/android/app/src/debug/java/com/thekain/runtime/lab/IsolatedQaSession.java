@@ -20,6 +20,7 @@ final class IsolatedQaSession {
     private final Handler main=new Handler(Looper.getMainLooper());
     private final AtomicBoolean busy=new AtomicBoolean();
     private final AtomicBoolean exporting=new AtomicBoolean();
+    private final AtomicBoolean ownerFault=new AtomicBoolean();
     private JSONObject state=new JSONObject();
     private OwnedQaFixture fixture;
     private IsolatedRuntime runtime;
@@ -82,6 +83,27 @@ final class IsolatedQaSession {
     String display() {return display;}
     boolean idle() {return ready && !busy.get();}
     boolean canRecover() {return runtime!=null && !busy.get();}
+    boolean canKillOwner() {
+        IsolatedRuntime.Operation value=operation;
+        return BuildConfig.DEBUG && !ownerFault.get() && value!=null && value.request.operation==RuntimeRequest.HANG
+            && value.pythonEntered && !value.finished && !value.retiring;
+    }
+    void killOwnerAfterConfirmation() {
+        if(!canKillOwner() || !ownerFault.compareAndSet(false,true))return;
+        // The normal QA executor is awaiting HANG. Never queue this fault behind
+        // that wait, clear the lease, cancel the operation or stop the Service.
+        new Thread(()->{
+            try {
+                IsolatedRuntime.Operation value=operation;
+                if(!BuildConfig.DEBUG || !"com.thekain.runtime.lab".equals(context.getPackageName())
+                        || !ProcessIdentity.read("/proc/self/cmdline",512).split("\u0000",2)[0].equals(context.getPackageName())
+                        || value==null || value.request.operation!=RuntimeRequest.HANG || !value.pythonEntered
+                        || value.finished || value.retiring)throw new IOException("QA_OWNER_FAULT_GUARD");
+                android.os.Process.killProcess(android.os.Process.myPid());
+            }catch(Exception e) {publish("Процесс QA не завершён: "+e.getClass().getSimpleName());}
+            finally {ownerFault.set(false);publish(display);}
+        },"uid-owner-fault").start();
+    }
     boolean cancellable() {return operation!=null;}
     boolean canExport() {return !busy.get() && !exporting.get() && !"{}".equals(report);}
     void cancel() {IsolatedRuntime.Operation value=operation;if(value!=null)value.cancel();}

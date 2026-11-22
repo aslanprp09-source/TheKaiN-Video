@@ -30,19 +30,25 @@ def run(folder):
                     break
         except Exception: pass
         time.sleep(.1)
-    assert lease and lease.get('phase')=='ARMED' and type(owner) is int and owner>1
+    assert lease and lease.get('phase')=='ARMED' and type(owner) is int and owner>1 and lease.get('observed_started_worker_pid',0)>1
     assert re.fullmatch('[0-9a-f-]{36}',lease['id'])
     cmd=driver.adb('exec-out','run-as',PACKAGE,'cat',f'/proc/{owner}/cmdline').split(b'\0')[0]
     assert cmd==PACKAGE.encode(),'Refuse non-owner kill'
     identity=driver.proc_identity(owner);assert identity and identity[1]==lease['owner_start'] and identity[0] not in ('Z','X','?')
+    lease['kill_mechanism']='confirmed_guarded_owner_self_sigkill'
     (folder/'guard-owner-before-kill.json').write_text(json.dumps(lease,indent=2)+'\n')
-    # Normal launcher process, not instrumentation. No Service unbind, cleanup or state rewrite precedes this kill.
-    driver.adb('shell','run-as',PACKAGE,'kill','-9',str(owner))
+    # The SDK-free launcher's confirmed self-kill. No shell signal, Service
+    # unbind, cleanup or lease rewrite precedes this fault.
+    driver.tap(folder,PACKAGE+':id/uid_kill_owner_button',scroll=True)
+    (folder/'owner-before-selfkill.png').write_bytes(driver.adb('exec-out','screencap','-p'))
+    driver.tap(folder,'android:id/button1',text='Завершить QA')
     until=time.monotonic()+8
     while time.monotonic()<until:
         if driver.dead(driver.proc_identity(owner),lease['owner_start']):break
         time.sleep(.1)
     else:raise AssertionError('Old owner death not observed')
+    (folder/'guard-owner-after-kill.json').write_text(json.dumps(dict(owner_pid=owner,owner_start=lease['owner_start'],
+        owner_death_before_instrumentation=True,kill_mechanism=lease['kill_mechanism'],used_shell_signal=False,used_force_stop=False))+'\n')
     text=driver.adb('shell','am','instrument','-w','-e','class','com.thekain.runtime.lab.OwnerRecoveryTest',driver.RUNNER,timeout=100).decode()
     (folder/'owner-guard-recovery-instrumentation.txt').write_text(text);print(text)
     assert re.search(r'^OK \(1 test\)\s*$',text,re.M) and not any(s in text for s in ('FAILURES!!!','shortMsg=','INSTRUMENTATION_FAILED'))

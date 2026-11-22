@@ -97,6 +97,13 @@ PID/start/name and kills only that owner. A fresh instrumentation process must
 recover through the real guard and complete a new owned HTTPS analysis. Outside
 shell observations do not clear the app reservation.
 
+Owner termination uses the debug launcher's confirmed, guarded **self-SIGKILL**;
+it never accepts a PID, cancels work, unbinds the Service or edits the reservation
+first. The driver independently confirms owner exit before instrumentation starts.
+It uses neither a shell signal nor force-stop. Old-owner proc reads use the public
+Os API to preserve typed errno on API26: only ENOENT/ESRCH or a changed start identity
+prove exit; EACCES/EPERM/malformed records still refuse recovery.
+
 The existing matrices remain API26/29/35 with4KiB and official API36 rev7 with
 actual16KiB, both ABI source builds and all41 product API35, Windows/JVM/Lint/policy.
 `recovery_report.py` adds its own strict acceptance; it does not replace the27+27
@@ -112,8 +119,9 @@ The separate **TheKaiN UID QA** launcher adds:
    owner. A missing/busy/unverified proof never enables a new analysis.
 
 For physical testing, first run the original14-case suite, then the recovery
-trial. For owner restart, start the hang, wait for Python's PID, force-stop only
-the separate lab using Android Settings, reopen it and choose explicit recovery.
+trial. For owner restart, start the hang, wait for Python's PID, choose **Завершить
+процесс QA** and confirm **Завершить QA** in the separate lab, reopen it and choose
+explicit recovery.
 Export the JSON; original cases and separate recovery trials remain distinguishable.
 An operator report is editable evidence, not device attestation.
 

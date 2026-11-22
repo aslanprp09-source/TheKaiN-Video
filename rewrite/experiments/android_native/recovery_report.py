@@ -13,7 +13,11 @@ def validate(folder):
     rows=[json.loads(line) for line in (folder/'recovery-operation-evidence.jsonl').read_text().splitlines()]
     proofs=[json.loads(line) for line in (folder/'kernel-guard-recovery.jsonl').read_text().splitlines()]
     marker=json.loads((folder/'guard-owner-before-kill.json').read_text())
+    death=json.loads((folder/'guard-owner-after-kill.json').read_text())
     assert marker['schema']==2 and marker['phase']=='ARMED' and marker['observed_started_worker_pid']>0
+    assert marker['kill_mechanism']==death['kill_mechanism']=='confirmed_guarded_owner_self_sigkill'
+    assert death['owner_pid']==marker['owner_pid'] and death['owner_start']==marker['owner_start']
+    assert death['owner_death_before_instrumentation'] and not death['used_shell_signal'] and not death['used_force_stop']
     successes=[x for x in proofs if x['status']==1]
     assert len(successes)>=5 and len({x['operation_id'] for x in successes})==len(successes)
     failed={x['id']:x for x in rows if x['error']==13}

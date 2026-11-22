@@ -17,6 +17,9 @@ import java.util.UUID;
 final class IsolatedLease {
     static final Object COORDINATOR=new Object();
     static final int NO_PENDING=0,RECOVERED=1,BUSY=2,UNVERIFIED=3;
+    // Linux O_CLOEXEC exists on both supported API26 ABIs; its public Java
+    // OsConstants field was added only in API27. Keep atomic close-on-exec.
+    private static final int LINUX_O_CLOEXEC=0x80000;
     final AtomicFile file;
     final Context context;
     static final class Guard implements AutoCloseable {
@@ -126,7 +129,9 @@ final class IsolatedLease {
         int pid=j.getInt("owner_pid");long start=j.getLong("owner_start");
         if(pid==android.os.Process.myPid() && start==ProcessIdentity.selfStartTicks())return false;
         try {
-            String raw=ProcessIdentity.read("/proc/"+pid+"/stat",8192);int end=raw.lastIndexOf(')');
+            // Keep the kernel errno: older Android FileInputStream may discard
+            // the ErrnoException cause when converting an absent proc record.
+            String raw=readOwnerStat(pid);int end=raw.lastIndexOf(')');
             if(!raw.startsWith(pid+" (") || end<0)throw new IOException("OWNER_PROC_RECORD");
             String[] fields=raw.substring(end+2).trim().split(" +");
             if(fields.length<20)throw new IOException("OWNER_PROC_FIELDS");
@@ -134,26 +139,41 @@ final class IsolatedLease {
             // threads still run. Only disappearance or a reused start identity
             // proves that this old owner cannot retain work in another thread.
             return Long.parseLong(fields[19])!=start;
-        }catch(IOException e) {
-            for(Throwable cause=e;cause!=null;cause=cause.getCause())if(cause instanceof ErrnoException) {
-                int code=((ErrnoException)cause).errno;if(code==OsConstants.ENOENT || code==OsConstants.ESRCH)return true;
-            }
+        }catch(ErrnoException e) {
+            if(e.errno==OsConstants.ENOENT || e.errno==OsConstants.ESRCH)return true;
             throw e;
         }
+    }
+    private String readOwnerStat(int pid) throws Exception {
+        java.io.FileDescriptor fd=Os.open("/proc/"+pid+"/stat",OsConstants.O_RDONLY|LINUX_O_CLOEXEC|OsConstants.O_NOFOLLOW,0);
+        try {
+            ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] bytes=new byte[2048];int count;
+            while((count=Os.read(fd,bytes,0,bytes.length))>0) {
+                if(out.size()+count>8192)throw new IOException("OWNER_PROC_BOUNDS");out.write(bytes,0,count);
+            }
+            return new String(out.toByteArray(),StandardCharsets.US_ASCII);
+        }finally {Os.close(fd);}
     }
     Recovery recover() {
         synchronized(COORDINATOR) {
             if(!exists())return new Recovery(NO_PENDING,"",0,0,0);
+            String stage="JOURNAL";
             try {
                 if(!uncertain())return new Recovery(BUSY,"",0,0,0);
                 if(!exists())return new Recovery(NO_PENDING,"",0,0,0); // A real OS reboot was observed.
                 JSONObject j=read();validate(j);
+                stage="OWNER_EXIT";
                 boolean sameOwner=j.getInt("owner_pid")==android.os.Process.myPid() && j.getLong("owner_start")==ProcessIdentity.selfStartTicks();
                 if(!sameOwner && !previousOwnerGone(j))return new Recovery(BUSY,"",0,0,0);
+                stage="OWNER_CANARY";
                 if(!("owner-only-"+j.getString("id")).equals(ProcessIdentity.read(new File(context.getFilesDir(),"isolated-owner-canary").getPath(),128)))
                     return new Recovery(UNVERIFIED,"",0,0,0);
-                return finish(j,false);
-            }catch(Exception e) {return new Recovery(UNVERIFIED,"",0,0,0);}
+                stage="KERNEL_GUARD";return finish(j,false);
+            }catch(Exception e) {
+                int errno=e instanceof ErrnoException?((ErrnoException)e).errno:0;
+                android.util.Log.w("TheKaiNIsolated","RECOVERY_REFUSED_"+stage+"_"+e.getClass().getSimpleName()+"_errno="+errno);
+                return new Recovery(UNVERIFIED,"",0,0,0);
+            }
         }
     }
     boolean finishKnownDead(String id,Guard guard) {

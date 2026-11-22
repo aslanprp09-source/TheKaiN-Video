@@ -8,7 +8,9 @@ from .recovery_report import validate
 
 class RecoveryReportTest(unittest.TestCase):
     def test_missing_exclusive_or_old_failure_or_owner_identity_never_passes(self):
-        marker=dict(schema=2,phase='ARMED',observed_started_worker_pid=200,id='owner',owner_pid=100,owner_start=4,device=8,inode=9)
+        marker=dict(schema=2,phase='ARMED',observed_started_worker_pid=200,id='owner',owner_pid=100,owner_start=4,device=8,inode=9,
+            kill_mechanism='confirmed_guarded_owner_self_sigkill')
+        death=dict(owner_pid=100,owner_start=4,owner_death_before_instrumentation=True,kill_mechanism=marker['kill_mechanism'],used_shell_signal=False,used_force_stop=False)
         proofs=[dict(status=1,operation_id=str(i),kernel_lock_exclusive=True,old_operation_not_rewritten=True,production_ready=False,
             device=8,inode=9,elapsed_ms=5,previous_owner_pid=100,owner_pid=101) for i in range(4)]
         proofs.append(dict(proofs[0],operation_id='owner'))
@@ -22,8 +24,19 @@ class RecoveryReportTest(unittest.TestCase):
                 (folder/'lease-recovery-instrumentation.txt').write_text('OK (4 tests)\n')
                 (folder/'owner-guard-recovery-instrumentation.txt').write_text('OK (1 test)\n')
                 (folder/'guard-owner-before-kill.json').write_text(json.dumps(marker))
+                (folder/'guard-owner-after-kill.json').write_text(json.dumps(death))
                 (folder/'kernel-guard-recovery.jsonl').write_text('\n'.join(map(json.dumps,p)))
                 (folder/'recovery-operation-evidence.jsonl').write_text('\n'.join(map(json.dumps,r)))
                 if changed:
                     with self.assertRaises(AssertionError):validate(folder)
                 else:self.assertFalse(validate(folder)['production_ready'])
+        for fault in ('used_shell_signal','used_force_stop','owner_death_before_instrumentation'):
+            with self.subTest(fault=fault),tempfile.TemporaryDirectory() as temp:
+                folder=Path(temp);bad=dict(death);bad[fault]=fault!='owner_death_before_instrumentation'
+                for name,value in [('guard-owner-before-kill.json',marker),('guard-owner-after-kill.json',bad)]:
+                    (folder/name).write_text(json.dumps(value))
+                (folder/'lease-recovery-instrumentation.txt').write_text('OK (4 tests)\n')
+                (folder/'owner-guard-recovery-instrumentation.txt').write_text('OK (1 test)\n')
+                (folder/'kernel-guard-recovery.jsonl').write_text('\n'.join(map(json.dumps,proofs)))
+                (folder/'recovery-operation-evidence.jsonl').write_text('\n'.join(map(json.dumps,rows)))
+                with self.assertRaises(AssertionError):validate(folder)
