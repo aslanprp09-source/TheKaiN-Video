@@ -40,9 +40,13 @@ public final class DiagnosticQaTest {
                     JSONObject pending=read(app).optJSONObject("pending");
                     if(pending!=null && pending.optString("scenario_name").equals("BLOCK_MAIN_DEADLINE") && pending.has("runtime_snapshot")) {
                         JSONObject snapshot=pending.getJSONObject("runtime_snapshot");
-                        if(snapshot.getBoolean("python_entered")) {
+                        assertFalse(snapshot.getBoolean("death_proof_granted_by_snapshot"));
+                        if(snapshot.getBoolean("worker_death_observed"))assertTrue("Unexpected pre-retirement worker death: "+snapshot,
+                            snapshot.getBoolean("deadline_expired") || snapshot.getBoolean("retiring") || snapshot.getBoolean("finished"));
+                        if(snapshot.getBoolean("python_entered") && !snapshot.getBoolean("deadline_expired")
+                                && !snapshot.getBoolean("retiring") && !snapshot.getBoolean("finished")) {
                             sawLiveDeadline=true;assertTrue(snapshot.getBoolean("supervisor_alive"));
-                            assertFalse(snapshot.getBoolean("worker_death_observed"));assertFalse(snapshot.getBoolean("death_proof_granted_by_snapshot"));
+                            assertFalse(snapshot.getBoolean("worker_death_observed"));
                             assertTrue(snapshot.has("service_record_observation"));assertTrue(snapshot.getLong("observer_last_sequence")>0);
                             assertEquals("ARMED",snapshot.getString("lease_observation"));
                             scenario.onActivity(activity->{assertFalse(activity.findViewById(R.id.uid_kill_owner_button).isEnabled());assertTrue(activity.findViewById(R.id.uid_export_button).isEnabled());});

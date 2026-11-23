@@ -43,6 +43,7 @@ public final class QaAttemptJournalTest {
         java.io.File home=new java.io.File(context.getFilesDir(),"diagnostic-wait-fixture");
         try(OwnedQaFixture fixture=new OwnedQaFixture(context,home);IsolatedRuntime runtime=new IsolatedRuntime(context,home)) {
             IsolatedRuntime.Operation op=runtime.submit(RuntimeRequest.HANG,null,1,30000,RuntimeRequest.MAX_RSS,IsolatedInput.BLOCK_MAIN);
+            Throwable firstFailure=null;
             try {
                 op.whenPythonStarted().get(25,java.util.concurrent.TimeUnit.SECONDS);
                 JSONObject pending=journal.scenario(op.id,"INJECTED_LOST_COMPLETION_DELIVERY");
@@ -60,9 +61,14 @@ public final class QaAttemptJournalTest {
                 assertEquals("ARMED",snapshot.getString("lease_observation"));assertFalse(op.completion().isDone());
                 journal.restart();assertEquals(op.id,state.getJSONArray("unfinished_operations").getJSONObject(0).getString("id"));
                 assertEquals("FAILED",state.getJSONArray("attempts").getJSONObject(0).getString("status"));
-            }finally {
-                op.cancel();IsolatedRuntime.Outcome out=op.completion().get(5,java.util.concurrent.TimeUnit.SECONDS);
-                assertEquals(RuntimeResult.CANCELED,out.result.error);assertTrue(out.deathConfirmed);assertTrue(out.ownerCanaryIntact);
+            }catch(Exception | AssertionError failure) {firstFailure=failure;throw failure;}
+            finally {
+                try {
+                    if(!op.finished)op.cancel();IsolatedRuntime.Outcome out=op.completion().get(5,java.util.concurrent.TimeUnit.SECONDS);
+                    if(op.pythonEntered) {assertEquals(RuntimeResult.CANCELED,out.result.error);assertTrue(out.deathConfirmed);assertTrue(out.ownerCanaryIntact);}
+                }catch(Exception | AssertionError cleanupFailure) {
+                    if(firstFailure!=null)firstFailure.addSuppressed(cleanupFailure);else throw cleanupFailure;
+                }
             }
         }
     }

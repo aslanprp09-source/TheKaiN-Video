@@ -107,7 +107,9 @@ recovery5 tests and product41 API35 tests remain. Additional instrumentation:
 - three complete BLOCK_MAIN cancellation -> new12s BLOCK_MAIN deadline -> actual
   supervisor loss -> explicit exclusive-lock recovery -> fresh owned HTTPS
   analysis cycles, with the same Application, session and owner PID. Live exported
-  snapshots are checked, and every cycle must have actual death-confirmed cancel
+  snapshots are checked as live only before retirement/deadline; terminal snapshots must
+  retain the real death observation rather than assert that the worker is alive.
+  Every cycle must have actual death-confirmed cancel
   and timeout outcomes, retained failed observer proof and clean fresh analysis;
 - a lost-delivery future while a real isolated Python worker is alive: a short
   test-only observational wait fails and captures live/ARMED/no-death state,
