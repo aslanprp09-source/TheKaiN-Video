@@ -357,7 +357,7 @@ public final class IsolatedRuntime implements AutoCloseable {
     JSONObject diagnosticSnapshot(Operation o) throws org.json.JSONException {
         // No Runtime monitor, lease IO, IPC roundtrip or new proof of death here.
         long now=SystemClock.elapsedRealtime();Snapshot kernel=o.kernel;
-        return new JSONObject().put("id",o.id).put("operation",o.request.operation).put("mode",o.mode)
+        JSONObject snapshot=new JSONObject().put("id",o.id).put("operation",o.request.operation).put("mode",o.mode)
             .put("captured_elapsed_ms",now).put("captured_wall_ms",System.currentTimeMillis())
             .put("deadline_elapsed_ms",o.request.deadline).put("deadline_expired",now>=o.request.deadline)
             .put("deadline_lateness_ms",Math.max(0,now-o.request.deadline))
@@ -382,6 +382,7 @@ public final class IsolatedRuntime implements AutoCloseable {
             .put("retiring",o.retiring).put("finished",o.finished).put("runtime_future_done",o.future.isDone())
             .put("cleanup_deadline_elapsed_ms",o.cleanupDeadline).put("transition_log",o.trace.snapshot())
             .put("diagnostic_only",true).put("death_proof_granted_by_snapshot",false);
+        return snapshot.put("captured_end_elapsed_ms",SystemClock.elapsedRealtime());
     }
     private boolean serviceExists(Class<?> type) {
         try {

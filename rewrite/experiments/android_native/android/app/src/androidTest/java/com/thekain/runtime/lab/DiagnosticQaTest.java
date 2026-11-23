@@ -40,10 +40,11 @@ public final class DiagnosticQaTest {
                     JSONObject pending=read(app).optJSONObject("pending");
                     if(pending!=null && pending.optString("scenario_name").equals("BLOCK_MAIN_DEADLINE") && pending.has("runtime_snapshot")) {
                         JSONObject snapshot=pending.getJSONObject("runtime_snapshot");
+                        boolean deadlineObservedAtEnd=snapshot.getLong("captured_end_elapsed_ms")>=snapshot.getLong("deadline_elapsed_ms");
                         assertFalse(snapshot.getBoolean("death_proof_granted_by_snapshot"));
                         if(snapshot.getBoolean("worker_death_observed"))assertTrue("Unexpected pre-retirement worker death: "+snapshot,
-                            snapshot.getBoolean("deadline_expired") || snapshot.getBoolean("retiring") || snapshot.getBoolean("finished"));
-                        if(snapshot.getBoolean("python_entered") && !snapshot.getBoolean("deadline_expired")
+                            deadlineObservedAtEnd || snapshot.getBoolean("retiring") || snapshot.getBoolean("finished"));
+                        if(snapshot.getBoolean("python_entered") && !deadlineObservedAtEnd
                                 && !snapshot.getBoolean("retiring") && !snapshot.getBoolean("finished")) {
                             sawLiveDeadline=true;assertTrue(snapshot.getBoolean("supervisor_alive"));
                             assertFalse(snapshot.getBoolean("worker_death_observed"));

@@ -63,7 +63,9 @@ Snapshot capture takes no Runtime monitor, lease lock or file read and performs
 no synchronous Service query. An optional owner-only diagnostic query runs on one
 separate daemon thread with a one-item bounded queue; a stuck query stays unknown
 and cannot block the owner deadline/cleanup thread. Observations have their own
-times and are not an atomic system-wide instant. A stale/denied Service observation
+times and the Runtime snapshot has explicit capture-start/capture-end elapsed
+ms; it is not an atomic system-wide instant. A sample crossing its deadline is
+classified as a terminal observation, without changing that deadline. A stale/denied Service observation
 is never evidence of death. The original conservative ServiceRecord cleanup gate
 still runs unchanged. Sampling and AtomicFile fsync have scheduling/IO overhead;
 wall-clock hard guarantees and instantaneous RSS limits are not claimed.
