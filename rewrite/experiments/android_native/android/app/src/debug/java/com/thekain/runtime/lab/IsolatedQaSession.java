@@ -103,18 +103,19 @@ final class IsolatedQaSession {
         state.getJSONObject("pending").put("id",operation.id);awaitStage="NONE";
         capturePending("SUBMITTED",null,0);save();
     }
-    private void capturePending(String status,CompletableFuture<?> awaited,long until) throws Exception {
+    private void capturePending(String status,Future<?> awaited,long until) throws Exception {
         JSONObject pending=state.optJSONObject("pending");if(pending==null)return;
         if(!pending.optString("wait_status").equals("WAIT_EXCEEDED"))pending.put("wait_status",status);
         pending.put("wait_stage",awaitStage).put("last_capture_reason",status)
             .put("captured_elapsed_ms",SystemClock.elapsedRealtime()).put("captured_wall_ms",System.currentTimeMillis());
         if(until>0)pending.put("wait_deadline_elapsed_ms",until);
-        if(awaited!=null)pending.put("awaited_future_done",awaited.isDone());
+        if(awaited!=null)pending.put("awaited_future_done",awaited.isDone())
+            .put("wait_source",awaited instanceof ReadOnlySignal?"READ_ONLY_RUNTIME_SIGNAL":"OTHER_FUTURE");
         if(operation!=null) {runtime.requestDiagnosticServiceObservation(operation);pending.put("runtime_snapshot",runtime.diagnosticSnapshot(operation));}
         if(status.equals("WAIT_EXCEEDED") && !pending.has("wait_exceeded_snapshot"))
             pending.put("wait_exceeded_snapshot",new JSONObject(pending.toString()));
     }
-    private <T> T await(CompletableFuture<T> future,int seconds,String stage) throws Exception {
+    private <T> T await(Future<T> future,int seconds,String stage) throws Exception {
         // This is the same outer wait budget, not a retry or an extended runtime
         // deadline. Persist observations while the QA executor is waiting.
         awaitStage=stage;
@@ -205,7 +206,7 @@ final class IsolatedQaSession {
     private JSONObject freshRecoveryAnalysis() throws Exception {
         beginScenario("RECOVERY_ANALYZE",RuntimeRequest.ANALYZE,0,30000);
         operation=runtime.submit(RuntimeRequest.ANALYZE,fixture.url,1,30000);submitted();
-        IsolatedRuntime.Outcome fresh=await(operation.completion(),35,"COMPLETION");
+        IsolatedRuntime.Outcome fresh=await(operation.outcomeSignal(),35,"COMPLETION");
         if(fresh.result.error!=0 || !fresh.deathConfirmed || !fresh.ownerCanaryIntact || fresh.result.pythonCalls!=1
                 || fresh.workerUid==android.os.Process.myUid())throw new IOException("RECOVERY_ANALYSIS_FAILED");
         File[] guards=context.getFilesDir().listFiles((directory,name)->name.startsWith("isolated-lease-") && name.endsWith(".lock"));
@@ -230,12 +231,12 @@ final class IsolatedQaSession {
     private void supervisorRecoveryTrial() throws Exception {
         beginScenario("SUPERVISOR_LOSS",RuntimeRequest.HANG,0,30000);
         operation=runtime.submit(RuntimeRequest.HANG,null,1,30000);submitted();IsolatedRuntime.Operation interrupted=operation;
-        await(interrupted.whenPythonStarted(),25,"PYTHON_STARTED");
+        await(interrupted.pythonStartedSignal(),25,"PYTHON_STARTED");
         context.unbindService(interrupted.connection);interrupted.bound=false;
         context.stopService(new Intent(context,IsolatedRuntimeService.class));
-        IsolatedRuntime.Outcome failed=await(interrupted.completion(),6,"OBSERVER_LOSS_COMPLETION");
+        IsolatedRuntime.Outcome failed=await(interrupted.outcomeSignal(),6,"OBSERVER_LOSS_COMPLETION");
         if(failed.result.error!=RuntimeResult.CLEANUP_FAILED || failed.deathConfirmed)throw new IOException("OBSERVER_LOSS_NOT_PROVEN");
-        IsolatedRuntime.RecoveryOutcome proof=await(runtime.recoverInterruptedWorker(),4,"KERNEL_RECOVERY");
+        IsolatedRuntime.RecoveryOutcome proof=await(runtime.recoverySignal(),4,"KERNEL_RECOVERY");
         if(!proof.recovered() || !interrupted.id.equals(proof.operationId))throw new IOException("GUARD_RECOVERY_REFUSED");
         JSONObject originalSnapshot=runtime.diagnosticSnapshot(interrupted);attempts.scenarioCompleted();save();
         JSONObject trial=recoveryFacts(proof,"supervisor_loss").put("original_snapshot",originalSnapshot).put("original_error",failed.result.error)
@@ -250,7 +251,7 @@ final class IsolatedQaSession {
             try {
                 attemptKind="OWNER_RECOVERY";attempts.begin(attemptKind);
                 attempts.scenario("", "OWNER_RECOVERY");state.put("recovery_pending",true);save();
-                IsolatedRuntime.RecoveryOutcome proof=await(runtime.recoverInterruptedWorker(),4,"KERNEL_RECOVERY");
+                IsolatedRuntime.RecoveryOutcome proof=await(runtime.recoverySignal(),4,"KERNEL_RECOVERY");
                 JSONObject trial=recoveryFacts(proof,"owner_restart");attempts.scenarioCompleted();
                 if(proof.recovered()) {trial.put("fresh_analysis",freshRecoveryAnalysis());ready=true;}
                 LabQaStore.append(state,"recovery_trials",trial,16);state.remove("recovery_pending");attempts.completed();save();
@@ -277,14 +278,15 @@ final class IsolatedQaSession {
         running.whenPythonStarted().whenComplete((pid,error)->{
             if(pid!=null && operation==running)publish(scenarioDisplay+"\nPython работает в отдельном UID. PID worker: "+pid+". Отмена доступна.");
         });
-        if(cancel) {await(operation.whenPythonStarted(),25,"PYTHON_STARTED");if(!operation.cancel())throw new IOException("CANCEL_NOT_ACCEPTED");}
-        IsolatedRuntime.Outcome out=await(operation.completion(),35,"COMPLETION");
+        if(cancel) {await(operation.pythonStartedSignal(),25,"PYTHON_STARTED");if(!operation.cancel())throw new IOException("CANCEL_NOT_ACCEPTED");}
+        IsolatedRuntime.Outcome out=await(operation.outcomeSignal(),35,"COMPLETION");
         JSONObject row=new JSONObject().put("attempt_id",scenarioFacts.getString("attempt_id"))
             .put("scenario_id",scenarioFacts.getString("scenario_id")).put("scenario_name",scenarioFacts.getString("scenario_name"))
             .put("scenario_index",scenarioFacts.getInt("scenario_index"))
             .put("started_elapsed_ms",scenarioFacts.getLong("started_elapsed_ms")).put("started_wall_ms",scenarioFacts.getLong("started_wall_ms"))
             .put("finished_elapsed_ms",SystemClock.elapsedRealtime()).put("finished_wall_ms",System.currentTimeMillis())
-            .put("transition_log",operation.trace.snapshot()).put("id",out.result.id).put("operation",kind).put("mode",mode)
+            .put("transition_log",operation.trace.snapshot()).put("completion_wait_source","READ_ONLY_RUNTIME_SIGNAL")
+            .put("id",out.result.id).put("operation",kind).put("mode",mode)
             .put("expected_error",expected).put("error",out.result.error).put("worker_pid",out.workerPid).put("worker_uid",out.workerUid)
             .put("parent_pid",android.os.Process.myPid()).put("parent_uid",android.os.Process.myUid()).put("instance",out.instance)
             .put("observer_pid",out.observerPid).put("observer_uid",out.observerUid).put("observer_start_ticks",out.observerStartTicks)

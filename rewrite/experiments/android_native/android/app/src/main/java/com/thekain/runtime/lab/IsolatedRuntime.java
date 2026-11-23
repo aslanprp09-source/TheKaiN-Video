@@ -17,6 +17,7 @@ public final class IsolatedRuntime implements AutoCloseable {
     private final Context context;
     private final File fixtureHome;
     private final IsolatedLease lease;
+    private final Executor notificationExecutor;
     private final HandlerThread thread=new HandlerThread("isolated-supervisor");
     private final Handler supervisor;
     private volatile long supervisorTick=SystemClock.elapsedRealtime();
@@ -29,11 +30,15 @@ public final class IsolatedRuntime implements AutoCloseable {
         this(context,null);
     }
     IsolatedRuntime(Context context,File fixtureHome) {
+        this(context,fixtureHome,null);
+    }
+    // Test seam for delayed notifications, never an IPC-controlled executor.
+    IsolatedRuntime(Context context,File fixtureHome,Executor notificationExecutor) {
         try {
             if(!ProcessIdentity.read("/proc/self/cmdline",512).split("\u0000",2)[0].equals(context.getPackageName()))
                 throw new IllegalStateException("OWNER_REQUIRED");
         }catch(IOException e) {throw new IllegalStateException("OWNER_IDENTITY_UNAVAILABLE",e);}
-        this.context=context.getApplicationContext();this.fixtureHome=fixtureHome;lease=new IsolatedLease(this.context);
+        this.context=context.getApplicationContext();this.fixtureHome=fixtureHome;this.notificationExecutor=notificationExecutor;lease=new IsolatedLease(this.context);
         thread.start();supervisor=new Handler(thread.getLooper());
     }
     public final class Operation {
@@ -63,8 +68,11 @@ public final class IsolatedRuntime implements AutoCloseable {
         long samples,peak,cpu,before,address,cpuLimit,resourceBytes,cancelAt=-1,retireAt,cleanupDeadline;
         volatile long procFailureSince=-1;
         Operation(RuntimeRequest request,int mode,long submitted) {this.request=request;this.mode=mode;id=request.id;this.submitted=submitted;trace.mark("SUBMITTED");}
-        public CompletableFuture<Outcome> completion() {return future.thenApplyAsync(v->v);}
-        public CompletableFuture<Integer> whenPythonStarted() {return started.thenApplyAsync(v->v);}
+        public CompletableFuture<Outcome> completion() {return notification(future);}
+        public CompletableFuture<Integer> whenPythonStarted() {return notification(started);}
+        /** Blocking waits belong off the main thread and do not depend on notification dispatch. */
+        public Future<Outcome> outcomeSignal() {return new ReadOnlySignal<>(future);}
+        public Future<Integer> pythonStartedSignal() {return new ReadOnlySignal<>(started);}
         public boolean cancel() {
             synchronized(IsolatedRuntime.this) {
                 if(finished || retiring)return false;
@@ -72,6 +80,11 @@ public final class IsolatedRuntime implements AutoCloseable {
             }
             supervisor.post(()->retire(this,RuntimeResult.CANCELED));return true;
         }
+    }
+    private <T> CompletableFuture<T> notification(CompletableFuture<T> source) {
+        // Keep user continuations off the supervisor; callers waiting for the
+        // actual result use read-only signals, not these asynchronously copied views.
+        return notificationExecutor==null?source.thenApplyAsync(v->v):source.thenApplyAsync(v->v,notificationExecutor);
     }
     public static final class Outcome {
         public final RuntimeResult result;
@@ -457,7 +470,9 @@ public final class IsolatedRuntime implements AutoCloseable {
         }
         public boolean recovered() {return status==IsolatedLease.RECOVERED;}
     }
-    public CompletableFuture<RecoveryOutcome> recoverInterruptedWorker() {
+    public CompletableFuture<RecoveryOutcome> recoverInterruptedWorker() {return notification(recoverInterruptedSource());}
+    public Future<RecoveryOutcome> recoverySignal() {return new ReadOnlySignal<>(recoverInterruptedSource());}
+    private CompletableFuture<RecoveryOutcome> recoverInterruptedSource() {
         CompletableFuture<RecoveryOutcome> result=new CompletableFuture<>();long started=SystemClock.elapsedRealtime();
         synchronized(this) {
             if(closed || (active!=null && !active.finished)) {
@@ -495,7 +510,7 @@ public final class IsolatedRuntime implements AutoCloseable {
             }catch(Exception e) {android.util.Log.e("TheKaiNIsolated","RECOVERY_EVIDENCE_FAILED");}
             result.complete(out);
         }))result.completeExceptionally(new IllegalStateException("RECOVERY_OWNER_CLOSED"));
-        return result.thenApplyAsync(v->v);
+        return result;
     }
     @Override public synchronized void close() {
         closed=true;preparation.shutdownNow();diagnosticQueries.shutdownNow();

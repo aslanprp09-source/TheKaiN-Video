@@ -168,6 +168,11 @@ adb -s "$ANDROID_SERIAL" exec-out run-as com.thekain.runtime.lab cat files/diagn
 adb -s "$ANDROID_SERIAL" exec-out run-as com.thekain.runtime.lab cat files/isolated-qa-report.json > "$evidence/diagnostic-qa-report.json"
 python3 rewrite/experiments/android_native/diagnostic_report.py --evidence "$evidence"
 
+# Additional real-worker test; preserve the entire original65-test inventory above/below.
+timeout 180 adb -s "$ANDROID_SERIAL" shell am instrument -w -r -e class com.thekain.runtime.lab.CompletionSignalTest com.thekain.runtime.lab.test/androidx.test.runner.AndroidJUnitRunner > "$evidence/completion-signal-instrumentation.txt"
+adb -s "$ANDROID_SERIAL" exec-out run-as com.thekain.runtime.lab cat files/completion-signal-evidence.json > "$evidence/completion-signal-evidence.json"
+python3 rewrite/experiments/android_native/completion_signal_report.py --evidence "$evidence" --source "$(git rev-parse HEAD)" --api "$api" --pages "$pages"
+
 # Deliberately poison the isolated lease: normal submit must refuse until explicit guarded recovery.
 # Successful kernel proof from the full suite above is retained separately.
 timeout 80 adb -s "$ANDROID_SERIAL" shell am instrument -w -e class com.thekain.runtime.lab.ObserverFailureTest com.thekain.runtime.lab.test/androidx.test.runner.AndroidJUnitRunner > "$evidence/observer-failure-instrumentation.txt"
