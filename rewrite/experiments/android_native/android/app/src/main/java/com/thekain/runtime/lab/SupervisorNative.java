@@ -9,7 +9,7 @@ final class SupervisorNative {
     static native boolean protect();
     static native int flags(int fd);
     static native int seal(int source,long max);
-    static native int[] spawn(String installedDirectory,int zip,int cert,int key);
+    static native int[] spawn(String installedDirectory,int zip,int cert,int key,int guard);
     static native void kill(int pid);
     static native boolean reap(int pid);
     static native int dumpable();

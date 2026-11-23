@@ -95,6 +95,12 @@ adb -s "$ANDROID_SERIAL" shell pidof system_server | tr -d '\r' > "$evidence/sys
 test -s "$evidence/system-server-before.txt"
 adb -s "$ANDROID_SERIAL" install -r -t "$delivery/lab.apk"
 adb -s "$ANDROID_SERIAL" install -r -t "$delivery/tests.apk"
+if [ "$pages" = 16384 ]; then
+  # The official image can still be processing first-boot package broadcasts
+  # and killing even foreground system apps after sys.boot_completed. This is
+  # infrastructure readiness, not a Python warmup or an operation retry.
+  python3 rewrite/experiments/android_native/emulator_ready.py --evidence "$evidence"
+fi
 # A passing run still executes all original 27 and all additional 27 below.
 timeout 80 adb -s "$ANDROID_SERIAL" shell am instrument -w -e class 'com.thekain.runtime.lab.IsolatedRuntimeTest#separateUidInterpreterSealedResourcesAndOpenSsl' com.thekain.runtime.lab.test/androidx.test.runner.AndroidJUnitRunner > "$evidence/isolated-bootstrap.txt"
 python3 - "$evidence/isolated-bootstrap.txt" <<'PYBOOT'
@@ -154,7 +160,7 @@ python3 rewrite/experiments/android_native/isolated_report.py --evidence "$evide
 adb -s "$ANDROID_SERIAL" shell pidof system_server | tr -d '\r' > "$evidence/system-server-after-isolated.txt"
 cmp "$evidence/system-server-before.txt" "$evidence/system-server-after-isolated.txt"
 
-# Deliberately poison the final isolated lease: no further runtime operation follows.
+# Deliberately poison the isolated lease: normal submit must refuse until explicit guarded recovery.
 # Successful kernel proof from the full suite above is retained separately.
 timeout 80 adb -s "$ANDROID_SERIAL" shell am instrument -w -e class com.thekain.runtime.lab.ObserverFailureTest com.thekain.runtime.lab.test/androidx.test.runner.AndroidJUnitRunner > "$evidence/observer-failure-instrumentation.txt"
 adb -s "$ANDROID_SERIAL" exec-out run-as com.thekain.runtime.lab cat files/observer-failure.json > "$evidence/observer-failure.json"
@@ -183,3 +189,18 @@ else:raise AssertionError('Native child death after supervisor loss is not indep
 PYPDEATH
 adb -s "$ANDROID_SERIAL" shell pidof system_server | tr -d '\r' > "$evidence/system-server-after-observer-fault.txt"
 cmp "$evidence/system-server-before.txt" "$evidence/system-server-after-observer-fault.txt"
+
+# The original refusal test above remains unchanged. Recovery is a separate explicit action.
+timeout 180 adb -s "$ANDROID_SERIAL" shell am instrument -w -e class com.thekain.runtime.lab.LeaseRecoveryTest,com.thekain.runtime.lab.RecoveryQaTest com.thekain.runtime.lab.test/androidx.test.runner.AndroidJUnitRunner > "$evidence/lease-recovery-instrumentation.txt"
+python3 - "$evidence/lease-recovery-instrumentation.txt" <<'PYRECOVERY'
+from pathlib import Path
+import re,sys
+text=Path(sys.argv[1]).read_text();print(text)
+assert re.search(r'^OK \(4 tests\)\s*$',text,re.M), 'All additional explicit recovery tests must execute'
+assert not any(s in text for s in ('FAILURES!!!','shortMsg=','INSTRUMENTATION_FAILED'))
+PYRECOVERY
+adb -s "$ANDROID_SERIAL" exec-out run-as com.thekain.runtime.lab cat files/recovery-qa.png > "$evidence/recovery-qa.png"
+python3 rewrite/experiments/android_native/recovery-smoke.py --evidence "$evidence"
+adb -s "$ANDROID_SERIAL" shell pidof system_server | tr -d '\r' > "$evidence/system-server-after-recovery.txt"
+cmp "$evidence/system-server-before.txt" "$evidence/system-server-after-recovery.txt"
+python3 rewrite/experiments/android_native/recovery_report.py --evidence "$evidence"

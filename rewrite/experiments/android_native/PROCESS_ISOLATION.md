@@ -1,3 +1,5 @@
+For the subsequent explicit recovery experiment, see [LEASE_RECOVERY.md](LEASE_RECOVERY.md). Its Android/physical acceptance is separate from the PR42 baseline.
+
 # Runtime process, cancellation and resource experiment
 
 The subsequent genuine isolated-UID backend is specified in

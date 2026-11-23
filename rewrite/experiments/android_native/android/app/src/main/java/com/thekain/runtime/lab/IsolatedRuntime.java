@@ -9,9 +9,10 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/** Java-only capability broker and supervisor. Never loads JNI or executes Python. */
+/** Capability broker with libc-only lease JNI. Never loads libpython or executes Python. */
 public final class IsolatedRuntime implements AutoCloseable {
     private static final AtomicBoolean LEASE=new AtomicBoolean();
+    private static volatile IsolatedRuntime.Operation LIVE;
     private static final long SAMPLE=40,CLEANUP=2500;
     private final Context context;
     private final File fixtureHome;
@@ -46,7 +47,7 @@ public final class IsolatedRuntime implements AutoCloseable {
         IResourceOwner observerEndpoint;IIsolatedWorker worker;
         volatile int peerPid,peerUid,observerPid,observerUid;volatile long observerStart,lastSample,sequence,observerPeak,observerCpu;
         volatile boolean observerRetiring,observerNonDumpable,observerPythonLoaded,noChildConfirmed,executed;
-        boolean canaryIntact=true;volatile int childProtection;volatile int exitSignal=-1,exitCode=-1;volatile int credentialProof;
+        volatile IsolatedLease.Guard guard;boolean canaryIntact=true;volatile int childProtection;volatile int exitSignal=-1,exitCode=-1;volatile int credentialProof;
         ServiceConnection connection;
         boolean bound,connected,binderDead,pythonEntered;
         String instance="";int error=-1,denials;
@@ -96,14 +97,16 @@ public final class IsolatedRuntime implements AutoCloseable {
         if(timeoutMs<100 || timeoutMs>NativeRuntime.MAX_DEADLINE_MS || mode<0 || mode>IsolatedInput.PLATFORM_CREDENTIAL)
             throw new IllegalArgumentException("LAB_BOUNDS");
         Operation o=new Operation(new RuntimeRequest(UUID.randomUUID().toString(),operation,url,ca,now+timeoutMs,rss,RuntimeRequest.MAX_HEADROOM),mode,now);
+        synchronized(IsolatedLease.COORDINATOR) {
         if(lease.uncertain()) {
             o.error=RuntimeResult.CLEANUP_FAILED;o.retireAt=now;o.finished=true;o.future.complete(new Outcome(o,false));return o;
         }
         if(closed || active!=null || !LEASE.compareAndSet(false,true)) {
             o.error=RuntimeResult.BUSY;o.retireAt=now;o.finished=true;o.future.complete(new Outcome(o,true));return o;
         }
-        active=o;o.preparing=true;supervisor.post(()->sample(o));
+        active=o;LIVE=o;o.preparing=true;supervisor.post(()->sample(o));
         preparation.execute(()->prepare(o));return o;
+        }
     }
     private void prepare(Operation o) {
         IsolatedInput input=null;ChildNetworkGate gate=null;
@@ -112,7 +115,8 @@ public final class IsolatedRuntime implements AutoCloseable {
                 out.write(("owner-only-"+o.id).getBytes(java.nio.charset.StandardCharsets.US_ASCII));
             }
             o.canaryWritten=true;
-            input=IsolatedResources.prepare(context,o.request,o.mode,fixtureHome);
+            o.guard=lease.createGuard(o.id);
+            input=IsolatedResources.prepare(context,o.request,o.mode,fixtureHome,o.guard);
             // Counters and all HTTPS IO belong to the trusted owner, not the isolated UID.
             gate=new ChildNetworkGate(o.request,new IRuntimeCallback.Stub() {
                 public boolean ready(String id,String instance,long ticks) {return false;}
@@ -124,11 +128,11 @@ public final class IsolatedRuntime implements AutoCloseable {
             IsolatedInput prepared=input;ChildNetworkGate transport=gate;
             supervisor.post(()->{o.gate=transport;o.resourceBytes=prepared.bytes;o.preparing=false;
                 if(!current(o) || o.retiring) {prepared.close();transport.close();return;}
-                try {lease.reserve(o.id);bind(o,prepared);}
+                try {lease.reserve(o.id,o.guard);bind(o,prepared);}
                 catch(Exception e) {prepared.close();retire(o,RuntimeResult.IPC_ERROR);}
             });
         }catch(Exception e) {
-            if(input!=null)input.close();if(gate!=null)gate.close();
+            if(input!=null)input.close();if(o.guard!=null)o.guard.close();if(gate!=null)gate.close();
             supervisor.post(()->{o.preparing=false;if(current(o) && !o.retiring)retire(o,RuntimeResult.INVALID_REQUEST);});
         }
     }
@@ -229,13 +233,18 @@ public final class IsolatedRuntime implements AutoCloseable {
             @Override public void phase(String capability) {
                 synchronized(IsolatedRuntime.this) {if(sender(o,capability) && o.kernel!=null && o.childProtection==255) {o.pythonEntered=true;o.started.complete(o.kernel.pid);}}
             }
-            @Override public void limits(String capability,long before,long address,long cpu,int childProtection) {
+            @Override public boolean limits(String capability,long before,long address,long cpu,int childProtection) {
                 synchronized(IsolatedRuntime.this) {
-                    if(!sender(o,capability) || o.kernel==null)return;
+                    if(!sender(o,capability) || o.kernel==null)return false;
                     if(before<=0 || address!=before+o.request.virtualHeadroom || cpu<=0 || cpu>64 || childProtection!=255) {
-                        supervisor.post(()->retire(o,RuntimeResult.IPC_ERROR));return;
+                        supervisor.post(()->retire(o,RuntimeResult.IPC_ERROR));return false;
                     }
-                    o.before=before;o.address=address;o.cpuLimit=cpu;o.childProtection=childProtection;
+                }
+                // fsync is outside the Runtime monitor: UI cancellation must remain responsive.
+                if(!lease.arm(o.id)) {supervisor.post(()->retire(o,RuntimeResult.IPC_ERROR));return false;}
+                synchronized(IsolatedRuntime.this) {
+                    if(!sender(o,capability))return false;
+                    o.before=before;o.address=address;o.cpuLimit=cpu;o.childProtection=childProtection;return true;
                 }
             }
             @Override public IsolatedReply fetch(String capability,String url,String method) {
@@ -327,14 +336,19 @@ public final class IsolatedRuntime implements AutoCloseable {
             try {context.stopService(new Intent(context,IsolatedRuntimeService.class));}catch(RuntimeException ignored){}
         }
         if(!dead && SystemClock.elapsedRealtime()<o.cleanupDeadline) {supervisor.postDelayed(()->reap(o),SAMPLE);return;}
+        // File IO/atomic fsync runs on the supervisor thread, outside the UI-facing Runtime monitor.
+        if(o.canaryWritten)try {
+            o.canaryIntact=("owner-only-"+o.id).equals(ProcessIdentity.read(new File(context.getFilesDir(),"isolated-owner-canary").getPath(),128));
+        }catch(IOException e) {o.canaryIntact=false;}
+        boolean leaseClean=dead && o.canaryIntact && lease.finishKnownDead(o.id,o.guard);
+        if(!leaseClean)lease.poison();
         synchronized(this) {
-            if(o.canaryWritten)try {
-                o.canaryIntact=("owner-only-"+o.id).equals(ProcessIdentity.read(new File(context.getFilesDir(),"isolated-owner-canary").getPath(),128));
-            }catch(IOException e) {o.canaryIntact=false;}
-            if(!dead || !o.canaryIntact) {o.error=RuntimeResult.CLEANUP_FAILED;lease.poison();}
+            if(!leaseClean)o.error=RuntimeResult.CLEANUP_FAILED;
             else if(o.error==0 && SystemClock.elapsedRealtime()>=o.request.deadline)o.error=RuntimeResult.TIMEOUT;
             o.finished=true;Outcome out=new Outcome(o,dead);record(o,out);
-            if(dead && o.canaryIntact) {o.ownerEndpoint=null;o.observerEndpoint=null;o.worker=null;lease.cleared();active=null;LEASE.set(false);} // Otherwise poison: no uncertain worker reuse.
+            if(leaseClean) {synchronized(IsolatedLease.COORDINATOR) {
+                o.ownerEndpoint=null;o.observerEndpoint=null;o.worker=null;active=null;LIVE=null;LEASE.set(false);
+            }} // Otherwise uncertainty and admission remain reserved.
             o.started.completeExceptionally(new IllegalStateException("NOT_STARTED"));o.future.complete(out);
             if(closed)thread.quitSafely();
         }
@@ -357,6 +371,55 @@ public final class IsolatedRuntime implements AutoCloseable {
             File file=new File(context.getFilesDir(),"isolated-evidence.jsonl");
             try(FileOutputStream out=new FileOutputStream(file,file.length()<=1024*1024)) {out.write((j+"\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));}
         }catch(Exception e) {android.util.Log.e("TheKaiNIsolated","EVIDENCE_WRITE_FAILED");}
+    }
+    public static final class RecoveryOutcome {
+        public final int status,previousOwnerPid;public final String operationId;
+        public final long elapsedMs,device,inode;
+        RecoveryOutcome(IsolatedLease.Recovery result,long elapsed) {
+            status=result.status;previousOwnerPid=result.previousOwner;operationId=result.id;
+            device=result.device;inode=result.inode;elapsedMs=elapsed;
+        }
+        public boolean recovered() {return status==IsolatedLease.RECOVERED;}
+    }
+    public CompletableFuture<RecoveryOutcome> recoverInterruptedWorker() {
+        CompletableFuture<RecoveryOutcome> result=new CompletableFuture<>();long started=SystemClock.elapsedRealtime();
+        synchronized(this) {
+            if(closed || (active!=null && !active.finished)) {
+                result.complete(new RecoveryOutcome(new IsolatedLease.Recovery(IsolatedLease.BUSY,"",0,0,0),0));return result;
+            }
+        }
+        if(!supervisor.post(()->{
+            IsolatedLease.Recovery recovered;
+            synchronized(IsolatedLease.COORDINATOR) {
+                Operation previous=LIVE;
+                boolean transportDone=previous==null || (previous.finished && !previous.preparing && !previous.fetching.get()
+                    && (previous.gate==null || previous.gate.terminated()));
+                if(!transportDone || serviceExists(IsolatedRuntimeService.class)) {
+                    recovered=new IsolatedLease.Recovery(IsolatedLease.BUSY,"",0,0,0);
+                }else {
+                    // Reserve admission before deleting a recovered journal; never reset a newly admitted operation's flag.
+                    if(lease.uncertain())LEASE.set(true);
+                    recovered=lease.recover();
+                }
+            }
+            if(recovered.status==IsolatedLease.RECOVERED) {
+                synchronized(IsolatedRuntime.this) {synchronized(IsolatedLease.COORDINATOR) {active=null;LIVE=null;LEASE.set(false);}}
+            }
+            RecoveryOutcome out=new RecoveryOutcome(recovered,SystemClock.elapsedRealtime()-started);
+            try {
+                JSONObject proof=new JSONObject().put("status",out.status).put("operation_id",out.operationId)
+                    .put("previous_owner_pid",out.previousOwnerPid).put("owner_pid",android.os.Process.myPid())
+                    .put("device",out.device).put("inode",out.inode).put("elapsed_ms",out.elapsedMs)
+                    .put("kernel_lock_exclusive",out.recovered()).put("old_operation_not_rewritten",true)
+                    .put("production_ready",false);
+                File file=new File(context.getFilesDir(),"isolated-recovery-evidence.jsonl");
+                try(FileOutputStream stream=new FileOutputStream(file,file.length()<=256*1024)) {
+                    stream.write((proof+"\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                }
+            }catch(Exception e) {android.util.Log.e("TheKaiNIsolated","RECOVERY_EVIDENCE_FAILED");}
+            result.complete(out);
+        }))result.completeExceptionally(new IllegalStateException("RECOVERY_OWNER_CLOSED"));
+        return result.thenApplyAsync(v->v);
     }
     @Override public synchronized void close() {
         closed=true;preparation.shutdownNow();

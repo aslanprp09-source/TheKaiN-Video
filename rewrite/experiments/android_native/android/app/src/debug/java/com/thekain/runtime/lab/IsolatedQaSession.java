@@ -20,6 +20,7 @@ final class IsolatedQaSession {
     private final Handler main=new Handler(Looper.getMainLooper());
     private final AtomicBoolean busy=new AtomicBoolean();
     private final AtomicBoolean exporting=new AtomicBoolean();
+    private final AtomicBoolean ownerFault=new AtomicBoolean();
     private JSONObject state=new JSONObject();
     private OwnedQaFixture fixture;
     private IsolatedRuntime runtime;
@@ -41,7 +42,7 @@ final class IsolatedQaSession {
             state.put("schema",1).put("boundary","android_isolated_uid").put("source_commit",BuildConfig.QA_SOURCE_COMMIT)
                 .put("production_ready",false).put("product_integration",false).put("physical_device_attested",false)
                 .put("qa89_review","BLOCKED_SEPARATE_TASK").put("rss_is_instantaneous",false)
-                .put("lost_owner_recovery","FAIL_CLOSED_UNTIL_OS_REBOOT");
+                .put("lost_owner_recovery","EXPLICIT_KERNEL_GUARD_RECOVERY_OR_FAIL_CLOSED");
             JSONObject device=new JSONObject().put("sdk",Build.VERSION.SDK_INT).put("model",Build.MODEL)
                 .put("manufacturer",Build.MANUFACTURER).put("hardware",Build.HARDWARE).put("fingerprint",Build.FINGERPRINT)
                 .put("abis",new JSONArray(Arrays.asList(Build.SUPPORTED_ABIS))).put("process_64bit",android.os.Process.is64Bit())
@@ -81,6 +82,28 @@ final class IsolatedQaSession {
     void unlisten(Runnable listener) {listeners.remove(listener);}
     String display() {return display;}
     boolean idle() {return ready && !busy.get();}
+    boolean canRecover() {return runtime!=null && !busy.get();}
+    boolean canKillOwner() {
+        IsolatedRuntime.Operation value=operation;
+        return BuildConfig.DEBUG && !ownerFault.get() && value!=null && value.request.operation==RuntimeRequest.HANG
+            && value.pythonEntered && !value.finished && !value.retiring;
+    }
+    void killOwnerAfterConfirmation() {
+        if(!canKillOwner() || !ownerFault.compareAndSet(false,true))return;
+        // The normal QA executor is awaiting HANG. Never queue this fault behind
+        // that wait, clear the lease, cancel the operation or stop the Service.
+        new Thread(()->{
+            try {
+                IsolatedRuntime.Operation value=operation;
+                if(!BuildConfig.DEBUG || !"com.thekain.runtime.lab".equals(context.getPackageName())
+                        || !ProcessIdentity.read("/proc/self/cmdline",512).split("\u0000",2)[0].equals(context.getPackageName())
+                        || value==null || value.request.operation!=RuntimeRequest.HANG || !value.pythonEntered
+                        || value.finished || value.retiring)throw new IOException("QA_OWNER_FAULT_GUARD");
+                android.os.Process.killProcess(android.os.Process.myPid());
+            }catch(Exception e) {publish("Процесс QA не завершён: "+e.getClass().getSimpleName());}
+            finally {ownerFault.set(false);publish(display);}
+        },"uid-owner-fault").start();
+    }
     boolean cancellable() {return operation!=null;}
     boolean canExport() {return !busy.get() && !exporting.get() && !"{}".equals(report);}
     void cancel() {IsolatedRuntime.Operation value=operation;if(value!=null)value.cancel();}
@@ -89,6 +112,7 @@ final class IsolatedQaSession {
         publish("Выполняется проверка UID…");owner.execute(()->{
             try {
                 if(kind==0)one(RuntimeRequest.PROBE,0,30000,false,0);
+                else if(kind==3)supervisorRecoveryTrial();
                 else if(kind==2)one(RuntimeRequest.HANG,IsolatedInput.BLOCK_MAIN,30000,false,-1);
                 else {
                     one(RuntimeRequest.PROBE,0,30000,false,0);
@@ -109,6 +133,58 @@ final class IsolatedQaSession {
                 publish("Проверка остановлена: "+e.getClass().getSimpleName()+". Сохраните отчёт.");
             }
             finally {operation=null;busy.set(false);publish(display);}
+        });
+    }
+    private JSONObject freshRecoveryAnalysis() throws Exception {
+        operation=runtime.submit(RuntimeRequest.ANALYZE,fixture.url,1,30000);
+        IsolatedRuntime.Outcome fresh=operation.completion().get(35,TimeUnit.SECONDS);operation=null;
+        if(fresh.result.error!=0 || !fresh.deathConfirmed || !fresh.ownerCanaryIntact || fresh.result.pythonCalls!=1
+                || fresh.workerUid==android.os.Process.myUid())throw new IOException("RECOVERY_ANALYSIS_FAILED");
+        File[] guards=context.getFilesDir().listFiles((directory,name)->name.startsWith("isolated-lease-") && name.endsWith(".lock"));
+        if(guards==null || guards.length!=0)throw new IOException("RECOVERY_GUARD_FOOTPRINT");
+        return new JSONObject().put("id",fresh.result.id).put("worker_uid",fresh.workerUid).put("worker_pid",fresh.workerPid)
+            .put("observer_uid",fresh.observerUid).put("observer_pid",fresh.observerPid).put("error",fresh.result.error)
+            .put("death_confirmed",fresh.deathConfirmed).put("owner_canary_intact",fresh.ownerCanaryIntact)
+            .put("python_calls",fresh.result.pythonCalls).put("formats",fresh.result.formats).put("guard_files",guards.length)
+            .put("main_python_loaded",ProcessIdentity.read("/proc/self/maps",2*1024*1024).contains("libpython3.14.so"));
+    }
+    private JSONObject recoveryFacts(IsolatedRuntime.RecoveryOutcome proof,String trigger) throws Exception {
+        return new JSONObject().put("trigger",trigger).put("status",proof.status).put("kernel_lock_exclusive",proof.recovered())
+            .put("operation_id",proof.operationId).put("previous_owner_pid",proof.previousOwnerPid)
+            .put("owner_pid",android.os.Process.myPid()).put("parent_uid",android.os.Process.myUid())
+            .put("device",proof.device).put("inode",proof.inode).put("elapsed_ms",proof.elapsedMs)
+            .put("old_operation_not_rewritten",true).put("production_ready",false);
+    }
+    private void supervisorRecoveryTrial() throws Exception {
+        operation=runtime.submit(RuntimeRequest.HANG,null,1,30000);IsolatedRuntime.Operation interrupted=operation;
+        interrupted.whenPythonStarted().get(25,TimeUnit.SECONDS);
+        context.unbindService(interrupted.connection);interrupted.bound=false;
+        context.stopService(new Intent(context,IsolatedRuntimeService.class));
+        IsolatedRuntime.Outcome failed=interrupted.completion().get(6,TimeUnit.SECONDS);operation=null;
+        if(failed.result.error!=RuntimeResult.CLEANUP_FAILED || failed.deathConfirmed)throw new IOException("OBSERVER_LOSS_NOT_PROVEN");
+        IsolatedRuntime.RecoveryOutcome proof=runtime.recoverInterruptedWorker().get(4,TimeUnit.SECONDS);
+        if(!proof.recovered() || !interrupted.id.equals(proof.operationId))throw new IOException("GUARD_RECOVERY_REFUSED");
+        JSONObject trial=recoveryFacts(proof,"supervisor_loss").put("original_error",failed.result.error)
+            .put("original_death_confirmed",failed.deathConfirmed).put("original_worker_pid",failed.workerPid)
+            .put("fresh_analysis",freshRecoveryAnalysis());
+        LabQaStore.append(state,"recovery_trials",trial,16);save();
+    }
+    void recoverOwner() {
+        if(!canRecover() || !busy.compareAndSet(false,true))return;
+        publish("Проверяем ядровую блокировку прежнего worker…");
+        owner.execute(()->{
+            try {
+                state.put("recovery_pending",true);save();
+                IsolatedRuntime.RecoveryOutcome proof=runtime.recoverInterruptedWorker().get(4,TimeUnit.SECONDS);
+                JSONObject trial=recoveryFacts(proof,"owner_restart");
+                if(proof.recovered()) {trial.put("fresh_analysis",freshRecoveryAnalysis());ready=true;}
+                LabQaStore.append(state,"recovery_trials",trial,16);state.remove("recovery_pending");save();
+                publish(proof.recovered()?"Ядро подтвердило освобождение блокировки. Новый анализ завершён.":
+                    proof.status==IsolatedLease.NO_PENDING?"Прерванной операции нет.":"Доказательства очистки недостаточны. Новая операция не разрешена.");
+            }catch(Exception e) {
+                try {state.put("recovery_failure_class",e.getClass().getSimpleName());state.remove("recovery_pending");save();}catch(Exception ignored){}
+                publish("Восстановление не подтверждено: "+e.getClass().getSimpleName());
+            }finally {operation=null;busy.set(false);publish(display);}
         });
     }
     private void one(int kind,int mode,long deadline,boolean cancel,int expected) throws Exception {

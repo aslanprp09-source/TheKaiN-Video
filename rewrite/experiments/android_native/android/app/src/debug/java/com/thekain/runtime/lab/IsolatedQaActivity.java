@@ -1,6 +1,7 @@
 package com.thekain.runtime.lab;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.*;
 import android.os.*;
 import android.view.*;
@@ -11,10 +12,12 @@ public final class IsolatedQaActivity extends Activity {
     private static final int EXPORT=411;
     private IsolatedQaSession session;
     private TextView status;
-    private Button probe,suite,hang,cancel,export;
+    private Button probe,suite,hang,cancel,export,recoveryTest,recover,killOwner;
     private final Runnable listener=()->{
         if(isDestroyed() || status==null)return;status.setText(session.display());
         probe.setEnabled(session.idle());suite.setEnabled(session.idle());hang.setEnabled(session.idle());
+        recoveryTest.setEnabled(session.idle());recover.setEnabled(session.canRecover());
+        killOwner.setEnabled(session.canKillOwner());
         cancel.setEnabled(session.cancellable());export.setEnabled(session.canExport());
     };
     private int dp(int n) {return Math.round(n*getResources().getDisplayMetrics().density);}
@@ -35,6 +38,11 @@ public final class IsolatedQaActivity extends Activity {
         probe=button(content,R.id.uid_probe_button,R.string.uid_probe,()->session.start(0));
         suite=button(content,R.id.uid_suite_button,R.string.uid_suite,()->session.start(1));
         hang=button(content,R.id.uid_hang_button,R.string.uid_hang,()->session.start(2));
+        recoveryTest=button(content,R.id.uid_recovery_test_button,R.string.uid_recovery_test,()->session.start(3));
+        recover=button(content,R.id.uid_recover_button,R.string.uid_recover,session::recoverOwner);
+        killOwner=button(content,R.id.uid_kill_owner_button,R.string.lab_kill_owner,()->new AlertDialog.Builder(this)
+            .setMessage(R.string.lab_owner_warning).setNegativeButton(R.string.lab_back,null)
+            .setPositiveButton(R.string.lab_confirm,(dialog,which)->session.killOwnerAfterConfirmation()).show());
         export=button(content,R.id.uid_export_button,R.string.uid_export,()->startActivityForResult(
             new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/json")
                 .putExtra(Intent.EXTRA_TITLE,getString(R.string.uid_report_name)),EXPORT));

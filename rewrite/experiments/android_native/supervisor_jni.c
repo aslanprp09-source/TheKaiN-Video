@@ -32,9 +32,9 @@ JNIEXPORT jint JNICALL Java_com_thekain_runtime_lab_SupervisorNative_seal(JNIEnv
     return target;
 fail:if(target>=0)close(target);failure(env);return -1;
 }
-JNIEXPORT jintArray JNICALL Java_com_thekain_runtime_lab_SupervisorNative_spawn(JNIEnv *env,jclass cls,jstring directory,jint zip,jint cert,jint key) {
+JNIEXPORT jintArray JNICALL Java_com_thekain_runtime_lab_SupervisorNative_spawn(JNIEnv *env,jclass cls,jstring directory,jint zip,jint cert,jint key,jint guard) {
     (void)cls;const char *root=(*env)->GetStringUTFChars(env,directory,NULL);if(!root)return NULL;
-    int channel[2]={-1,-1},fds[5]={-1,-1,-1,-1,-1},nullfd=-1;char path[4096],ld[4160],parent[32];struct rlimit limit;
+    int channel[2]={-1,-1},fds[6]={-1,-1,-1,-1,-1,-1},nullfd=-1;char path[4096],ld[4160],parent[32];struct rlimit limit;
     if(child_pid || getuid()%100000<90000 || prctl(PR_SET_DUMPABLE,0) || prctl(PR_GET_DUMPABLE)!=0
             || getrlimit(RLIMIT_NOFILE,&limit) || limit.rlim_cur>1048576 || !limit.rlim_cur
             || snprintf(path,sizeof(path),"%s/libthekain_child.so",root)>=(int)sizeof(path)
@@ -44,27 +44,27 @@ JNIEXPORT jintArray JNICALL Java_com_thekain_runtime_lab_SupervisorNative_spawn(
     for(int i=0;i<2;i++)if(setsockopt(channel[i],SOL_SOCKET,SO_SNDBUF,&buffer,sizeof(buffer))
             || setsockopt(channel[i],SOL_SOCKET,SO_RCVBUF,&buffer,sizeof(buffer)))goto fail;
     nullfd=open("/dev/null",O_RDWR|O_CLOEXEC);if(nullfd<0)goto fail;
-    int input[5]={channel[1],zip,cert,key,nullfd};
-    for(int i=0;i<5;i++) {fds[i]=fcntl(input[i],F_DUPFD_CLOEXEC,10);if(fds[i]<0)goto fail;}
+    int input[6]={channel[1],zip,cert,key,guard,nullfd};
+    for(int i=0;i<6;i++) {fds[i]=fcntl(input[i],F_DUPFD_CLOEXEC,10);if(fds[i]<0)goto fail;}
     snprintf(parent,sizeof(parent),"%d",getpid());
     pid_t pid=fork();
     if(pid<0)goto fail;
     if(pid==0) {
         // Async-signal-safe operations only between ART fork and exec. No Python/JNI in that interval.
-        if(dup2(fds[0],0)<0 || dup2(fds[4],1)<0 || dup2(fds[4],2)<0 || dup2(fds[1],3)<0 || dup2(fds[2],4)<0 || dup2(fds[3],5)<0)_exit(126);
-        for(unsigned long i=6;i<(unsigned long)limit.rlim_cur;i++)close((int)i);
+        if(dup2(fds[0],0)<0 || dup2(fds[5],1)<0 || dup2(fds[5],2)<0 || dup2(fds[1],3)<0 || dup2(fds[2],4)<0 || dup2(fds[3],5)<0 || dup2(fds[4],6)<0)_exit(126);
+        for(unsigned long i=7;i<(unsigned long)limit.rlim_cur;i++)close((int)i);
         char *args[]={"thekain-py-lab",(char*)root,parent,NULL};char *vars[]={ld,"PYTHONNOUSERSITE=1",NULL};
         execve(path,args,vars);_exit(127);
     }
     child_pid=pid;
-    for(int i=0;i<5;i++)close(fds[i]);close(nullfd);close(channel[1]);
+    for(int i=0;i<6;i++)close(fds[i]);close(nullfd);close(channel[1]);
     (*env)->ReleaseStringUTFChars(env,directory,root);
     jint values[2]={pid,channel[0]};jintArray result=(*env)->NewIntArray(env,2);
     if(result)(*env)->SetIntArrayRegion(env,result,0,2,values);
     else {kill(pid,SIGKILL);int status;while(waitpid(pid,&status,0)<0 && errno==EINTR){}reaped=1;close(channel[0]);}
     return result;
 fail:
-    for(int i=0;i<5;i++)if(fds[i]>=0)close(fds[i]);
+    for(int i=0;i<6;i++)if(fds[i]>=0)close(fds[i]);
     if(nullfd>=0)close(nullfd);for(int i=0;i<2;i++)if(channel[i]>=0)close(channel[i]);
     (*env)->ReleaseStringUTFChars(env,directory,root);failure(env);return NULL;
 }

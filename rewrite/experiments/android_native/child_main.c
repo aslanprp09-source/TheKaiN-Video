@@ -6,6 +6,7 @@
 #include <string.h>
 #include <sys/ptrace.h>
 #include "runtime_child_fence.h"
+#include "lease_guard.h"
 #include "sealed_code_hook.h"
 #include "memory_tls.h"
 /* Fixed binary socketpair protocol. No shell, argv URLs, JNI/ART, arbitrary Python or inherited Binder FDs. */
@@ -14,6 +15,7 @@ static int write_all(const void *buffer,size_t count) {const char *p=buffer;whil
 static int put32(uint32_t n) {n=htonl(n);return write_all(&n,4);}
 static int get32(uint32_t *n) {if(read_all(n,4))return -1;*n=ntohl(*n);return 0;}
 static int put64(uint64_t n) {return put32((uint32_t)(n>>32)) || put32((uint32_t)n);}
+static int guard_probe_stage(int stage) {return put32(10) || put32((uint32_t)stage);}
 /* Only the dedicated pre-Python negative operation installs this handler.
  * Verify the kernel's syscall number/code; do not classify an arbitrary exit as a denial. */
 static void credential_sigsys(int signal,siginfo_t *info,void *context) {
@@ -87,6 +89,10 @@ static int child_run(int argc,char **argv) {
     if(put32(0) || put32((uint32_t)getpid()) || put32((uint32_t)getuid()) || put32((uint32_t)getppid()))return 115;
     uint32_t size,seconds,ack,headroomMiB,fault;char json[16385];
     if(get32(&size) || size>16384 || !size || read_all(json,size) || get32(&headroomMiB) || get32(&seconds) || get32(&fault) || fault>1)return 102;
+    uint32_t high,low;uint64_t guardDevice,guardInode;
+    if(get32(&high) || get32(&low))return 120;guardDevice=((uint64_t)high<<32)|low;
+    if(get32(&high) || get32(&low))return 120;guardInode=((uint64_t)high<<32)|low;
+    if(!lease_guard_identity(LEASE_GUARD_FD,guardDevice,guardInode))return 120;
     json[size]=0;
     if(fault==1) {
         struct sigaction action;memset(&action,0,sizeof(action));action.sa_sigaction=credential_sigsys;
@@ -94,8 +100,19 @@ static int child_run(int argc,char **argv) {
         if(sigaction(SIGSYS,&action,NULL))return 119;
     }
     RuntimeKernelLimits limits;
-    if(limit_child_files() || configure_runtime_limits((uint64_t)headroomMiB*1024*1024,(int)seconds,&limits) || fence_native_child())return 103;
+    struct sigaction guardAction,previousAction;memset(&guardAction,0,sizeof(guardAction));
+    guardAction.sa_sigaction=lease_guard_sigsys;guardAction.sa_flags=SA_SIGINFO;sigemptyset(&guardAction.sa_mask);
+    if(sigaction(SIGSYS,&guardAction,&previousAction))return 123;
+    if(put32(9) || put32(1))return 122;
+    if(limit_child_files() || configure_runtime_limits((uint64_t)headroomMiB*1024*1024,(int)seconds,&limits) || fence_lease_guard() || fence_native_child())return 103;
+    if(put32(9) || put32(2))return 122;
+    lease_guard_probe_stage=guard_probe_stage;
+    if(!lease_guard_denials())return 121;
+    lease_guard_probe_stage=NULL;
+    if(sigaction(SIGSYS,&previousAction,NULL))return 123;
+    if(put32(9) || put32(3) || put32((uint32_t)lease_guard_trap_mask))return 122;
     int protection=hardened(parent);if(protection!=255)return 104;
+    if(put32(9) || put32(4))return 122;
     if(put32(3) || put64(limits.before) || put64(limits.address) || put64(limits.cpu) || put32((uint32_t)protection)
             || get32(&ack) || ack)return 105;
     if(fault==1) {
@@ -108,11 +125,13 @@ static int child_run(int argc,char **argv) {
     }
     if(PyFile_SetOpenCodeHook(sealed_code_open,NULL))return 117;
     if(PyImport_AppendInittab("_thekain_transport",PyInit__thekain_transport)<0)return 106;
+    if(put32(9) || put32(5))return 122;
     PyConfig config;PyConfig_InitIsolatedConfig(&config);config.site_import=0;config.write_bytecode=0;config.install_signal_handlers=0;
     PyStatus status=PyConfig_SetBytesString(&config,&config.home,"/");config.module_search_paths_set=1;
     if(!PyStatus_Exception(status))status=PyWideStringList_Append(&config.module_search_paths,L"/proc/self/fd/3");
     if(!PyStatus_Exception(status))status=Py_InitializeFromConfig(&config);PyConfig_Clear(&config);
     if(PyStatus_Exception(status) || !sealed_code_reads)return 107;
+    if(put32(9) || put32(6))return 122;
     PyObject *cert=PyUnicode_FromString("/proc/self/fd/4"),*key=PyUnicode_FromString("/proc/self/fd/5");
     if(!cert || !key || PySys_SetObject("_thekain_fixture_cert",cert) || PySys_SetObject("_thekain_fixture_key",key))return 108;
     Py_DECREF(cert);Py_DECREF(key);

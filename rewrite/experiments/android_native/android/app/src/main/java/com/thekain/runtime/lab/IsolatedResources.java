@@ -10,8 +10,13 @@ import java.util.zip.*;
 
 /** Inventory comes from this installed APK; bytes come from assets, never a mutable Python cache. */
 final class IsolatedResources {
+    private static final char[] HEX_DIGITS="0123456789abcdef".toCharArray();
     static String hex(byte[] data) {
-        StringBuilder s=new StringBuilder();for(byte b:data)s.append(String.format(java.util.Locale.ROOT,"%02x",b&255));return s.toString();
+        // Called for every verified asset before the operation deadline. Avoid
+        // allocating a Formatter and format parser for each digest byte.
+        char[] out=new char[data.length*2];
+        for(int i=0;i<data.length;i++) {int value=data[i]&255;out[i*2]=HEX_DIGITS[value>>>4];out[i*2+1]=HEX_DIGITS[value&15];}
+        return new String(out);
     }
     static byte[] bytes(InputStream in,int max) throws Exception {
         ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] b=new byte[16384];int n;
@@ -27,7 +32,7 @@ final class IsolatedResources {
         }catch(Exception e) {if(fd!=null)fd.close();throw e;}
         finally {if(file.exists())file.delete();}
     }
-    static IsolatedInput prepare(Context context,RuntimeRequest request,int mode,File fixtureHome) throws Exception {
+    static IsolatedInput prepare(Context context,RuntimeRequest request,int mode,File fixtureHome,IsolatedLease.Guard guard) throws Exception {
         if(Looper.myLooper()==Looper.getMainLooper())throw new IOException("BACKGROUND_REQUIRED");
         String abi=Build.SUPPORTED_ABIS[0];
         if(!abi.equals("x86_64") && !abi.equals("arm64-v8a"))throw new IOException("ABI");
@@ -68,7 +73,7 @@ final class IsolatedResources {
             try(InputStream in=new FileInputStream(new File(home,"fixtures/owned-key.pem"))) {key=snapshot(context,bytes(in,16384));}
             String digest=hex(hash.digest());if(mode==IsolatedInput.BAD_DIGEST)digest="0000000000000000000000000000000000000000000000000000000000000000";
             if(!zip.delete())throw new IOException("RESOURCE_UNLINK");
-            return new IsolatedInput(request,mode,resources,certificate,key,size,digest,context.getFileStreamPath("isolated-owner-canary").getAbsolutePath());
+            return new IsolatedInput(request,mode,resources,certificate,key,size,digest,context.getFileStreamPath("isolated-owner-canary").getAbsolutePath(),guard);
         }catch(Exception e) {
             for(ParcelFileDescriptor fd:new ParcelFileDescriptor[]{resources,certificate,key})if(fd!=null)fd.close();throw e;
         }finally {if(zip.exists())zip.delete();}

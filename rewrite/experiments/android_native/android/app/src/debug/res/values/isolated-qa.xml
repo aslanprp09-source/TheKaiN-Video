@@ -1,6 +1,6 @@
 <resources>
     <string name="uid_title">TheKaiN UID QA</string>
-    <string name="uid_warning">Отдельная лаборатория UID. Основное приложение и сайты не подключены. Запускайте только одну лабораторию за раз. RSS измеряется периодически. После незавершённой очистки запуск блокируется до перезагрузки Android.</string>
+    <string name="uid_warning">Отдельная лаборатория UID. Основное приложение и сайты не подключены. Запускайте только одну лабораторию за раз. RSS измеряется периодически. После неопределённой очистки обычный запуск блокируется; восстановление требует отдельного подтверждения ядра.</string>
     <string name="uid_probe">Проверить isolated UID / JNI / ARM64</string>
     <string name="uid_suite">Запустить набор безопасности и восстановления</string>
     <string name="uid_hang">Зависание Python и потока Service</string>
@@ -12,4 +12,9 @@
     <item name="uid_hang_button" type="id"/>
     <item name="uid_cancel_button" type="id"/>
     <item name="uid_export_button" type="id"/>
+    <string name="uid_recovery_test">Сбой наблюдателя и восстановление</string>
+    <string name="uid_recover">Восстановить после перезапуска</string>
+    <item name="uid_recovery_test_button" type="id"/>
+    <item name="uid_recover_button" type="id"/>
+    <item name="uid_kill_owner_button" type="id"/>
 </resources>
