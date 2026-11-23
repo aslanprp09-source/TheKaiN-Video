@@ -1,3 +1,5 @@
+For the subsequent issue46 attempt/timeout observations and same-lifecycle repetition, see [ATTEMPT_DIAGNOSTICS.md](ATTEMPT_DIAGNOSTICS.md). Physical full-suite acceptance remains BLOCKED.
+
 # Explicit kernel-guard recovery laboratory — issue #43
 
 This follows PR42 on `rebuild-2026-11-11`. It remains in the separate runtime lab:

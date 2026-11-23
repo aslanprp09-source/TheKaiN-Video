@@ -19,8 +19,11 @@ public final class IsolatedRuntime implements AutoCloseable {
     private final IsolatedLease lease;
     private final HandlerThread thread=new HandlerThread("isolated-supervisor");
     private final Handler supervisor;
+    private volatile long supervisorTick=SystemClock.elapsedRealtime();
+    private final ThreadPoolExecutor diagnosticQueries=new ThreadPoolExecutor(1,1,0,TimeUnit.MILLISECONDS,
+        new ArrayBlockingQueue<>(1),task->{Thread t=new Thread(task,"isolated-diagnostic-query");t.setDaemon(true);return t;});
     private final ExecutorService preparation=Executors.newSingleThreadExecutor();
-    private Operation active;
+    private volatile Operation active;
     private boolean closed;
     public IsolatedRuntime(Context context) {
         this(context,null);
@@ -38,6 +41,11 @@ public final class IsolatedRuntime implements AutoCloseable {
         final RuntimeRequest request;final int mode;
         final long submitted;
         final CompletableFuture<Outcome> future=new CompletableFuture<>();
+        final OperationTrace trace=new OperationTrace();
+        volatile String leaseObservation="NOT_RESERVED",serviceObservation="NOT_OBSERVED";
+        volatile long serviceObservedAt;
+        volatile String diagnosticService="NOT_OBSERVED";volatile long diagnosticServiceAt;
+        final AtomicBoolean serviceQueryPending=new AtomicBoolean();
         final CompletableFuture<Integer> started=new CompletableFuture<>();
         final AtomicBoolean fetching=new AtomicBoolean();
         volatile boolean canceled,retiring,finished,preparing,configuring,canaryWritten;
@@ -49,12 +57,12 @@ public final class IsolatedRuntime implements AutoCloseable {
         volatile boolean observerRetiring,observerNonDumpable,observerPythonLoaded,noChildConfirmed,executed;
         volatile IsolatedLease.Guard guard;boolean canaryIntact=true;volatile int childProtection;volatile int exitSignal=-1,exitCode=-1;volatile int credentialProof;
         ServiceConnection connection;
-        boolean bound,connected,binderDead,pythonEntered;
+        volatile boolean bound,connected,binderDead,pythonEntered;
         String instance="";int error=-1,denials;
         RuntimeResult result;
         long samples,peak,cpu,before,address,cpuLimit,resourceBytes,cancelAt=-1,retireAt,cleanupDeadline;
         volatile long procFailureSince=-1;
-        Operation(RuntimeRequest request,int mode,long submitted) {this.request=request;this.mode=mode;id=request.id;this.submitted=submitted;}
+        Operation(RuntimeRequest request,int mode,long submitted) {this.request=request;this.mode=mode;id=request.id;this.submitted=submitted;trace.mark("SUBMITTED");}
         public CompletableFuture<Outcome> completion() {return future.thenApplyAsync(v->v);}
         public CompletableFuture<Integer> whenPythonStarted() {return started.thenApplyAsync(v->v);}
         public boolean cancel() {
@@ -99,10 +107,10 @@ public final class IsolatedRuntime implements AutoCloseable {
         Operation o=new Operation(new RuntimeRequest(UUID.randomUUID().toString(),operation,url,ca,now+timeoutMs,rss,RuntimeRequest.MAX_HEADROOM),mode,now);
         synchronized(IsolatedLease.COORDINATOR) {
         if(lease.uncertain()) {
-            o.error=RuntimeResult.CLEANUP_FAILED;o.retireAt=now;o.finished=true;o.future.complete(new Outcome(o,false));return o;
+            o.error=RuntimeResult.CLEANUP_FAILED;o.retireAt=now;o.finished=true;o.leaseObservation="UNCERTAIN";o.trace.mark("COMPLETED");o.future.complete(new Outcome(o,false));return o;
         }
         if(closed || active!=null || !LEASE.compareAndSet(false,true)) {
-            o.error=RuntimeResult.BUSY;o.retireAt=now;o.finished=true;o.future.complete(new Outcome(o,true));return o;
+            o.error=RuntimeResult.BUSY;o.retireAt=now;o.finished=true;o.trace.mark("COMPLETED");o.future.complete(new Outcome(o,true));return o;
         }
         active=o;LIVE=o;o.preparing=true;supervisor.post(()->sample(o));
         preparation.execute(()->prepare(o));return o;
@@ -115,7 +123,7 @@ public final class IsolatedRuntime implements AutoCloseable {
                 out.write(("owner-only-"+o.id).getBytes(java.nio.charset.StandardCharsets.US_ASCII));
             }
             o.canaryWritten=true;
-            o.guard=lease.createGuard(o.id);
+            o.guard=lease.createGuard(o.id);o.leaseObservation="GUARD_CREATED";
             input=IsolatedResources.prepare(context,o.request,o.mode,fixtureHome,o.guard);
             // Counters and all HTTPS IO belong to the trusted owner, not the isolated UID.
             gate=new ChildNetworkGate(o.request,new IRuntimeCallback.Stub() {
@@ -128,7 +136,7 @@ public final class IsolatedRuntime implements AutoCloseable {
             IsolatedInput prepared=input;ChildNetworkGate transport=gate;
             supervisor.post(()->{o.gate=transport;o.resourceBytes=prepared.bytes;o.preparing=false;
                 if(!current(o) || o.retiring) {prepared.close();transport.close();return;}
-                try {lease.reserve(o.id,o.guard);bind(o,prepared);}
+                try {lease.reserve(o.id,o.guard);o.leaseObservation="RESERVED";bind(o,prepared);}
                 catch(Exception e) {prepared.close();retire(o,RuntimeResult.IPC_ERROR);}
             });
         }catch(Exception e) {
@@ -231,7 +239,7 @@ public final class IsolatedRuntime implements AutoCloseable {
                 }
             }
             @Override public void phase(String capability) {
-                synchronized(IsolatedRuntime.this) {if(sender(o,capability) && o.kernel!=null && o.childProtection==255) {o.pythonEntered=true;o.started.complete(o.kernel.pid);}}
+                synchronized(IsolatedRuntime.this) {if(sender(o,capability) && o.kernel!=null && o.childProtection==255) {o.pythonEntered=true;o.trace.mark("STARTED");o.started.complete(o.kernel.pid);}}
             }
             @Override public boolean limits(String capability,long before,long address,long cpu,int childProtection) {
                 synchronized(IsolatedRuntime.this) {
@@ -242,6 +250,7 @@ public final class IsolatedRuntime implements AutoCloseable {
                 }
                 // fsync is outside the Runtime monitor: UI cancellation must remain responsive.
                 if(!lease.arm(o.id)) {supervisor.post(()->retire(o,RuntimeResult.IPC_ERROR));return false;}
+                o.leaseObservation="ARMED";
                 synchronized(IsolatedRuntime.this) {
                     if(!sender(o,capability))return false;
                     o.before=before;o.address=address;o.cpuLimit=cpu;o.childProtection=childProtection;return true;
@@ -286,6 +295,7 @@ public final class IsolatedRuntime implements AutoCloseable {
         };
     }
     private void sample(Operation o) {
+        supervisorTick=SystemClock.elapsedRealtime();
         if(!current(o) || o.retiring)return;
         if(o.kernel!=null) {
             if(o.kernel.dead) {retire(o,RuntimeResult.WORKER_DIED);return;}
@@ -300,15 +310,79 @@ public final class IsolatedRuntime implements AutoCloseable {
         supervisor.postDelayed(()->sample(o),SAMPLE);
     }
     private void retire(Operation o,int error) {
+        supervisorTick=SystemClock.elapsedRealtime();
         synchronized(this) {
             if(!current(o) || o.retiring)return;o.retiring=true;o.retireAt=SystemClock.elapsedRealtime();
             o.error=o.canceled?RuntimeResult.CANCELED:o.retireAt>=o.request.deadline?RuntimeResult.TIMEOUT:error;
+            if(o.retireAt>=o.request.deadline)o.trace.mark("DEADLINE");o.trace.mark("RETIRING");
         }
         // Keep the trusted isolated supervisor alive until it has killed/reaped the native child.
         IsolatedInput pending=oInput.remove(o);if(pending!=null)pending.close();
         if(o.gate!=null)o.gate.close();
         try {if(o.worker!=null)o.worker.retire(o.id);}catch(Exception ignored) { }
         o.cleanupDeadline=SystemClock.elapsedRealtime()+CLEANUP;reap(o);
+    }
+    void requestDiagnosticServiceObservation(Operation o) {
+        if(!o.serviceQueryPending.compareAndSet(false,true))return;
+        try {diagnosticQueries.execute(()->{
+            String value="UNAVAILABLE";
+            try {
+                ActivityManager manager=(ActivityManager)context.getSystemService(Context.ACTIVITY_SERVICE);
+                List<ActivityManager.RunningServiceInfo> services=manager.getRunningServices(100);
+                if(services!=null) {
+                    value="ABSENT";
+                    for(ActivityManager.RunningServiceInfo info:services)
+                        if(info.service!=null && IsolatedRuntimeService.class.getName().equals(info.service.getClassName())) {value="PRESENT";break;}
+                }
+            }catch(RuntimeException unavailable) { /* explicit unknown, never death proof */ }
+            finally {o.diagnosticService=value;o.diagnosticServiceAt=SystemClock.elapsedRealtime();o.serviceQueryPending.set(false);}
+        });}catch(RejectedExecutionException busy) {o.serviceQueryPending.set(false);}
+    }
+    private boolean observedServiceExists(Operation o) {
+        // This retains the original conservative decision. Cache its observation,
+        // never run a potentially blocking ActivityManager query in a timeout snapshot.
+        boolean exists=serviceExists(IsolatedRuntimeService.class);
+        o.serviceObservation=exists?"PRESENT_OR_UNAVAILABLE":"ABSENT";
+        o.serviceObservedAt=SystemClock.elapsedRealtime();return exists;
+    }
+    JSONObject diagnosticBeforeSubmit() throws org.json.JSONException {
+        Operation value=active;
+        JSONObject result=new JSONObject().put("captured_elapsed_ms",SystemClock.elapsedRealtime())
+            .put("supervisor_alive",thread.isAlive()).put("supervisor_thread_state",thread.getState().name())
+            .put("supervisor_last_tick_elapsed_ms",supervisorTick).put("active_operation_observed",value!=null)
+            .put("lease_observation","NOT_READ_FOR_DIAGNOSTICS").put("diagnostic_only",true)
+            .put("death_proof_granted_by_snapshot",false);
+        if(value!=null)result.put("previous_or_active_operation",diagnosticSnapshot(value));return result;
+    }
+    JSONObject diagnosticSnapshot(Operation o) throws org.json.JSONException {
+        // No Runtime monitor, lease IO, IPC roundtrip or new proof of death here.
+        long now=SystemClock.elapsedRealtime();Snapshot kernel=o.kernel;
+        JSONObject snapshot=new JSONObject().put("id",o.id).put("operation",o.request.operation).put("mode",o.mode)
+            .put("captured_elapsed_ms",now).put("captured_wall_ms",System.currentTimeMillis())
+            .put("deadline_elapsed_ms",o.request.deadline).put("deadline_expired",now>=o.request.deadline)
+            .put("deadline_lateness_ms",Math.max(0,now-o.request.deadline))
+            .put("supervisor_alive",thread.isAlive()).put("supervisor_thread_state",thread.getState().name())
+            .put("supervisor_last_tick_elapsed_ms",supervisorTick)
+            .put("supervisor_tick_age_ms",Math.max(0,now-supervisorTick))
+            .put("binder_connected",o.connected).put("binder_death_observed",o.binderDead)
+            .put("binder_present",o.binder!=null).put("binder_alive_cached",o.binder!=null && o.binder.isBinderAlive())
+            .put("service_bound",o.bound).put("service_record_observation",o.diagnosticService)
+            .put("service_record_observed_elapsed_ms",o.diagnosticServiceAt)
+            .put("service_query_pending",o.serviceQueryPending.get())
+            .put("retirement_service_observation",o.serviceObservation).put("retirement_service_observed_elapsed_ms",o.serviceObservedAt)
+            .put("service_observation_is_current_query",false)
+            .put("observer_pid",o.observerPid).put("observer_uid",o.observerUid)
+            .put("observer_last_sequence",o.sequence).put("observer_last_sample_elapsed_ms",o.lastSample)
+            .put("observer_sample_age_ms",o.lastSample==0?-1:Math.max(0,now-o.lastSample))
+            .put("observer_retiring",o.observerRetiring).put("worker_pid",kernel==null?0:kernel.pid)
+            .put("worker_death_observed",kernel!=null && kernel.dead).put("python_entered",o.pythonEntered)
+            .put("lease_observation",o.leaseObservation).put("guard_known",o.guard!=null)
+            .put("guard_device",o.guard==null?0:o.guard.device).put("guard_inode",o.guard==null?0:o.guard.inode)
+            .put("preparing",o.preparing).put("configuring",o.configuring).put("fetching",o.fetching.get())
+            .put("retiring",o.retiring).put("finished",o.finished).put("runtime_future_done",o.future.isDone())
+            .put("cleanup_deadline_elapsed_ms",o.cleanupDeadline).put("transition_log",o.trace.snapshot())
+            .put("diagnostic_only",true).put("death_proof_granted_by_snapshot",false);
+        return snapshot.put("captured_end_elapsed_ms",SystemClock.elapsedRealtime());
     }
     private boolean serviceExists(Class<?> type) {
         try {
@@ -321,7 +395,8 @@ public final class IsolatedRuntime implements AutoCloseable {
         }catch(RuntimeException e) {return true;}
     }
     private void reap(Operation o) {
-        if(!current(o))return;
+        supervisorTick=SystemClock.elapsedRealtime();
+        if(!current(o))return;o.trace.mark("CLEANUP");
         boolean kernelDead=o.kernel!=null?o.kernel.dead:(!o.executed || o.observerPid==0 || o.noChildConfirmed);
         if(kernelDead && !o.observerRetiring) {
             o.observerRetiring=true;
@@ -329,7 +404,7 @@ public final class IsolatedRuntime implements AutoCloseable {
             try {context.stopService(new Intent(context,IsolatedRuntimeService.class));}catch(RuntimeException ignored){}
         }
         boolean dead=kernelDead && o.observerRetiring && (o.binder==null || o.binderDead || !o.binder.isBinderAlive())
-            && !serviceExists(IsolatedRuntimeService.class) && !o.preparing && !o.fetching.get() && (o.gate==null || o.gate.terminated());
+            && !observedServiceExists(o) && !o.preparing && !o.fetching.get() && (o.gate==null || o.gate.terminated());
         // If monitoring is lost, still retire the Service; PDEATHSIG is a fallback, never a substitute for missing proof.
         if(!kernelDead && SystemClock.elapsedRealtime()>=o.cleanupDeadline) {
             if(o.bound) {try {context.unbindService(o.connection);}catch(RuntimeException ignored){}o.bound=false;}
@@ -342,10 +417,11 @@ public final class IsolatedRuntime implements AutoCloseable {
         }catch(IOException e) {o.canaryIntact=false;}
         boolean leaseClean=dead && o.canaryIntact && lease.finishKnownDead(o.id,o.guard);
         if(!leaseClean)lease.poison();
+        o.leaseObservation=leaseClean?"RELEASED":"UNCERTAIN";
         synchronized(this) {
             if(!leaseClean)o.error=RuntimeResult.CLEANUP_FAILED;
             else if(o.error==0 && SystemClock.elapsedRealtime()>=o.request.deadline)o.error=RuntimeResult.TIMEOUT;
-            o.finished=true;Outcome out=new Outcome(o,dead);record(o,out);
+            o.finished=true;o.trace.mark("COMPLETED");Outcome out=new Outcome(o,dead);record(o,out);
             if(leaseClean) {synchronized(IsolatedLease.COORDINATOR) {
                 o.ownerEndpoint=null;o.observerEndpoint=null;o.worker=null;active=null;LIVE=null;LEASE.set(false);
             }} // Otherwise uncertainty and admission remain reserved.
@@ -422,7 +498,7 @@ public final class IsolatedRuntime implements AutoCloseable {
         return result.thenApplyAsync(v->v);
     }
     @Override public synchronized void close() {
-        closed=true;preparation.shutdownNow();
+        closed=true;preparation.shutdownNow();diagnosticQueries.shutdownNow();
         if(active!=null && !active.finished)active.cancel();else supervisor.post(thread::quitSafely);
     }
 }
