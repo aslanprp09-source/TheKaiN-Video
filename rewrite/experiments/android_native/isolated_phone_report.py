@@ -5,8 +5,10 @@ import json
 from pathlib import Path
 if __package__:
     from .phone_report import private_data
+    from .attempt_report import current_suite
 else:
     from phone_report import private_data
+    from attempt_report import current_suite
 
 
 def inspect(report,receipt):
@@ -24,7 +26,8 @@ def inspect(report,receipt):
     assert device['hardware'] not in ('ranchu','goldfish') and not device['fingerprint'].startswith('generic'), 'Emulator is not a phone'
     serialized=json.dumps(report)
     assert '-----BEGIN' not in serialized and 'https://' not in serialized and 'http://' not in serialized, 'Unexpected sensitive/URL payload'
-    rows=report['cases'];assert 14<=len(rows)<=64
+    assert 14<=len(report['cases'])<=64
+    rows,attempt_review=current_suite(report);assert 14<=len(rows)<=64
     instances=[]
     for row in rows:
         assert row['error']==row['expected_error'] or (row['expected_error']==-1 and row['error'] in (1,2)), 'Unexpected failure'
@@ -63,7 +66,7 @@ def inspect(report,receipt):
     analyses=[r for r in rows[last_fault+1:] if r['operation']==2 and r['error']==0]
     assert len(analyses)>=5, 'Five fresh owned analyses after fault recovery required'
     return {'status':'OPERATOR_REPORT_REQUIRES_REVIEW','source_commit':report['source_commit'],
-        'sdk':device['sdk'],'operations':len(rows),'worker_instances':len(instances),
+        'attempt_review':attempt_review,'sdk':device['sdk'],'operations':len(rows),'worker_instances':len(instances),
         'errors':dict(Counter(r['error'] for r in rows)),
         'max_sampled_rss_bytes':max(r['peak_rss_bytes'] for r in rows),
         'max_observer_rss_bytes':max(r['observer_peak_rss_bytes'] for r in rows),

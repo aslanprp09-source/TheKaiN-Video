@@ -1,3 +1,5 @@
+For the subsequent issue46 attempt/timeout observations and same-lifecycle repetition, see [ATTEMPT_DIAGNOSTICS.md](ATTEMPT_DIAGNOSTICS.md). Physical full-suite acceptance remains BLOCKED.
+
 For the subsequent explicit recovery experiment, see [LEASE_RECOVERY.md](LEASE_RECOVERY.md). Its Android/physical acceptance is separate from the PR42 baseline.
 
 # Source-built Android JNI experiment

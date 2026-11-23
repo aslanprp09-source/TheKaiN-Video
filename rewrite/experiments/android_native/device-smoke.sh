@@ -16,6 +16,8 @@ cleanup() {
   timeout 8 adb -s "$ANDROID_SERIAL" logcat -b crash -d > "$evidence/crash.txt" 2>/dev/null || true
   timeout 8 adb -s "$ANDROID_SERIAL" shell dumpsys activity exit-info com.thekain.runtime.lab > "$evidence/exit-info.txt" 2>/dev/null || true
   if [ "$result" -ne 0 ]; then
+    timeout 8 adb -s "$ANDROID_SERIAL" exec-out run-as com.thekain.runtime.lab cat files/isolated-qa-report.json > "$evidence/failure-qa-report.json" 2>/dev/null || true
+    if [ -f "$evidence/diagnostic-instrumentation.txt" ]; then tail -100 "$evidence/diagnostic-instrumentation.txt"; fi
     # Full window dump includes both mCurrentFocus and mFocusedApp on all matrix APIs.
     timeout 8 adb -s "$ANDROID_SERIAL" shell dumpsys window > "$evidence/failure-window.txt" 2>/dev/null || true
     timeout 8 adb -s "$ANDROID_SERIAL" shell dumpsys activity activities > "$evidence/failure-activities.txt" 2>/dev/null || true
@@ -159,6 +161,12 @@ done
 python3 rewrite/experiments/android_native/isolated_report.py --evidence "$evidence" --api "$api" --pages "$pages"
 adb -s "$ANDROID_SERIAL" shell pidof system_server | tr -d '\r' > "$evidence/system-server-after-isolated.txt"
 cmp "$evidence/system-server-before.txt" "$evidence/system-server-after-isolated.txt"
+
+# Additional repeated real QA path in one application process. Original27+27 remain unchanged.
+timeout 300 adb -s "$ANDROID_SERIAL" shell am instrument -w -e class com.thekain.runtime.lab.DiagnosticQaTest,com.thekain.runtime.lab.QaAttemptJournalTest com.thekain.runtime.lab.test/androidx.test.runner.AndroidJUnitRunner > "$evidence/diagnostic-instrumentation.txt"
+adb -s "$ANDROID_SERIAL" exec-out run-as com.thekain.runtime.lab cat files/diagnostic-cycle-evidence.json > "$evidence/diagnostic-cycle-evidence.json"
+adb -s "$ANDROID_SERIAL" exec-out run-as com.thekain.runtime.lab cat files/isolated-qa-report.json > "$evidence/diagnostic-qa-report.json"
+python3 rewrite/experiments/android_native/diagnostic_report.py --evidence "$evidence"
 
 # Deliberately poison the isolated lease: normal submit must refuse until explicit guarded recovery.
 # Successful kernel proof from the full suite above is retained separately.
