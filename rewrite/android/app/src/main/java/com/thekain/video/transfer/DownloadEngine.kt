@@ -54,6 +54,14 @@ class DownloadEngine(
             val file = stage(task)
             if (task.state != TransferState.PUBLISHING && !(task.outputUri != null && task.digest != null && task.verifiedBytes != null)) {
                 if (task.state != TransferState.VERIFYING) {
+                    // A bounded automatic retry of an unvalidated response starts from zero.
+                    // Never append a different response to bytes lacking a strong validator.
+                    // Crash recovery of an ordinary DOWNLOADING partial still fails closed.
+                    if (task.state == TransferState.RETRY_WAIT && !task.resumable) {
+                        if (file.exists() && (!file.isFile || !file.delete()))
+                            throw TransferFailure(TransferError.PERMISSION_DENIED)
+                        task = save { it.copy(bytes = 0, total = null, etag = null, resumable = false) }
+                    }
                     task = save { it.copy(state = TransferState.DOWNLOADING, error = null) }
                     transfer.fetch(task, file, { total, tag, resume ->
                         checkpoint(id)
