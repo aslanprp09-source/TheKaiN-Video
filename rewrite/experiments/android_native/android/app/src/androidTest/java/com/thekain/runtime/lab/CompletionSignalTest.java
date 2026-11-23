@@ -12,6 +12,32 @@ import static org.junit.Assert.*;
 /** Real isolated worker, deliberately queued notifications; original65 tests are unchanged. */
 @RunWith(AndroidJUnit4.class)
 public final class CompletionSignalTest extends RuntimeTestSupport {
+    @Test public void repeatedForgedProcRejectionCannotBecomeWorkerDiedDuringChannelClose() throws Exception {
+        JSONArray rows=new JSONArray();
+        try(IsolatedRuntime isolated=new IsolatedRuntime(context)) {
+            for(int attempt=0;attempt<5;attempt++) {
+                IsolatedRuntime.Outcome rejected=isolated.submit(RuntimeRequest.PROBE,null,1,30000,
+                    RuntimeRequest.MAX_RSS,IsolatedInput.FAKE_PROC).outcomeSignal().get(35,TimeUnit.SECONDS);
+                assertEquals(RuntimeResult.IPC_ERROR,rejected.result.error);
+                assertFalse(rejected.pythonEntered);assertTrue(rejected.deathConfirmed);assertTrue(rejected.ownerCanaryIntact);
+                IsolatedRuntime.Outcome fresh=isolated.submit(RuntimeRequest.ANALYZE,url,1,30000).outcomeSignal().get(35,TimeUnit.SECONDS);
+                assertEquals(RuntimeResult.OK,fresh.result.error);assertTrue(fresh.deathConfirmed);assertTrue(fresh.ownerCanaryIntact);
+                assertNotEquals(rejected.result.id,fresh.result.id);healthyMain();
+                java.io.File[] files=context.getCacheDir().listFiles((folder,name)->name.startsWith("isolated-python-") || name.startsWith("isolated-fixture-"));
+                assertNotNull(files);assertEquals(0,files.length);
+                rows.put(new JSONObject().put("rejected_id",rejected.result.id).put("fresh_id",fresh.result.id)
+                    .put("error",rejected.result.error).put("python_entered",rejected.pythonEntered)
+                    .put("death_confirmed",rejected.deathConfirmed).put("owner_canary_intact",rejected.ownerCanaryIntact)
+                    .put("fresh_error",fresh.result.error).put("fresh_death_confirmed",fresh.deathConfirmed)
+                    .put("fresh_owner_canary_intact",fresh.ownerCanaryIntact).put("owned_ipc_temp_files",files.length));
+            }
+        }
+        try(FileOutputStream out=context.openFileOutput("forged-proc-rejection-evidence.json",0)) {
+            out.write(new JSONObject().put("source_commit",BuildConfig.QA_SOURCE_COMMIT).put("rows",rows)
+                .put("api",android.os.Build.VERSION.SDK_INT).put("page_size",android.system.Os.sysconf(android.system.OsConstants._SC_PAGESIZE))
+                .put("production_ready",false).toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        }
+    }
     @Test public void blockedNotificationsCannotDelayRealCancellationDeadlineOrFreshAnalysis() throws Exception {
         ArrayBlockingQueue<Runnable> notifications=new ArrayBlockingQueue<>(16);
         Executor paused=task->{if(!notifications.offer(task))throw new RejectedExecutionException("TEST_NOTIFICATION_LIMIT");};

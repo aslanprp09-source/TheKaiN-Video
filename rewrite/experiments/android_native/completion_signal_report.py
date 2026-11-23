@@ -26,6 +26,21 @@ def inspect(data, source, api, pages):
                 physical_samsung_root_cause='UNCONFIRMED', production_ready=False)
 
 
+def inspect_rejections(data, source, api, pages):
+    assert data['source_commit'] == source and data['api'] == api and data['page_size'] == pages
+    assert data['production_ready'] is False and len(data['rows']) == 5
+    identities = []
+    for row in data['rows']:
+        identities.extend((row['rejected_id'], row['fresh_id']))
+        assert row['error'] == 5 and row['python_entered'] is False
+        assert row['death_confirmed'] is True and row['owner_canary_intact'] is True
+        assert row['fresh_error'] == 0 and row['fresh_death_confirmed'] is True
+        assert row['fresh_owner_canary_intact'] is True and row['owned_ipc_temp_files'] == 0
+    assert len(set(identities)) == 10 and all(re.fullmatch('[0-9a-f-]{36}', value) for value in identities)
+    return dict(forged_proc_rejection='PASS', cycles=5, error=5, fresh_owned_analysis='PASS',
+                api=api, page_size=pages, production_ready=False)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--evidence', type=Path, required=True)
@@ -35,11 +50,12 @@ def main():
     args = parser.parse_args()
     text = (args.evidence / 'completion-signal-instrumentation.txt').read_text()
     print(text)
-    assert re.search(r'^OK \(1 test\)\s*$', text, re.M)
-    assert len(re.findall(r'^INSTRUMENTATION_STATUS_CODE: 0\s*$', text, re.M)) == 1
+    assert re.search(r'^OK \(2 tests\)\s*$', text, re.M)
+    assert len(re.findall(r'^INSTRUMENTATION_STATUS_CODE: 0\s*$', text, re.M)) == 2
     assert not re.search(r'FAILURES!!!|shortMsg=|INSTRUMENTATION_(?:FAILED|ABORTED)|INSTRUMENTATION_STATUS_CODE: -[1-4]\b', text)
     result = inspect(json.loads((args.evidence / 'completion-signal-evidence.json').read_text()), args.source, args.api, args.pages)
     print('::notice::' + json.dumps(result))
+    print('::notice::' + json.dumps(inspect_rejections(json.loads((args.evidence / 'forged-proc-rejection-evidence.json').read_text()), args.source, args.api, args.pages)))
 
 
 if __name__ == '__main__':

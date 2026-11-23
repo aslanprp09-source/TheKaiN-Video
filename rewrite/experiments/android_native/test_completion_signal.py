@@ -5,10 +5,24 @@ from copy import deepcopy
 import subprocess
 import tempfile
 import unittest
-from rewrite.experiments.android_native.completion_signal_report import inspect
+from rewrite.experiments.android_native.completion_signal_report import inspect, inspect_rejections
 
 
 class CompletionSignalTest(unittest.TestCase):
+    def test_forged_proc_intake_requires_five_exact_rejections_and_fresh_successes(self):
+        source='c'*40
+        rows=[dict(rejected_id=f'00000000-0000-0000-0000-{i*2:012d}',fresh_id=f'00000000-0000-0000-0000-{i*2+1:012d}',
+                   error=5,python_entered=False,death_confirmed=True,owner_canary_intact=True,fresh_error=0,
+                   fresh_death_confirmed=True,fresh_owner_canary_intact=True,owned_ipc_temp_files=0) for i in range(5)]
+        data=dict(source_commit=source,api=36,page_size=16384,production_ready=False,rows=rows)
+        self.assertEqual(inspect_rejections(data,source,36,16384)['cycles'],5)
+        for field,value in [('error',4),('error',12),('python_entered',True),('death_confirmed',False),
+                            ('fresh_error',5),('fresh_death_confirmed',False),('owned_ipc_temp_files',1)]:
+            broken=deepcopy(data);broken['rows'][0][field]=value
+            with self.subTest(field=field,value=value),self.assertRaises(AssertionError):
+                inspect_rejections(broken,source,36,16384)
+        broken=deepcopy(data);broken['rows'].pop()
+        with self.assertRaises(AssertionError):inspect_rejections(broken,source,36,16384)
     def test_read_only_wait_observes_source_while_notification_executor_is_paused(self):
         self.assertTrue(shutil.which('javac') and shutil.which('java'), 'JDK required for real CompletableFuture regression')
         source = r'''

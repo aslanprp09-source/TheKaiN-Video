@@ -34,25 +34,6 @@ on:
 permissions:
   contents: read
 jobs:
-  fixed-api36-failure-facts:
-    # Temporary investigation of PR50's exact earlier failure; never an acceptance gate.
-    if: github.event_name == 'pull_request' && github.event.pull_request.number == 50
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions:
-      contents: read
-      actions: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          persist-credentials: false
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
-        with:
-          artifact-ids: '14824806539'
-          run-id: '45184781390'
-          github-token: ${{ github.token }}
-          path: ${{ runner.temp }}/fixed-api36-failure
-      - run: python3 rewrite/experiments/android_native/failure_summary.py "$RUNNER_TEMP/fixed-api36-failure"
   native-runtime-build:
     if: github.event_name == 'workflow_dispatch' && inputs.native_runtime_lab && !inputs.build_packages && !inputs.sign_android && !inputs.verify_artifact
     needs: ci-policy
