@@ -43,3 +43,4 @@ receipt = dict(schema=1, kind='MAIN_APP_INTERNAL_DEBUG', source_sha=source, test
 output.parent.mkdir(parents=True, exist_ok=True)
 output.write_text(json.dumps(receipt, indent=2) + '\n')
 print(f"Verified main debug APK: versionCode={receipt['versionCode']}; SHA-256={digest}")
+print(f"Verified signer certificate SHA-256={receipt['certificate_sha256']}; tracked_worktree_dirty={receipt['tracked_worktree_dirty']}")

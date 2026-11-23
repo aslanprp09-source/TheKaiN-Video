@@ -57,7 +57,7 @@ cd rewrite/android
 gradle --no-daemon :app:installDebug :app:installDebugAndroidTest
 # API 33+ only, for the granted-notification main-UI case:
 adb shell pm grant com.thekain.video.rebuild android.permission.POST_NOTIFICATIONS
-bash tools/direct-reliability-smoke.sh /tmp/thekain-direct-evidence
+ANDROID_SERIAL=emulator-5554 bash tools/direct-reliability-smoke.sh /tmp/thekain-direct-evidence
 ```
 
 ## Internal APK receipt and installation

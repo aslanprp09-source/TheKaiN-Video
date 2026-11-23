@@ -25,7 +25,7 @@ PY
     ;;
   *) echo 'Only disposable API26/29/35 emulators are allowed' >&2; exit 1 ;;
 esac
-timeout 240 adb -s "$serial" shell am instrument -w \
+timeout 240 adb -s "$serial" shell am instrument -w -r \
   -e listener com.thekain.video.UiFailureListener \
   -e class com.thekain.video.DirectDownloadReliabilityTest \
   com.thekain.video.rebuild.test/androidx.test.runner.AndroidJUnitRunner > "$artifacts/instrumentation.txt"
