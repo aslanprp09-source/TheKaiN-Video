@@ -18,7 +18,7 @@ def inspect(report,receipt):
     assert report['production_ready'] is False and report['product_integration'] is False
     assert report['physical_device_attested'] is False and report['qa89_review']=='BLOCKED_SEPARATE_TASK'
     assert report['rss_is_instantaneous'] is False
-    assert not report.get('pending') and not report.get('qa_failure_class'), 'Incomplete/failed operator protocol'
+    assert not report.get('pending') and not report.get('qa_failure_class') and not report.get('exported_while_busy'), 'Incomplete/failed operator protocol'
     device=report['device']
     assert device['apk_sha256']==receipt['apk_sha256']['lab.apk'], 'APK mismatch'
     assert device['certificate_sha256']==receipt['debug_certificate_sha256'], 'Certificate mismatch'

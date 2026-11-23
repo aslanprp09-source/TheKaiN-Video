@@ -14,7 +14,7 @@ def identifier(value):
 def current_suite(report):
     if 'attempt_schema' not in report:
         return report['cases'], None  # Original strict intake for historical APKs.
-    assert report['attempt_schema']==1
+    assert report['attempt_schema']==1 and not report.get('exported_while_busy')
     attempts=report['attempts'];assert 1<=len(attempts)<=16
     indexed={}
     for attempt in attempts:

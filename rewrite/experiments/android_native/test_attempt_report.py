@@ -33,7 +33,7 @@ class AttemptReportTest(unittest.TestCase):
             with self.subTest(status=status),self.assertRaises(AssertionError):current_suite(r)
 
     def test_wrong_suite_or_missing_case_or_timeout_without_death_always_refused(self):
-        for change in ('old_suite','missing','duplicate','wrong_order','wrong_timeout','no_death','no_deadline_phase','reused_scenario','forged_phase','lost_failure'):
+        for change in ('old_suite','missing','duplicate','wrong_order','wrong_timeout','no_death','no_deadline_phase','reused_scenario','forged_phase','busy_export','lost_failure'):
             r=fixture()
             if change=='old_suite':r['last_suite_attempt_id']=r['attempts'][0]['id']
             elif change=='missing':r['cases'].pop()
@@ -44,6 +44,7 @@ class AttemptReportTest(unittest.TestCase):
             elif change=='no_deadline_phase':r['cases'][4]['transition_log']['events'].pop(2)
             elif change=='reused_scenario':r['cases'][2]['scenario_id']=r['cases'][1]['scenario_id']
             elif change=='forged_phase':r['cases'][1]['transition_log']['events'][1]['phase']='RESET'
+            elif change=='busy_export':r['exported_while_busy']=True
             else:del r['attempts'][0]['failure_class']
             with self.subTest(change=change),self.assertRaises((AssertionError,KeyError)):current_suite(r)
 

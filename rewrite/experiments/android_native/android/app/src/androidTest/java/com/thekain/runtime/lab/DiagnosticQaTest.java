@@ -34,7 +34,7 @@ public final class DiagnosticQaTest {
                 JSONObject before=read(app);int count=before.optJSONArray("cases")==null?0:before.getJSONArray("cases").length();
                 int recoveryCount=before.optJSONArray("recovery_trials")==null?0:before.getJSONArray("recovery_trials").length();
                 scenario.onActivity(activity->session.start(4));until=SystemClock.elapsedRealtime()+80000;
-                boolean sawLiveDeadline=false;
+                boolean sawLiveDeadline=false,exportChecked=false;
                 while(!session.idle() && SystemClock.elapsedRealtime()<until) {
                     assertFalse(session.display(),session.display().startsWith("Проверка остановлена:"));
                     JSONObject pending=read(app).optJSONObject("pending");
@@ -45,12 +45,23 @@ public final class DiagnosticQaTest {
                             assertFalse(snapshot.getBoolean("worker_death_observed"));assertFalse(snapshot.getBoolean("death_proof_granted_by_snapshot"));
                             assertTrue(snapshot.has("service_record_observation"));assertTrue(snapshot.getLong("observer_last_sequence")>0);
                             assertEquals("ARMED",snapshot.getString("lease_observation"));
-                            scenario.onActivity(activity->{assertFalse(activity.findViewById(R.id.uid_kill_owner_button).isEnabled());});
+                            scenario.onActivity(activity->{assertFalse(activity.findViewById(R.id.uid_kill_owner_button).isEnabled());assertTrue(activity.findViewById(R.id.uid_export_button).isEnabled());});
+                            if(!exportChecked) {
+                                java.util.concurrent.CountDownLatch saved=new java.util.concurrent.CountDownLatch(1);
+                                java.util.concurrent.atomic.AtomicBoolean ok=new java.util.concurrent.atomic.AtomicBoolean();
+                                File export=new File(app.getFilesDir(),"diagnostic-live-export.json");
+                                session.export(android.net.Uri.fromFile(export),value->{ok.set(value);saved.countDown();});
+                                assertTrue("Export queued behind active QA wait",saved.await(5,java.util.concurrent.TimeUnit.SECONDS));assertTrue(ok.get());
+                                JSONObject live=new JSONObject(ProcessIdentity.read(export.getPath(),256*1024));
+                                assertTrue(live.getBoolean("exported_while_busy"));assertTrue(live.has("pending"));
+                                assertTrue(live.getJSONObject("export_runtime_observation").getBoolean("diagnostic_only"));
+                                exportChecked=true;
+                            }
                         }
                     }
                     Thread.sleep(80);
                 }
-                assertTrue(session.display(),session.idle());assertTrue("No real in-flight deadline snapshot",sawLiveDeadline);
+                assertTrue(session.display(),session.idle());assertTrue("No real in-flight deadline snapshot",sawLiveDeadline);assertTrue("No live export",exportChecked);
                 assertSame(session,app.isolatedSession());assertEquals(owner,android.os.Process.myPid());
                 JSONObject state=read(app);assertFalse(state.has("qa_failure_class"));assertFalse(state.has("pending"));
                 String attempt=state.getString("current_attempt_id");assertTrue(attempts.add(attempt));

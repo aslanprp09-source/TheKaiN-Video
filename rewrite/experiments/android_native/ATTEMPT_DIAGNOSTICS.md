@@ -33,6 +33,15 @@ The phase set is fixed, duplicate phases are suppressed, and snapshots are deep
 copies with a24-entry cap and explicit drop count. No arbitrary strings, Python,
 URLs, keys, paths, raw stacks or `/proc` content enter the trace.
 
+A scenario is durably recorded as SUBMITTING **before** calling Runtime.submit.
+If that synchronous call blocks, its pre-submit supervisor/active-operation
+observation survives; no nonexistent worker identity is fabricated. Once submit
+returns, the real operation UUID and Runtime snapshot replace the empty identity.
+The export control stays available during work: a separate single-flight IO
+executor freezes the last bounded journal and adds a fresh, nonblocking Runtime
+observation. It does not queue behind a stuck submit/wait. Exports made while busy
+are explicitly incomplete and are refused by the full phone checker.
+
 The QA executor observes the same original outer wait budgets25/35/6/4s, polling
 the same future in bounded slices and persisting a snapshot at most once every2s.
 There is no operation retry, extended request deadline or successful replacement

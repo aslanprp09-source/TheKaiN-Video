@@ -23,7 +23,7 @@ public final class IsolatedRuntime implements AutoCloseable {
     private final ThreadPoolExecutor diagnosticQueries=new ThreadPoolExecutor(1,1,0,TimeUnit.MILLISECONDS,
         new ArrayBlockingQueue<>(1),task->{Thread t=new Thread(task,"isolated-diagnostic-query");t.setDaemon(true);return t;});
     private final ExecutorService preparation=Executors.newSingleThreadExecutor();
-    private Operation active;
+    private volatile Operation active;
     private boolean closed;
     public IsolatedRuntime(Context context) {
         this(context,null);
@@ -344,6 +344,15 @@ public final class IsolatedRuntime implements AutoCloseable {
         boolean exists=serviceExists(IsolatedRuntimeService.class);
         o.serviceObservation=exists?"PRESENT_OR_UNAVAILABLE":"ABSENT";
         o.serviceObservedAt=SystemClock.elapsedRealtime();return exists;
+    }
+    JSONObject diagnosticBeforeSubmit() throws org.json.JSONException {
+        Operation value=active;
+        JSONObject result=new JSONObject().put("captured_elapsed_ms",SystemClock.elapsedRealtime())
+            .put("supervisor_alive",thread.isAlive()).put("supervisor_thread_state",thread.getState().name())
+            .put("supervisor_last_tick_elapsed_ms",supervisorTick).put("active_operation_observed",value!=null)
+            .put("lease_observation","NOT_READ_FOR_DIAGNOSTICS").put("diagnostic_only",true)
+            .put("death_proof_granted_by_snapshot",false);
+        if(value!=null)result.put("previous_or_active_operation",diagnosticSnapshot(value));return result;
     }
     JSONObject diagnosticSnapshot(Operation o) throws org.json.JSONException {
         // No Runtime monitor, lease IO, IPC roundtrip or new proof of death here.

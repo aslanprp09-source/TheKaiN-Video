@@ -16,6 +16,7 @@ final class IsolatedQaSession {
     private final Context context;
     private final AtomicFile journal;
     private final ExecutorService owner=Executors.newSingleThreadExecutor();
+    private final ExecutorService exportOwner=Executors.newSingleThreadExecutor();
     private final CopyOnWriteArrayList<Runnable> listeners=new CopyOnWriteArrayList<>();
     private final Handler main=new Handler(Looper.getMainLooper());
     private final AtomicBoolean busy=new AtomicBoolean();
@@ -24,7 +25,8 @@ final class IsolatedQaSession {
     private JSONObject state=new JSONObject();
     private QaAttemptJournal attempts;
     private volatile String attemptKind="";
-    private String awaitStage="NONE";
+    private volatile String awaitStage="NONE";
+    private volatile String scenarioDisplay="";
     private OwnedQaFixture fixture;
     private IsolatedRuntime runtime;
     private volatile IsolatedRuntime.Operation operation;
@@ -90,11 +92,16 @@ final class IsolatedQaSession {
             .put("operation_pending",state.has("pending")).put("failure_class",state.optString("qa_failure_class"))
             .put("archived_locally",true).put("counts_as_current_evidence",false);
     }
-    private JSONObject beginScenario(String name) throws Exception {
-        awaitStage="NONE";JSONObject facts=attempts.scenario(operation.id,name);
-        facts.put("operation",operation.request.operation).put("mode",operation.mode);
+    private JSONObject beginScenario(String name,int kind,int mode,long deadline) throws Exception {
+        awaitStage="SUBMITTING";JSONObject facts=attempts.scenario("",name);
+        facts.put("operation",kind).put("mode",mode).put("requested_deadline_ms",deadline)
+            .put("wait_stage","SUBMITTING").put("runtime_before_submit",runtime.diagnosticBeforeSubmit());
+        scenarioDisplay="Сценарий "+facts.getInt("scenario_index")+": "+name+". Попытка "+facts.getString("attempt_id")+".";
+        save();publish(scenarioDisplay);return facts;
+    }
+    private void submitted() throws Exception {
+        state.getJSONObject("pending").put("id",operation.id);awaitStage="NONE";
         capturePending("SUBMITTED",null,0);save();
-        publish("Сценарий "+facts.getInt("scenario_index")+": "+name+". Попытка "+facts.getString("attempt_id")+".");return facts;
     }
     private void capturePending(String status,CompletableFuture<?> awaited,long until) throws Exception {
         JSONObject pending=state.optJSONObject("pending");if(pending==null)return;
@@ -157,7 +164,7 @@ final class IsolatedQaSession {
         },"uid-owner-fault").start();
     }
     boolean cancellable() {return operation!=null;}
-    boolean canExport() {return !busy.get() && !exporting.get() && !"{}".equals(report);}
+    boolean canExport() {return !exporting.get() && !"{}".equals(report);}
     void cancel() {IsolatedRuntime.Operation value=operation;if(value!=null)value.cancel();}
     void start(int kind) {
         if(!ready || !busy.compareAndSet(false,true))return;
@@ -196,8 +203,8 @@ final class IsolatedQaSession {
         });
     }
     private JSONObject freshRecoveryAnalysis() throws Exception {
-        operation=runtime.submit(RuntimeRequest.ANALYZE,fixture.url,1,30000);
-        beginScenario("RECOVERY_ANALYZE");
+        beginScenario("RECOVERY_ANALYZE",RuntimeRequest.ANALYZE,0,30000);
+        operation=runtime.submit(RuntimeRequest.ANALYZE,fixture.url,1,30000);submitted();
         IsolatedRuntime.Outcome fresh=await(operation.completion(),35,"COMPLETION");
         if(fresh.result.error!=0 || !fresh.deathConfirmed || !fresh.ownerCanaryIntact || fresh.result.pythonCalls!=1
                 || fresh.workerUid==android.os.Process.myUid())throw new IOException("RECOVERY_ANALYSIS_FAILED");
@@ -221,8 +228,8 @@ final class IsolatedQaSession {
             .put("old_operation_not_rewritten",true).put("production_ready",false);
     }
     private void supervisorRecoveryTrial() throws Exception {
-        operation=runtime.submit(RuntimeRequest.HANG,null,1,30000);IsolatedRuntime.Operation interrupted=operation;
-        beginScenario("SUPERVISOR_LOSS");
+        beginScenario("SUPERVISOR_LOSS",RuntimeRequest.HANG,0,30000);
+        operation=runtime.submit(RuntimeRequest.HANG,null,1,30000);submitted();IsolatedRuntime.Operation interrupted=operation;
         await(interrupted.whenPythonStarted(),25,"PYTHON_STARTED");
         context.unbindService(interrupted.connection);interrupted.bound=false;
         context.stopService(new Intent(context,IsolatedRuntimeService.class));
@@ -260,16 +267,15 @@ final class IsolatedQaSession {
     }
     private void one(int kind,int mode,long deadline,boolean cancel,int expected,long rssLimit) throws Exception {
         JSONObject before=power();
-        operation=runtime.submit(kind,kind==RuntimeRequest.ANALYZE?fixture.url:null,1,deadline,
-            rssLimit,mode);
         String scenario=kind==RuntimeRequest.HANG?(cancel?"BLOCK_MAIN_CANCEL":"BLOCK_MAIN_DEADLINE"):
             kind==RuntimeRequest.PROBE?(mode==0?"PROBE":mode==1?"SECURITY":mode==IsolatedInput.BAD_DIGEST?"BAD_DIGEST":"FAKE_PROC"):
             kind==RuntimeRequest.CRASH?"CRASH":kind==RuntimeRequest.MEMORY?(rssLimit==64L*1024*1024?"RSS_64M":"RSS_DEFAULT"):"ANALYZE";
-        JSONObject scenarioFacts=beginScenario(scenario);
+        JSONObject scenarioFacts=beginScenario(scenario,kind,mode,deadline);
+        operation=runtime.submit(kind,kind==RuntimeRequest.ANALYZE?fixture.url:null,1,deadline,rssLimit,mode);submitted();
         IsolatedRuntime.Operation running=operation;
-        publish("Операция UID запущена. Отмена доступна.");
+        publish(scenarioDisplay+"\nОперация UID запущена. Отмена доступна.");
         running.whenPythonStarted().whenComplete((pid,error)->{
-            if(pid!=null && operation==running)publish("Python работает в отдельном UID. PID worker: "+pid+". Отмена доступна.");
+            if(pid!=null && operation==running)publish(scenarioDisplay+"\nPython работает в отдельном UID. PID worker: "+pid+". Отмена доступна.");
         });
         if(cancel) {await(operation.whenPythonStarted(),25,"PYTHON_STARTED");if(!operation.cancel())throw new IOException("CANCEL_NOT_ACCEPTED");}
         IsolatedRuntime.Outcome out=await(operation.completion(),35,"COMPLETION");
@@ -301,10 +307,14 @@ final class IsolatedQaSession {
                 || out.workerUid==android.os.Process.myUid())))throw new IOException("QA_EXPECTATION_MISMATCH");
     }
     void export(android.net.Uri uri,java.util.function.Consumer<Boolean> result) {
-        if(busy.get() || !exporting.compareAndSet(false,true)) {result.accept(false);return;}
-        String snapshot=report;owner.execute(()->{
+        if(!exporting.compareAndSet(false,true)) {result.accept(false);return;}
+        String snapshot=report;boolean running=busy.get();String stage=awaitStage;exportOwner.execute(()->{
             boolean ok=false;try(OutputStream out=context.getContentResolver().openOutputStream(uri,"wt")) {
-                if(out==null)throw new IOException("EXPORT_UNAVAILABLE");out.write(snapshot.getBytes(java.nio.charset.StandardCharsets.UTF_8));ok=true;
+                if(out==null)throw new IOException("EXPORT_UNAVAILABLE");
+                JSONObject exportState=new JSONObject(snapshot).put("exported_while_busy",running).put("export_wait_stage",stage);
+                if(runtime!=null)exportState.put("export_runtime_observation",runtime.diagnosticBeforeSubmit());
+                byte[] bytes=exportState.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                if(bytes.length>LabQaStore.MAX_BYTES)throw new IOException("QA_EXPORT_LIMIT");out.write(bytes);ok=true;
             }catch(Exception ignored){}finally {exporting.set(false);}boolean saved=ok;main.post(()->result.accept(saved));
         });
     }
