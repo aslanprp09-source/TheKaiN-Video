@@ -209,10 +209,16 @@ jobs:
       - name: Verify executed JVM tests
         if: always()
         run: python3 tools/report-tests.py app/build/test-results/testDebugUnitTest
+      - name: Verify main debug APK and record its receipt
+        env:
+          BUILD_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python3 tools/debug-apk-receipt.py app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/build-report.json
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: TheKaiN-rebuild-Android-0.1-debug
-          path: rewrite/android/app/build/outputs/apk/debug/app-debug.apk
+          path: |
+            rewrite/android/app/build/outputs/apk/debug/app-debug.apk
+            rewrite/android/app/build/outputs/apk/debug/build-report.json
   android-device-tests:
     if: ${{ !inputs.verify_artifact }}
     runs-on: ubuntu-24.04
@@ -274,10 +280,12 @@ jobs:
           gradle --no-daemon :app:installDebug :app:installDebugAndroidTest
           adb -s "$ANDROID_SERIAL" shell pm grant com.thekain.video.rebuild android.permission.POST_NOTIFICATIONS
           bash tools/emulator-ui-ready.sh "$RUNNER_TEMP/m4-device-evidence/ui-readiness"
-          gradle --no-daemon :app:connectedDebugAndroidTest -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true -Pandroid.testInstrumentationRunnerArguments.listener=com.thekain.video.UiFailureListener -Pandroid.testInstrumentationRunnerArguments.notClass=com.thekain.video.ProcessRestartTest,com.thekain.video.NotificationDeniedTest,com.thekain.video.M5VisualTest
+          gradle --no-daemon :app:connectedDebugAndroidTest -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true -Pandroid.testInstrumentationRunnerArguments.listener=com.thekain.video.UiFailureListener -Pandroid.testInstrumentationRunnerArguments.notClass=com.thekain.video.ProcessRestartTest,com.thekain.video.NotificationDeniedTest,com.thekain.video.M5VisualTest,com.thekain.video.DirectDownloadReliabilityTest
       - name: Verify instrumentation results
         if: always()
         run: python3 tools/report-tests.py app/build/outputs/androidTest-results/connected 41
+      - name: Additional real HTTPS cancellation, recovery and main UI tests
+        run: bash tools/direct-reliability-smoke.sh "$RUNNER_TEMP/m4-device-evidence/direct-reliability"
       - name: Collect UI state at failure before process restart
         if: always() && steps.prepare-emulator.conclusion == 'success'
         run: bash tools/collect-ui-failure-evidence.sh "$RUNNER_TEMP/m4-device-evidence"
@@ -370,6 +378,10 @@ jobs:
       - name: Report executed storage tests
         if: always()
         run: python3 tools/report-tests.py app/build/outputs/androidTest-results/connected
+      - name: Additional direct HTTPS reliability on Android 8 and 10
+        run: |
+          gradle --no-daemon :app:installDebug :app:installDebugAndroidTest
+          bash tools/direct-reliability-smoke.sh "$RUNNER_TEMP/removal-runtime/direct-reliability"
       - name: Save runtime identity and crash evidence
         if: always()
         run: |

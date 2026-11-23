@@ -2,8 +2,8 @@ package com.thekain.video.transfer
 
 import com.thekain.video.data.DownloadTask
 import com.thekain.video.domain.*
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.*
+import kotlin.coroutines.EmptyCoroutineContext
 import java.io.File
 import java.io.FileOutputStream
 import java.net.URI
@@ -24,9 +24,36 @@ class DirectTransfer(
     private val connections: Connections = systemConnections,
     private val freeBytes: (File) -> Long = { it.usableSpace }
 ) : TransferAdapter {
-    private fun open(source: String, headers: Map<String, String>): HttpsURLConnection {
+    private fun close(connection: HttpsURLConnection) { runCatching { connection.disconnect() } }
+
+    /** Only the blocking network primitive runs off-coroutine: it never writes files or progress.
+     * Cancellation closes the registered connection before the caller can publish or retry.
+     * Late reads/results cannot resume the cancelled caller or touch its staging output.
+     */
+    private suspend fun <T> network(connection: HttpsURLConnection, block: () -> T): T =
+        suspendCancellableCoroutine { continuation ->
+            val caller = continuation.context
+            continuation.invokeOnCancellation { close(connection) }
+            Dispatchers.IO.dispatch(EmptyCoroutineContext, Runnable {
+                try {
+                    caller.ensureActive()
+                    val value = block()
+                    caller.ensureActive()
+                    if (continuation.isActive) continuation.resumeWith(Result.success(value))
+                } catch (error: Exception) {
+                    if (continuation.isActive) continuation.resumeWith(Result.failure(error))
+                } finally {
+                    // Cancellation can precede a connection/input-stream acquisition. A late
+                    // primitive must close again rather than resurrect a cancelled socket.
+                    if (caller[Job]?.isActive == false) close(connection)
+                }
+            })
+        }
+
+    private suspend fun open(source: String, headers: Map<String, String>): HttpsURLConnection {
         var address = source
         repeat(6) {
+            currentCoroutineContext().ensureActive()
             val uri = try { URI(address) } catch (_: Exception) { throw TransferFailure(TransferError.INVALID_URL) }
             if (!uri.scheme.equals("https", true) || uri.host.isNullOrBlank() || uri.rawUserInfo != null)
                 throw TransferFailure(TransferError.INVALID_URL)
@@ -37,7 +64,7 @@ class DirectTransfer(
                 setRequestProperty("Accept-Encoding", "identity")
                 headers.forEach { (key, value) -> setRequestProperty(key, value) }
             }
-            val status = try { connection.responseCode } catch (error: Exception) {
+            val status = try { network(connection) { connection.responseCode } } catch (error: Exception) {
                 connection.disconnect()
                 throw error
             }
@@ -106,15 +133,18 @@ class DirectTransfer(
                 }
             }
             val reserve = 8L * 1024 * 1024
-            if (freeBytes(stage.parentFile!!) < (total?.minus(bytes) ?: 65536).coerceAtLeast(65536) + reserve)
+            val available = freeBytes(stage.parentFile!!)
+            val remaining = (total?.minus(bytes) ?: 65536).coerceAtLeast(65536)
+            if (available < reserve || remaining > available - reserve)
                 throw TransferFailure(TransferError.NO_DISK_SPACE)
             progress(bytes, total)
-            response!!.inputStream.use { input ->
+            network(response!!) { response!!.inputStream }.use { input ->
                 FileOutputStream(stage, bytes > 0).use { output ->
                     val buffer = ByteArray(64 * 1024)
                     while (true) {
                         currentCoroutineContext().ensureActive()
-                        val count = input.read(buffer)
+                        val count = network(response!!) { input.read(buffer) }
+                        currentCoroutineContext().ensureActive()
                         if (count < 0) break
                         if (freeBytes(stage.parentFile!!) < count + reserve)
                             throw TransferFailure(TransferError.NO_DISK_SPACE)
