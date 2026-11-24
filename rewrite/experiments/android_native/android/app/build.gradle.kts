@@ -28,6 +28,7 @@ android {
         jniLibs.srcDir(runtimeDir.map { "$it/jniLibs" })
     }
     sourceSets.getByName("debug").assets.srcDir(qaNotices)
+    sourceSets.getByName("androidTest").assets.srcDir("../../../../android/app/src/androidTest/assets")
     packaging {
         jniLibs.useLegacyPackaging = true
         jniLibs.keepDebugSymbols.add("**/*.so")
@@ -39,8 +40,9 @@ android {
 }
 dependencyLocking { lockAllConfigurations() }
 dependencies {
-    // Already pinned/used by the existing TLS tests; debug QA certificate fixture only.
+    // Existing pinned QA components; the candidate broker stays debug-only.
     debugImplementation("com.squareup.okhttp3:okhttp-tls:4.12.0")
+    debugImplementation("com.squareup.okhttp3:okhttp:4.12.0") // Existing pinned QA component; no new version/artifact.
     debugImplementation(platform("org.jetbrains.kotlin:kotlin-bom:1.9.10"))
     debugImplementation("org.jetbrains:annotations:23.0.0")
     androidTestImplementation("androidx.test:runner:1.6.2")
@@ -72,7 +74,7 @@ val recordQaNotices = tasks.register("recordQaNotices") {
             }
         val folder=qaNotices.get().asFile.resolve("legal").apply { mkdirs() }
         folder.resolve("qa-debug-dependencies.json").writeText(JsonOutput.prettyPrint(JsonOutput.toJson(mapOf(
-            "scope" to "debug-only owned TLS certificate fixture; no product runtime dependency",
+            "scope" to "debug-only controlled HTTPS and owned TLS; no product runtime dependency",
             "components" to entries)))+"\n")
         file("../../../../release/legal/Apache-2.0.txt").copyTo(folder.resolve("qa-debug-Apache-2.0.txt"),overwrite=true)
     }
