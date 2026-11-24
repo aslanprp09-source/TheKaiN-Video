@@ -140,9 +140,20 @@ public final class IsolatedRuntimeService extends Service {
                     monitor.post(()->{try {accepted.set(emit(kernel.sample(),false));}catch(Exception ignoredFirst){}finally {first.countDown();}poll();});
                     if(!first.await(1,TimeUnit.SECONDS) || !accepted.get())throw new IOException("INITIAL_COUNTER_REFUSED");
                     if(input.mode==IsolatedInput.FAKE_PROC) {
-                        try(KernelDescriptors invalid=new KernelDescriptors(pid,android.os.Process.myUid(),input.resources,status,true)) {
-                            throw new IOException("FORGED_PROC_ACCEPTED");
+                        boolean rejected=false;
+                        try(KernelDescriptors invalid=new KernelDescriptors(pid,android.os.Process.myUid(),input.resources,status,true)) { }
+                        catch(IOException invalidDescriptor) {
+                            if(!"READ_ONLY_REGULAR_FD_REQUIRED".equals(invalidDescriptor.getMessage())
+                                    && !"NOT_KERNEL_PROC_FD".equals(invalidDescriptor.getMessage()))throw invalidDescriptor;
+                            rejected=true;
                         }
+                        // Publish the trusted validation failure while the child channel is
+                        // still open. Unwinding that channel first can kill the waiting child
+                        // and let WORKER_DIED race ahead of the actual IPC rejection.
+                        completed=true;
+                        owner.completed(request.id,new RuntimeResult(request.id,
+                            rejected?RuntimeResult.IPC_ERROR:RuntimeResult.NATIVE_FAILED),0);
+                        return; // Unexpected descriptor acceptance must fail the strict test.
                     }
                     String[] names={"","probe","analyze","block_exec","hang","crash","memory","bad_reply","output_flood","request_flood","direct_socket","byte_flood"};
                     JSONObject json=new JSONObject().put("op",input.mode==IsolatedInput.SECURITY?"isolated_security":input.mode==IsolatedInput.CHILD_FRAME?"malformed_channel":names[request.operation]);
@@ -212,7 +223,7 @@ public final class IsolatedRuntimeService extends Service {
             android.util.Log.e("TheKaiNIsolated","SUPERVISOR_FAILED_"+stage+"_"+e.getClass().getSimpleName()+"_errno="+errno);
             if(!retiring && !completed)try {
                 int error="RESOURCE_HASH".equals(e.getMessage())?RuntimeResult.INVALID_REQUEST:
-                    input.mode==IsolatedInput.FAKE_PROC || (e.getMessage()!=null && (e.getMessage().equals("CHILD_PROTOCOL")
+                    (e.getMessage()!=null && (e.getMessage().equals("CHILD_PROTOCOL")
                         || e.getMessage().equals("CHILD_REQUEST_BOUNDS") || e.getMessage().equals("CHILD_OUTPUT_BOUNDS")
                         || e.getMessage().equals("CHILD_MESSAGE_BUDGET")))?RuntimeResult.IPC_ERROR:
                     e instanceof EOFException?RuntimeResult.WORKER_DIED:RuntimeResult.NATIVE_FAILED;

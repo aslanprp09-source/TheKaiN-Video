@@ -10,6 +10,7 @@ from rewrite.experiments.android_native import test_recovery_phone_report
 from rewrite.experiments.android_native import test_emulator_ready
 from rewrite.experiments.android_native import test_attempt_report
 from rewrite.experiments.android_native import test_diagnostic_report
+from rewrite.experiments.android_native import test_completion_signal
 
 
 def load_tests(loader,tests,pattern):
@@ -24,4 +25,5 @@ def load_tests(loader,tests,pattern):
     tests.addTests(loader.loadTestsFromModule(test_emulator_ready))
     tests.addTests(loader.loadTestsFromModule(test_attempt_report))
     tests.addTests(loader.loadTestsFromModule(test_diagnostic_report))
+    tests.addTests(loader.loadTestsFromModule(test_completion_signal))
     return tests

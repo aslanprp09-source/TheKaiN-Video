@@ -43,7 +43,10 @@ observation. It does not queue behind a stuck submit/wait. Exports made while bu
 are explicitly incomplete and are refused by the full phone checker.
 
 The QA executor observes the same original outer wait budgets25/35/6/4s, polling
-the same future in bounded slices and persisting a snapshot at most once every2s.
+in bounded slices and persisting a snapshot at most once every2s. The follow-up
+[completion-signal change](COMPLETION_SIGNALS.md) observes the private Runtime
+source through a read-only signal rather than waiting for an asynchronously
+dispatched notification copy; it does not infer a missing Runtime result.
 There is no operation retry, extended request deadline or successful replacement
 outcome. On exceeding the outer wait, WAIT_EXCEEDED is saved with an immutable
 `wait_exceeded_snapshot` before TimeoutException; later failure handling cannot
