@@ -167,8 +167,9 @@ public final class ControlledHttpsBroker {
                         while(true) {
                             remaining();int allowance=Math.min(limits.bodyBytes-out.size(),limits.totalBytes-payloadBytes);
                             if(allowance<0)throw new BrokerFailure(RESPONSE_LIMIT);
-                            int count=in.read(buffer,0,Math.min(buffer.length,allowance+1));remaining();
-                            if(count<0)break;payloadBytes+=count;
+                            int count=in.read(buffer,0,Math.min(buffer.length,allowance+1));
+                            if(count>0)payloadBytes+=count; // Count bytes even if cancellation/deadline wins immediately after this read.
+                            remaining();if(count<0)break;
                             if(count>allowance)throw new BrokerFailure(RESPONSE_LIMIT);out.write(buffer,0,count);
                         }
                         return commit(status,out.toByteArray());
