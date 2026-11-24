@@ -10,12 +10,21 @@ mkdir -p "$evidence"
 export ANDROID_SERIAL=emulator-5554
 export ANDROID_AVD_HOME="$RUNNER_TEMP/native-lab-avd"
 export PATH="$ANDROID_HOME/platform-tools:$PATH"
+collect_broker_evidence() {
+  mkdir -p "$evidence/broker"
+  for name in address pinning tls cancellation limits public public-failure; do
+    timeout 8 adb -s "$ANDROID_SERIAL" exec-out run-as com.thekain.runtime.lab cat "files/broker-evidence/$name.json" > "$evidence/broker/$name.json" 2>/dev/null || true
+  done
+}
 cleanup() {
   result=$?
   timeout 8 adb -s "$ANDROID_SERIAL" logcat -d > "$evidence/logcat.txt" 2>/dev/null || true
   timeout 8 adb -s "$ANDROID_SERIAL" logcat -b crash -d > "$evidence/crash.txt" 2>/dev/null || true
   timeout 8 adb -s "$ANDROID_SERIAL" shell dumpsys activity exit-info com.thekain.runtime.lab > "$evidence/exit-info.txt" 2>/dev/null || true
   if [ "$result" -ne 0 ]; then
+    collect_broker_evidence
+    if [ -f "$evidence/broker-instrumentation.txt" ]; then tail -150 "$evidence/broker-instrumentation.txt"; fi
+    if [ -f "$evidence/broker/public-failure.json" ]; then head -c 16384 "$evidence/broker/public-failure.json"; fi
     timeout 8 adb -s "$ANDROID_SERIAL" exec-out run-as com.thekain.runtime.lab cat files/isolated-qa-report.json > "$evidence/failure-qa-report.json" 2>/dev/null || true
     if [ -f "$evidence/diagnostic-instrumentation.txt" ]; then tail -100 "$evidence/diagnostic-instrumentation.txt"; fi
     # Full window dump includes both mCurrentFocus and mFocusedApp on all matrix APIs.
@@ -218,3 +227,8 @@ python3 rewrite/experiments/android_native/recovery-smoke.py --evidence "$eviden
 adb -s "$ANDROID_SERIAL" shell pidof system_server | tr -d '\r' > "$evidence/system-server-after-recovery.txt"
 cmp "$evidence/system-server-before.txt" "$evidence/system-server-after-recovery.txt"
 python3 rewrite/experiments/android_native/recovery_report.py --evidence "$evidence"
+
+# Candidate network component only; all original67 native/UID/QA tests above remain mandatory.
+timeout 180 adb -s "$ANDROID_SERIAL" shell am instrument -w -r -e class com.thekain.runtime.lab.network.ControlledHttpsBrokerTest com.thekain.runtime.lab.test/androidx.test.runner.AndroidJUnitRunner > "$evidence/broker-instrumentation.txt"
+collect_broker_evidence
+python3 rewrite/experiments/android_native/broker_report.py --evidence "$evidence" --source "$(git rev-parse HEAD)" --api "$api" --pages "$pages"
