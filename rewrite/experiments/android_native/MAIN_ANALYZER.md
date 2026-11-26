@@ -192,6 +192,14 @@ Window/Activity readiness and all visible preview/disabled-transfer/evidence
 checks remain required; typed HomeSession state and the exact operation proof
 are retained on failure. No application deadline or test scenario is removed.
 
+Main-APK deadline coverage keeps the original short **5s** submission budget,
+including resource preparation/import, and additionally tests real throttled
+HTTPS under the app's unchanged **30s default**. Slow startup cannot be assumed
+to reach HTTPS within 5s. Both cases require an actual timeout/cancel result,
+kernel/guard cleanup and fresh successful analysis. The HTTPS case must observe
+its exact request and at least 29.8s elapsed; missing results or socket inactivity
+cannot pass it. No production or existing short deadline is increased.
+
 Thus each API26/29/35/36 actual16KiB target executes original73 + new6 lab gates
 and five main tests (**84 unique successful tests**, with the intentional crash
 setup explicitly separate). The independent probe APK checks both main Services

@@ -50,11 +50,14 @@ def inspect(remote,main,recovery,source,api,pages):
     assert all(main['public'][k] is True for k in ('actual_graph','typed_formats','unknowns_preserved','download_blocked','direct_preserved'))
     runtime(main['public']['runtime'],source);assert main['public']['runtime']['error']==0 and main['public']['runtime']['formats']==1
     assert main['public']['runtime']['python_calls']==1 and main['public']['runtime']['machine']=='x86_64' and main['public']['runtime']['pages']==pages
-    assert all(main['cancel'][k] is True for k in ('ui_cancel','ui_deadline','actual_results','fresh_after_each'))
-    attempts=main['cancel']['proofs'];assert len(attempts)==4
+    assert all(main['cancel'][k] is True for k in ('ui_cancel','ui_deadline','actual_results','fresh_after_each','submission_deadline_5s','default_https_deadline','network_request_observed'))
+    assert main['cancel']['short_budget_ms']==5000 and 4800<=main['cancel']['short_elapsed_ms']<=6500
+    assert main['cancel']['network_budget_ms']==30000 and 29800<=main['cancel']['network_elapsed_ms']<=31500
+    attempts=main['cancel']['proofs'];assert len(attempts)==6
     for row in attempts:runtime(row,source)
     assert attempts[0]['error']==1 and attempts[1]['error']==0 and attempts[2]['error'] in (1,2) and attempts[3]['error']==0
-    assert len({row['id'] for row in attempts})==4
+    assert attempts[4]['error'] in (1,2) and attempts[5]['error']==0 and attempts[4]['network']['requests']>=1
+    assert len({row['id'] for row in attempts})==6
     assert all(main['security'][k] is True for k in ('scope_refused','tls_refused','fresh'))
     runtime(main['security']['tls_runtime'],source);assert main['security']['tls_runtime']['error']==8
     runtime(main['security']['runtime'],source);assert main['security']['runtime']['error']==0

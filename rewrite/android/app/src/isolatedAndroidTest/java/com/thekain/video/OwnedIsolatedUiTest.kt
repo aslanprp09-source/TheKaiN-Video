@@ -24,7 +24,8 @@ class OwnedIsolatedUiTest {
 
     private fun visibleInHome(selector: BySelector): UiObject2 {
         for (attempt in 0..6) {
-            device.findObject(selector)?.let { return it }
+            val found = device.findObject(selector)
+            if (found != null && found.visibleBounds.width() > 0 && found.visibleBounds.height() > 0) return found
             if (attempt == 6) break
             requireNotNull(device.findObject(By.res("home_content"))).scroll(Direction.DOWN, .7f)
             device.wait(Until.hasObject(selector), 500)

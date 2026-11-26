@@ -116,21 +116,41 @@ class MainIsolatedAnalyzerTest {
         val oldId = canceled.lastOutcome!!.result.id
         val fresh = canceled.analyze("$origin/page"); assertEquals(1, fresh.variants.size); assertFalse(fresh.variants.single().downloadAllowed)
         assertNotEquals(oldId, canceled.lastOutcome!!.result.id)
-        // Remove the completed /page request so the next assertion proves the deadline request really reached TLS HTTP.
+        // Account for the fresh /page request before starting the independent deadline attempts.
         assertNotNull(server.takeRequest(5, TimeUnit.SECONDS))
         val expired = IsolatedSourceAnalyzer(context, policy, timeoutMillis = 5000)
         val deadlineStarted = SystemClock.elapsedRealtime()
         val deadline = async(Dispatchers.Default) { runCatching { expired.analyze("$origin/stall-deadline") }.exceptionOrNull() }
-        assertNotNull(server.takeRequest(5, TimeUnit.SECONDS)); val failure = deadline.await()
+        // This short, unchanged budget includes resource verification and Python import.
+        // A loaded emulator may expire before HTTP; an actual acknowledged result/death is still mandatory.
+        val failure = deadline.await()
         assertTrue(failure is AnalysisFailure); assertEquals(AnalysisError.TIMEOUT, (failure as AnalysisFailure).code)
-        assertTrue("Global deadline, not the transport's 3s inactivity timeout", SystemClock.elapsedRealtime() - deadlineStarted >= 4800)
+        val shortElapsed = SystemClock.elapsedRealtime() - deadlineStarted
+        assertTrue("The original 5s submission budget remains enforced", shortElapsed >= 4800 && shortElapsed <= 6500)
         awaitResult(expired)
         // UI's deadline cancels the worker immediately; either that acknowledged cancellation or the independent
         // runtime deadline may win. Missing/WORKER_DIED/UNKNOWN/CLEANUP_FAILED is never accepted as timeout proof.
         assertTrue(expired.lastOutcome!!.result.error in setOf(RuntimeResult.CANCELED, RuntimeResult.TIMEOUT))
+        // Only after confirmed cleanup can any queued request from this attempt be drained.
+        while (server.takeRequest(20, TimeUnit.MILLISECONDS) != null) { }
         expired.analyze("$origin/page"); assertEquals(0, expired.lastOutcome!!.result.error)
+        assertEquals("/page", requireNotNull(server.takeRequest(5, TimeUnit.SECONDS)).path)
+        // Additional coverage of HTTPS under the unchanged production default, not a longer replacement for the 5s test.
+        val networkDeadline = IsolatedSourceAnalyzer(context, policy)
+        val networkStarted = SystemClock.elapsedRealtime()
+        val network = async(Dispatchers.Default) { runCatching { networkDeadline.analyze("$origin/stall-deadline-network") }.exceptionOrNull() }
+        assertEquals("/stall-deadline-network", requireNotNull(server.takeRequest(15, TimeUnit.SECONDS)).path)
+        val networkFailure = network.await()
+        assertTrue(networkFailure is AnalysisFailure); assertEquals(AnalysisError.TIMEOUT, (networkFailure as AnalysisFailure).code)
+        val networkElapsed = SystemClock.elapsedRealtime() - networkStarted
+        assertTrue("The unchanged 30s default, not 3s socket inactivity", networkElapsed >= 29800 && networkElapsed <= 31500)
+        awaitResult(networkDeadline)
+        assertTrue(networkDeadline.lastOutcome!!.result.error in setOf(RuntimeResult.CANCELED, RuntimeResult.TIMEOUT))
+        networkDeadline.analyze("$origin/page"); assertEquals(0, networkDeadline.lastOutcome!!.result.error)
         save("cancel", JSONObject().put("ui_cancel", true).put("ui_deadline", true).put("actual_results", true).put("fresh_after_each", true)
-            .put("proofs", JSONArray(rows().takeLast(4))))
+            .put("submission_deadline_5s", true).put("default_https_deadline", true).put("network_request_observed", true)
+            .put("short_budget_ms", 5000).put("short_elapsed_ms", shortElapsed)
+            .put("network_budget_ms", 30000).put("network_elapsed_ms", networkElapsed).put("proofs", JSONArray(rows().takeLast(6))))
     }
     @Test fun untrustedScopeAndWrongTlsCannotBecomeFormats() = runBlocking {
         val publicPolicy = RemoteHttpsTransport.Policy.publicOrigins(setOf("https://raw.githubusercontent.com"))
