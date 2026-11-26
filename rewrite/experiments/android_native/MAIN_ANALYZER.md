@@ -185,6 +185,13 @@ API26/29 storage/direct, JVM/Lint, Windows-host and CI-policy. Additional checks
 * One actual main UI test: paste owned page, analyze, inspect real candidate,
   verify disabled unchecked transfer and capture the displayed preview PNG.
 
+The actual-network UI test uses the existing real-app UI Automator approach:
+wait for the fixed READY footer, then scroll the lazy home list to its preview
+and localized refusal hint. An offscreen lazy item is not a readiness signal.
+Window/Activity readiness and all visible preview/disabled-transfer/evidence
+checks remain required; typed HomeSession state and the exact operation proof
+are retained on failure. No application deadline or test scenario is removed.
+
 Thus each API26/29/35/36 actual16KiB target executes original73 + new6 lab gates
 and five main tests (**84 unique successful tests**, with the intentional crash
 setup explicitly separate). The independent probe APK checks both main Services

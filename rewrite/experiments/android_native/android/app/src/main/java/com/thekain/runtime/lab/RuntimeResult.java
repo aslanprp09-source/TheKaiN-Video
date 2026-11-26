@@ -4,7 +4,7 @@ import android.os.Parcel;
 import android.os.Parcelable;
 import org.json.JSONObject;
 
-/** Bounded typed result. URLs, Python JSON and exception messages never cross IPC. */
+/** Bounded typed result: validated candidate URLs only; no raw Python JSON, file paths or exception messages. */
 public final class RuntimeResult implements Parcelable {
     public static final int OK=0,CANCELED=1,TIMEOUT=2,BUSY=3,WORKER_DIED=4,IPC_ERROR=5,
         INVALID_REQUEST=6,MEMORY_LIMIT=7,TLS_ERROR=8,REQUEST_LIMIT=9,RESPONSE_LIMIT=10,
