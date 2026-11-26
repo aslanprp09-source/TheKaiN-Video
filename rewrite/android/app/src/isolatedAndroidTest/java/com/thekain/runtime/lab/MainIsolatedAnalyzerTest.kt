@@ -133,7 +133,10 @@ class MainIsolatedAnalyzerTest {
         assertTrue(expired.lastOutcome!!.result.error in setOf(RuntimeResult.CANCELED, RuntimeResult.TIMEOUT))
         // Only after confirmed cleanup can any queued request from this attempt be drained.
         while (server.takeRequest(20, TimeUnit.MILLISECONDS) != null) { }
-        expired.analyze("$origin/page"); assertEquals(0, expired.lastOutcome!!.result.error)
+        // The short budget is fault injection, not a cold-import performance SLA for the recovery operation.
+        // Recovery uses the unchanged production default; global UID/lease admission cannot be bypassed by a new adapter.
+        val afterShortDeadline = IsolatedSourceAnalyzer(context, policy)
+        afterShortDeadline.analyze("$origin/page"); assertEquals(0, afterShortDeadline.lastOutcome!!.result.error)
         assertEquals("/page", requireNotNull(server.takeRequest(5, TimeUnit.SECONDS)).path)
         // Additional coverage of HTTPS under the unchanged production default, not a longer replacement for the 5s test.
         val networkDeadline = IsolatedSourceAnalyzer(context, policy)

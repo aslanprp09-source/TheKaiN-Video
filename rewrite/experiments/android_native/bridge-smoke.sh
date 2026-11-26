@@ -18,6 +18,18 @@ collect() {
 finish() {
   code=$?;collect
   if [ "$code" -ne 0 ]; then
+    python3 - "$evidence/main-source-journal.jsonl" <<'PYSOURCEFAILURE'
+from pathlib import Path
+import json,sys
+path=Path(sys.argv[1])
+if path.exists() and path.stat().st_size<=256*1024:
+    for line in path.read_text(errors='replace').splitlines()[-6:]:
+        try:
+            row=json.loads(line);network=row.get('network',{})
+            print('MAIN_SOURCE_TERMINAL_PROOF '+json.dumps({k:row.get(k) for k in ('id','error','elapsed_ms','python_calls','worker_pid','death_confirmed','child_protection')}
+                | {'network_failure':network.get('failure'),'network_terminated':network.get('terminated'),'network_requests':network.get('requests')},sort_keys=True))
+        except (ValueError,TypeError):print('MAIN_SOURCE_PARTIAL_JOURNAL_RETAINED')
+PYSOURCEFAILURE
     timeout 8 adb -s "$ANDROID_SERIAL" logcat -d -s TheKaiNHttps:I '*:S' | tail -120 > "$evidence/remote-lifecycle.txt" || true
     tail -60 "$evidence/remote-lifecycle.txt"
     for name in remote-instrumentation remote-owner-preparation remote-owner-recovery-instrumentation main-analysis-instrumentation main-ui-instrumentation main-boundary; do

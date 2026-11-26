@@ -199,6 +199,12 @@ to reach HTTPS within 5s. Both cases require an actual timeout/cancel result,
 kernel/guard cleanup and fresh successful analysis. The HTTPS case must observe
 its exact request and at least 29.8s elapsed; missing results or socket inactivity
 cannot pass it. No production or existing short deadline is increased.
+After the fault-injected 5s refusal, recovery uses a new adapter with the
+unchanged production default; global UID/guard admission still has to prove
+cleanup. The production-default deadline also requires successful reuse of the
+same adapter. This does not impose a new 5s cold-import success SLA or change
+the failed operation's budget. Failure intake retains the last terminal IDs,
+codes, elapsed time and cleanup proof without URLs or arbitrary error text.
 
 Thus each API26/29/35/36 actual16KiB target executes original73 + new6 lab gates
 and five main tests (**84 unique successful tests**, with the intentional crash
