@@ -137,6 +137,10 @@ public final class RemoteHttpsTest {
         record("public",new JSONObject().put("system_tls",true).put("fixture_only",false).put("bytes",2428).put("sha256",digest));
     }
     @Test public void parcelAndManifestIntakeRejectUnboundedOrNonisolatedProductContracts() throws Exception {
+        assertEquals(2048L,BrokerProcess.rssFromStatus("Name:\ttest\nVmRSS:\t2 kB\n"));
+        for(String invalid:new String[]{"", "VmRSS: -1 kB", "VmRSS: 2 MB", "VmRSS: 2 kB\nVmRSS: 2 kB", "VmRSS: 9999999999999999 kB"}) {
+            try {BrokerProcess.rssFromStatus(invalid);fail("Invalid RSS units/counters accepted");}catch(IOException expected) { }
+        }
         ServiceInfo service=context.getPackageManager().getServiceInfo(new ComponentName(context,RemoteHttpsService.class),0);
         assertFalse(service.exported);assertEquals(context.getPackageName()+":https_broker",service.processName);
         assertEquals(0,service.flags&ServiceInfo.FLAG_ISOLATED_PROCESS);

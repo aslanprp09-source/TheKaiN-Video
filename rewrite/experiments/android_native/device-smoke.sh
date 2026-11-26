@@ -121,6 +121,10 @@ text=Path(sys.argv[1]).read_text();print(text)
 assert re.search(r'^OK \(1 test\)\s*$',text,re.M), 'Isolated UID real JNI/IPC bootstrap failed; full matrix is NOT passed'
 assert not any(s in text for s in ('FAILURES!!!','shortMsg=','INSTRUMENTATION_FAILED'))
 PYBOOT
+# Exercise the new boundary before the lengthy original suite for prompt actionable failures.
+# A green job still requires every original73 gate below as well as these 11 new tests.
+adb -s "$ANDROID_SERIAL" install -r -t "$delivery/probe.apk"
+bash rewrite/experiments/android_native/bridge-smoke.sh "$api" "$pages" "$delivery" "$evidence"
 timeout 600 adb -s "$ANDROID_SERIAL" shell am instrument -w -e class com.thekain.runtime.lab.NativeLabTest,com.thekain.runtime.lab.RuntimeProcessTest,com.thekain.runtime.lab.LabLifecycleTest com.thekain.runtime.lab.test/androidx.test.runner.AndroidJUnitRunner > "$evidence/instrumentation.txt" &
 driver=$!
 bash rewrite/experiments/android_native/sample-meminfo.sh "$driver" "$evidence" &
@@ -232,6 +236,3 @@ python3 rewrite/experiments/android_native/recovery_report.py --evidence "$evide
 timeout 180 adb -s "$ANDROID_SERIAL" shell am instrument -w -r -e class com.thekain.runtime.lab.network.ControlledHttpsBrokerTest com.thekain.runtime.lab.test/androidx.test.runner.AndroidJUnitRunner > "$evidence/broker-instrumentation.txt"
 collect_broker_evidence
 python3 rewrite/experiments/android_native/broker_report.py --evidence "$evidence" --source "$(git rev-parse HEAD)" --api "$api" --pages "$pages"
-
-# Original73 gates above remain mandatory. The new owner-network and actual main-APK flow are additional.
-bash rewrite/experiments/android_native/bridge-smoke.sh "$api" "$pages" "$delivery" "$evidence"

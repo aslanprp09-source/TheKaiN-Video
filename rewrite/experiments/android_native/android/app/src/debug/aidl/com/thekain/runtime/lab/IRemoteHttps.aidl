@@ -5,8 +5,10 @@ import com.thekain.runtime.lab.BrokerChunk;
 import com.thekain.runtime.lab.IRemoteHttpsOwner;
 interface IRemoteHttps {
     BrokerHello hello();
-    oneway void configure(in BrokerConfig config, IRemoteHttpsOwner owner);
+    // PID authentication requires a synchronous transaction: oneway callers have PID 0.
+    // The owner invokes this only from its disposable-process handshake executor.
+    void configure(in BrokerConfig config, IRemoteHttpsOwner owner);
     BrokerChunk fetch(String capability, long sequence, String url, String method);
     BrokerChunk read(String capability, long sequence, int offset);
-    oneway void retire(String capability);
+    void retire(String capability);
 }

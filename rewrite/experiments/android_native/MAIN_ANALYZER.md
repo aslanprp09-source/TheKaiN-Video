@@ -48,6 +48,12 @@ every response. Chunks are at most **32768 bytes**. Total response allocation
 remains bounded to 512 KiB; aggregate payload to 2 MiB; attempts to 12. There are
 no Bundles, serialized arbitrary objects, scripts or remote resource updates.
 
+Configuration and retirement use synchronous Binder calls off the UI/supervisor
+threads: Android reports PID 0 for cross-process `oneway` calls, which cannot
+satisfy exact-owner PID authentication. RSS comes from kernel `VmRSS` with explicit
+kB-to-byte conversion, never `stat` page counts multiplied by a libc/compatibility
+page size. Resource thresholds and operation deadlines are unchanged.
+
 The C1 broker executes wholly inside this disposable HTTPS PID, including its
 two interruption-resistant DNS slots. Origin, DNS-answer, pinned-socket,
 IPv4/IPv6/private/metadata, redirect, system CA/hostname, framing and encoding
@@ -178,6 +184,9 @@ setup explicitly separate). The independent probe APK checks both main Services
 and absence of a shared-UID Python Service. Strict source/API/pages-bound intake
 requires every record and actual result. Failure capture retains original window
 focus, Activity, hierarchy/screenshot evidence and adds the main UI evidence.
+The new boundary runs after the isolated JNI bootstrap and before the lengthy
+original suite, so a failed handshake produces evidence promptly. All original
+73 checks still execute and must pass before the matrix job can be successful.
 
 Exact final source HEAD, CI runs, resource measurements and any failures belong
 in the PR after execution. Local compilation or a source-built ARM64 library is

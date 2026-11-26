@@ -55,6 +55,7 @@ public final class RemoteHttpsTransport implements IsolatedTransport {
     private volatile IRemoteHttps remote;
     private volatile boolean closed,done,bound,binderDead,connected,connectionWorkDone=true,configured,guardClosed,leaseClean,kernelGone,serviceGone;
     private volatile int fatal,requests;
+    private volatile String handshake="BIND_PENDING";
     private volatile long payload,peakRss,peakCpuMs,initialCpu,closeAt=-1,finishedAt;
     private final ServiceConnection connection;
     private RemoteHttpsTransport(Context context,RuntimeRequest request,Policy policy,Counters counters) throws Exception {
@@ -86,12 +87,12 @@ public final class RemoteHttpsTransport implements IsolatedTransport {
     }
     private void connect(Policy policy) {
         try {
-            if(closed)return;BrokerHello value=remote.hello();BrokerProcess actual=BrokerProcess.authenticate(context,value);
+            if(closed)return;handshake="HELLO";BrokerHello value=remote.hello();BrokerProcess actual=BrokerProcess.authenticate(context,value);
             hello=value;initialCpu=actual.cpu;peakRss=actual.rss;
             if(closed)return;
             if(actual.rss>policy.rss) {fail(RuntimeResult.MEMORY_LIMIT);return;}
             BrokerConfig config=new BrokerConfig(request.id,request.deadline,policy.origins.toArray(new String[0]),policy.fixture,policy.ca,policy.fault,policy.rss,policy.cpu,guard);
-            configured=true;
+            configured=true;handshake="CONFIGURE";
             remote.configure(config,new IRemoteHttpsOwner.Stub() {
                 private boolean sender(String cap) {return request.id.equals(cap) && hello!=null && Binder.getCallingPid()==hello.pid && Binder.getCallingUid()==android.os.Process.myUid();}
                 public boolean ready(String cap,int pid,long start) {
@@ -99,7 +100,7 @@ public final class RemoteHttpsTransport implements IsolatedTransport {
                     return lease.arm(request.id);
                 }
                 public void phase(String cap,int phase) {
-                    if(!sender(cap) || closed)return;if(phase==0)ready.complete(true);else if(phase==1)lookupStarted.complete(true);else if(phase==2)cpuStarted.complete(true);
+                    if(!sender(cap) || closed)return;if(phase==0) {handshake="READY";ready.complete(true);}else if(phase==1)lookupStarted.complete(true);else if(phase==2)cpuStarted.complete(true);
                 }
             });
         }catch(Exception invalid) {fail(RuntimeResult.IPC_ERROR);}
@@ -154,6 +155,7 @@ public final class RemoteHttpsTransport implements IsolatedTransport {
     @Override public void close() {beginClose(0);}
     private void beginClose(int code) {
         synchronized(this) {if(closed)return;fatal=code;closed=true;closeAt=SystemClock.elapsedRealtime();}
+        if(code!=0)android.util.Log.w("TheKaiNHttps","BROKER_RETIRE_"+code+"_"+handshake);
         // A queued handshake must run its closed check/finally; removing it would leave a false in-flight flag.
         ready.completeExceptionally(new IOException("BROKER_RETIRED"));connectionIo.shutdown();lifecycle.post(this::reap);
     }
@@ -196,6 +198,8 @@ public final class RemoteHttpsTransport implements IsolatedTransport {
             .put("instance",value==null?"":value.instance).put("ordinary_uid",android.os.Process.myUid()).put("owner_pid",android.os.Process.myPid())
             .put("kernel_process_gone",kernelGone).put("never_configured",!configured).put("binder_dead",binder==null || binderDead || !binder.isBinderAlive())
             .put("lease_clean",leaseClean).put("terminated",terminated()).put("failure",fatal).put("peak_rss_bytes",peakRss).put("observed_cpu_ms",peakCpuMs)
+            .put("rss_source","kernel_VmRSS_kB_x_1024")
+            .put("handshake_phase",handshake)
             .put("service_absent",serviceGone)
             .put("retire_ms",finishedAt==0?-1:finishedAt-closeAt).put("requests",requests).put("payload_bytes",payload)
             .put("owner_python_loaded",ProcessIdentity.read("/proc/self/maps",2*1024*1024).contains("libpython"))

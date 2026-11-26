@@ -11,7 +11,8 @@ class BridgeIntakeTest(unittest.TestCase):
             serial+=1;identifier=f'{serial:08x}-0000-0000-0000-000000000000'
             return dict(id=identifier,pid=400+serial,owner_pid=100,start_ticks=100+serial,instance=identifier,
                 kernel_process_gone=True,binder_dead=True,lease_clean=True,terminated=True,service_absent=True,
-                owner_python_loaded=False,ordinary_uid=10001,production_ready=False,retire_ms=100,peak_rss_bytes=32*1024*1024,observed_cpu_ms=1100,failure=error)
+                owner_python_loaded=False,ordinary_uid=10001,production_ready=False,retire_ms=100,peak_rss_bytes=32*1024*1024,observed_cpu_ms=1100,failure=error,
+                rss_source='kernel_VmRSS_kB_x_1024')
         def row(error=0):
             network=process()
             return dict(id=network['id'],source_commit=source,death_confirmed=True,canary_intact=True,worker_pid=network['pid']+1000,
@@ -34,7 +35,7 @@ class BridgeIntakeTest(unittest.TestCase):
 
     def test_no_main_success_without_current_source_actual_death_distinct_uids_and_real_outcomes(self):
         remote,main,recovery,source=self.fixture();self.assertEqual(inspect(remote,main,recovery,source,36,16384)['main_tests'],5)
-        for change in ('missing','source','pages','only_binder','lease','service','same_pid','same_uid','network_id','cached_process','no_deadline_result','wrong_deadline','enabled','tls','recovery','not_actual_ui'):
+        for change in ('missing','source','pages','only_binder','lease','service','rss_unit','same_pid','same_uid','network_id','cached_process','no_deadline_result','wrong_deadline','enabled','tls','recovery','not_actual_ui'):
             r,m,c=deepcopy(remote),deepcopy(main),deepcopy(recovery)
             if change=='missing':del m['ui']
             elif change=='source':m['public']['source_commit']='e'*40
@@ -42,6 +43,7 @@ class BridgeIntakeTest(unittest.TestCase):
             elif change=='only_binder':m['public']['runtime']['network']['kernel_process_gone']=False
             elif change=='lease':m['public']['runtime']['network']['lease_clean']=False
             elif change=='service':m['public']['runtime']['network']['service_absent']=False
+            elif change=='rss_unit':m['public']['runtime']['network']['rss_source']='assumed_page_size'
             elif change=='same_pid':m['public']['runtime']['network']['pid']=m['public']['runtime']['network']['owner_pid']
             elif change=='same_uid':m['public']['runtime']['worker_uid']=m['public']['runtime']['owner_uid']
             elif change=='network_id':m['public']['runtime']['network']['id']='a'*36

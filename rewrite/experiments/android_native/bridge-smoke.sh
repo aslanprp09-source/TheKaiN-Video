@@ -18,6 +18,8 @@ collect() {
 finish() {
   code=$?;collect
   if [ "$code" -ne 0 ]; then
+    timeout 8 adb -s "$ANDROID_SERIAL" logcat -d -s TheKaiNHttps:I '*:S' | tail -120 > "$evidence/remote-lifecycle.txt" || true
+    tail -60 "$evidence/remote-lifecycle.txt"
     for name in remote-instrumentation remote-owner-preparation remote-owner-recovery-instrumentation main-analysis-instrumentation main-ui-instrumentation main-boundary; do
       if [ -f "$evidence/$name.txt" ]; then tail -100 "$evidence/$name.txt"; fi
     done
@@ -33,6 +35,12 @@ finish() {
 trap finish EXIT
 python3 rewrite/experiments/android_native/main_delivery.py verify --folder "$delivery"
 timeout 180 adb -s "$ANDROID_SERIAL" shell am instrument -w -r -e class com.thekain.runtime.lab.RemoteHttpsTest com.thekain.runtime.lab.test/androidx.test.runner.AndroidJUnitRunner > "$evidence/remote-instrumentation.txt"
+python3 - "$evidence" <<'PYREMOTE'
+from pathlib import Path
+import sys
+from rewrite.experiments.android_native.bridge_report import raw
+raw(Path(sys.argv[1]),'remote-instrumentation.txt',5)
+PYREMOTE
 
 # A deliberate owner SIGKILL while actual DNS is stuck. This invocation is NOT counted as a passed test.
 owner_attempt=$(python3 -c 'import uuid;print(uuid.uuid4())')

@@ -57,9 +57,10 @@ public final class RemoteHttpsService extends Service {
             catch(IOException e) {throw new IllegalStateException("BROKER_IDENTITY");}
         }
         public void configure(BrokerConfig input,IRemoteHttpsOwner callback) {
-            try {checkOwner();}catch(RuntimeException denied) {if(input!=null)input.close();return;}
+            try {checkOwner();}catch(RuntimeException denied) {if(input!=null)input.close();throw denied;}
             if(input==null || callback==null || !USED.compareAndSet(false,true)) {if(input!=null)input.close();die();return;}
             config=input;owner=callback;ownerPid=Binder.getCallingPid();
+            String stage="CONFIG";
             try {
                 input.validate();long now=SystemClock.elapsedRealtime();
                 if(input.deadline<=now || input.deadline-now>30000 || (getApplicationInfo().flags&android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE)==0)
@@ -70,7 +71,7 @@ public final class RemoteHttpsService extends Service {
                         || !"127.0.0.1".equals(fixture.getHost()) || fixture.getPort()<=0 || fixture.getRawUserInfo()!=null
                         || fixture.getRawQuery()!=null || fixture.getRawFragment()!=null || !fixture.getRawPath().isEmpty())throw new IOException("BROKER_FIXTURE_SCOPE");
                 }
-                StructStat stat=Os.fstat(input.guard.getFileDescriptor());
+                stage="GUARD";StructStat stat=Os.fstat(input.guard.getFileDescriptor());
                 int flags=BrokerGuardFlags.flags(input.guard.getFd());
                 if(!OsConstants.S_ISREG(stat.st_mode) || stat.st_size!=0 || stat.st_nlink!=1 || stat.st_uid!=getApplicationInfo().uid
                     || stat.st_dev!=input.device || stat.st_ino!=input.inode || (flags&OsConstants.O_ACCMODE)!=OsConstants.O_RDONLY)
@@ -79,12 +80,12 @@ public final class RemoteHttpsService extends Service {
                 if(Os.read(input.guard.getFileDescriptor(),new byte[1],0,1)!=0)throw new IOException("BROKER_GUARD");
                 if(ProcessIdentity.read("/proc/self/maps",2*1024*1024).contains("libpython"))throw new IOException("BROKER_PYTHON_FORBIDDEN");
                 owner.asBinder().linkToDeath(RemoteHttpsService.this::die,0);
-                ControlledHttpsBroker engine=ServiceBrokerEngine.create(new HashSet<>(Arrays.asList(input.origins)),input.fixture,input.ca,input.fault,
+                stage="ENGINE";ControlledHttpsBroker engine=ServiceBrokerEngine.create(new HashSet<>(Arrays.asList(input.origins)),input.fixture,input.ca,input.fault,
                     ()->{try {owner.phase(input.id,1);}catch(RemoteException e) {die();}});
                 operation=engine.operationUntil(input.deadline);
-                if(!owner.ready(input.id,android.os.Process.myPid(),ProcessIdentity.selfStartTicks()))throw new IOException("BROKER_READY_REFUSED");
+                stage="READY";if(!owner.ready(input.id,android.os.Process.myPid(),ProcessIdentity.selfStartTicks()))throw new IOException("BROKER_READY_REFUSED");
                 armed=true;owner.phase(input.id,0);
-            }catch(Exception invalid) {android.util.Log.e("TheKaiNHttps","BROKER_CONFIG_REFUSED");die();}
+            }catch(Exception invalid) {android.util.Log.e("TheKaiNHttps","BROKER_CONFIG_REFUSED_"+stage+"_"+invalid.getClass().getSimpleName());die();}
         }
         public BrokerChunk fetch(String cap,long seq,String url,String method) {
             if(!authorized(cap))return failed(config!=null && SystemClock.elapsedRealtime()>=config.deadline?RuntimeResult.TIMEOUT:RuntimeResult.IPC_ERROR,seq);

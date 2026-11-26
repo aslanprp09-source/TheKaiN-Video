@@ -13,6 +13,7 @@ def process(proof,source):
     assert proof['kernel_process_gone'] is True and proof['binder_dead'] is True and proof['lease_clean'] is True and proof['terminated'] is True
     assert proof['owner_python_loaded'] is False and proof['production_ready'] is False
     assert proof['service_absent'] is True
+    assert proof['rss_source']=='kernel_VmRSS_kB_x_1024'
     assert 0<=proof['retire_ms']<=2500 and proof['peak_rss_bytes']>0 and proof['observed_cpu_ms']>=0
 
 
@@ -86,6 +87,12 @@ def main():
     screenshot=(a.evidence/'main-isolated-preview.png').read_bytes();assert 1024<len(screenshot)<=5*1024*1024 and screenshot[:8]==b'\x89PNG\r\n\x1a\n'
     remote={name:read(a.evidence/'remote'/f'{name}.json') for name in REMOTE};m={name:read(a.evidence/'main'/f'{name}.json') for name in MAIN}
     result=inspect(remote,m,read(a.evidence/'network-owner-recovery.json'),a.source,a.api,a.pages)
+    workers=[m['public']['runtime'],*m['cancel']['proofs'],m['security']['tls_runtime'],m['security']['runtime'],m['early']['fresh'],m['ui']['runtime']]
+    networks=[p for data in remote.values() for p in data['proofs']]+[row['network'] for row in workers]+[read(a.evidence/'network-owner-recovery.json')]
+    result['measurements']=dict(rss_source='kernel_VmRSS_kB_x_1024',network_peak_sampled_rss_bytes=max(p['peak_rss_bytes'] for p in networks),
+        network_max_observed_cpu_ms=max(p['observed_cpu_ms'] for p in networks),network_max_retire_ms=max(p['retire_ms'] for p in networks),
+        python_peak_sampled_rss_bytes=max(p['peak_rss_bytes'] for p in workers),python_max_observed_cpu_ms=max(p['observed_cpu_ms'] for p in workers),
+        sampled_not_instant_hard_limits=True)
     (a.evidence/'bridge-summary.json').write_text(json.dumps(result,indent=2)+'\n');print('::notice::'+json.dumps(result))
 
 
