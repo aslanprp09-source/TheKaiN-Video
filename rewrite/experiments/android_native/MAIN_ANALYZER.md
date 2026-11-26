@@ -187,6 +187,10 @@ focus, Activity, hierarchy/screenshot evidence and adds the main UI evidence.
 The new boundary runs after the isolated JNI bootstrap and before the lengthy
 original suite, so a failed handshake produces evidence promptly. All original
 73 checks still execute and must pass before the matrix job can be successful.
+Initial run255 API26 stalled in emulator/ADB boot before any test and exhausted
+the job limit. Boot polling now bounds each ADB request within the existing 360s
+polling budget and reports `INFRA_BOOT_NOT_READY` separately. This does not extend
+an application deadline or turn an unexecuted test into a pass.
 
 Exact final source HEAD, CI runs, resource measurements and any failures belong
 in the PR after execution. Local compilation or a source-built ARM64 library is
