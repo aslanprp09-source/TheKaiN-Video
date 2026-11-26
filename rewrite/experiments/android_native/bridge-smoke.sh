@@ -66,6 +66,12 @@ for role,key in (('owner','owner_pid'),('broker','pid')):
 print('Independent shell confirmed owner and stuck-DNS broker absent before recovery; intentional SIGKILL is not a timeout PASS')
 PYEXIT
 timeout 80 adb -s "$ANDROID_SERIAL" shell am instrument -w -r -e class 'com.thekain.runtime.lab.RemoteOwnerDeathTest#recoverOnlyAfterIndependentDriverConfirmsActualBrokerExit' com.thekain.runtime.lab.test/androidx.test.runner.AndroidJUnitRunner > "$evidence/remote-owner-recovery-instrumentation.txt"
+python3 - "$evidence" <<'PYRECOVERED'
+from pathlib import Path
+import sys
+from rewrite.experiments.android_native.bridge_report import raw
+raw(Path(sys.argv[1]),'remote-owner-recovery-instrumentation.txt',1)
+PYRECOVERED
 
 # Disposable emulator only. This never uninstalls or changes the user's physical downloader.
 adb -s "$ANDROID_SERIAL" install --no-streaming "$delivery/main-internal.apk"
@@ -73,6 +79,12 @@ adb -s "$ANDROID_SERIAL" install --no-streaming "$delivery/main-tests.apk"
 if [ "$api" -ge 33 ]; then adb -s "$ANDROID_SERIAL" shell pm grant com.thekain.video.rebuild android.permission.POST_NOTIFICATIONS; fi
 adb -s "$ANDROID_SERIAL" shell am instrument -w com.thekain.runtime.probe/.ProductBoundaryProbe > "$evidence/main-boundary.txt"
 timeout 180 adb -s "$ANDROID_SERIAL" shell am instrument -w -r -e class com.thekain.runtime.lab.MainIsolatedAnalyzerTest com.thekain.video.rebuild.test/androidx.test.runner.AndroidJUnitRunner > "$evidence/main-analysis-instrumentation.txt"
+python3 - "$evidence" <<'PYMAIN'
+from pathlib import Path
+import sys
+from rewrite.experiments.android_native.bridge_report import raw
+raw(Path(sys.argv[1]),'main-analysis-instrumentation.txt',4)
+PYMAIN
 timeout 100 adb -s "$ANDROID_SERIAL" shell am instrument -w -r -e class com.thekain.video.OwnedIsolatedUiTest -e listener com.thekain.video.UiFailureListener com.thekain.video.rebuild.test/androidx.test.runner.AndroidJUnitRunner > "$evidence/main-ui-instrumentation.txt"
 adb -s "$ANDROID_SERIAL" exec-out screencap -p > "$evidence/main-isolated-ui.png"
 collect

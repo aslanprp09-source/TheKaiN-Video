@@ -115,6 +115,13 @@ URL/id, codecs, optional bytes, dimensions and FPS. The combined text budget is
 Malformed, credential-bearing, cross-origin, unsupported and oversized metadata
 fails; unknown values remain null/unknown. No raw extractor JSON reaches the UI.
 
+The source path specifies a single-format selector explicitly. yt-dlp's default
+selector probes external FFmpeg even for analysis-only extraction; the installed
+audit hook correctly rejected that in run259. The explicit selector avoids the
+probe without relaxing audit/seccomp. A fresh host interpreter installs the real
+audit hook, proves subprocess denial and performs real pinned generic extraction
+as a regression test. This neither adds FFmpeg nor authorizes media transfer.
+
 The main `IsolatedSourceAnalyzer` uses authoritative read-only outcome signals,
 checks worker UID/death/canary/fence proof and validates every candidate against
 the trusted scope. Evidence is tied to the exact operation's transport, never a

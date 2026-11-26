@@ -86,7 +86,9 @@ def analyze(url):
     network=ApprovedNetwork()
     class ControlledYDL(yt_dlp.YoutubeDL):
         def urlopen(self,request):return network.open(request)
-    with ControlledYDL(dict(quiet=True,no_warnings=True,logger=Quiet(),cachedir=False,skip_download=True,noplaylist=True,
+    # The default selector probes FFmpeg through subprocesses, even with download=False.
+    # A fixed single-format selector needs no merger/exec; normalization still inspects real formats.
+    with ControlledYDL(dict(quiet=True,no_warnings=True,logger=Quiet(),cachedir=False,skip_download=True,noplaylist=True,format='best',
             allowed_extractors=['generic','html5'],js_runtimes={},remote_components=[],retries=0,extractor_retries=0,
             postprocessors=[],force_generic_extractor=True,ignore_no_formats_error=True)) as ydl:
         info=ydl.sanitize_info(ydl.extract_info(url,download=False))

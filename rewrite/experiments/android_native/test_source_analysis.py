@@ -3,6 +3,7 @@ from copy import deepcopy
 import importlib
 from pathlib import Path
 import sys
+import subprocess
 import types
 import unittest
 from unittest.mock import patch
@@ -20,6 +21,29 @@ class SourceAnalysisTest(unittest.TestCase):
 
     def fixture(self):
         return dict(title='Owned',formats=[dict(format_id='real',url='https://owned.example.org/real.mp4?token=fixture-sensitive',protocol='https',ext='mp4',acodec='mp4a.40.2')])
+
+    def test_real_generic_extraction_under_the_installed_audit_hook_never_probes_external_tools(self):
+        # A separate interpreter is required: Python audit hooks cannot be removed from the host test runner.
+        code=r'''import sys,types
+sys.path[:0]=['rewrite/experiments/android_native','rewrite/experiments/android_ytdlp']
+class Error(Exception):pass
+def fetch(url,method):
+    html=b'<html><title>Owned</title><video><source src="/real.mp4" type="video/mp4"></video></html>'
+    return html,url,'text/plain',200,len(html)
+sys.modules['_thekain_transport']=types.SimpleNamespace(Error=Error,fetch_info=fetch)
+import thekain_lab
+from source_analysis import analyze
+from spike import SpikeError
+try: sys.audit('subprocess.Popen','forbidden',[],None,None)
+except SpikeError as error: assert error.code=='UNSUPPORTED_MEDIA'
+else: raise AssertionError('Audit hook disabled')
+result=analyze('https://owned.example.org/page.html')
+assert result['status']=='PASS' and result['formats']==1 and result['download_enabled'] is False
+print('AUDITED_GENERIC_NO_EXTERNAL_EXEC_PASS')
+'''
+        result=subprocess.run([sys.executable,'-c',code],cwd=Path(__file__).resolve().parents[3],capture_output=True,text=True,timeout=20)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(result.stdout.strip(),'AUDITED_GENERIC_NO_EXTERNAL_EXEC_PASS')
 
     def test_real_pinned_generic_extractor_over_typed_metadata_preserves_unknowns(self):
         calls=[]

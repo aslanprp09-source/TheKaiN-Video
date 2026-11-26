@@ -16,7 +16,7 @@ class OwnedIsolatedUiTest {
     @get:Rule val rules: RuleChain = RuleChain.outerRule(compose).around(UiWindowFailureRule { compose.activity })
     @Test fun realHomeAnalyzesOwnedPageAndKeepsUncheckedDownloadDisabled() {
         UiWindowEvidence.await(compose.activity, "isolated-owned-page")
-        compose.onNodeWithTag("url_input").performTextReplacement(SourceAnalyzerFactory.ownedPage)
+        compose.onNodeWithTag("source_input").performTextReplacement(SourceAnalyzerFactory.ownedPage)
         androidx.test.espresso.Espresso.closeSoftKeyboard()
         UiWindowEvidence.await(compose.activity, "isolated-analyze-action")
         compose.onNodeWithTag("analyze_button").performClick()
