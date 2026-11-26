@@ -8,7 +8,7 @@ final class LeaseNative {
         try {
             String name=ProcessIdentity.read("/proc/self/cmdline",512).split("\u0000",2)[0];
             int uid=android.os.Process.myUid()%100000;
-            if(!name.equals("com.thekain.runtime.lab") || uid<10000 || uid>=90000)
+            if((!name.equals("com.thekain.runtime.lab") && !name.equals("com.thekain.video.rebuild")) || uid<10000 || uid>=90000)
                 throw new IllegalStateException("LEASE_OWNER_REQUIRED");
         }catch(IOException e) {throw new IllegalStateException("LEASE_OWNER_IDENTITY",e);}
         System.loadLibrary("thekain_lease");

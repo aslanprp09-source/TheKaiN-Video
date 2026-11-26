@@ -71,6 +71,7 @@ class HomeSession(private val scope: CoroutineScope, private val analyzer: Sourc
         val value = mutable.value
         if (value.phase != AnalysisPhase.READY || value.enqueuePending) return
         val variant = value.variant ?: return
+        if (!variant.downloadAllowed) return
         if (variant.request.url in acceptedSources && !confirmed) {
             mutable.value = value.copy(repeatConfirmation = true)
             return

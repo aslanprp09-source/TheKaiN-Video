@@ -1,5 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <queries><package android:name="com.thekain.runtime.lab"/></queries>
+    <queries><package android:name="com.thekain.runtime.lab"/><package android:name="com.thekain.video.rebuild"/></queries>
     <application android:label="TheKaiN boundary probe" android:allowBackup="false"/>
     <instrumentation android:name=".BoundaryProbe" android:targetPackage="com.thekain.runtime.probe"/>
+    <instrumentation android:name=".ProductBoundaryProbe" android:targetPackage="com.thekain.runtime.probe"/>
 </manifest>

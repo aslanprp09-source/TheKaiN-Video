@@ -17,6 +17,7 @@ import java.util.concurrent.TimeUnit
 import java.util.UUID
 import com.thekain.video.source.HttpsSourceAnalyzer
 import com.thekain.video.source.SourceAnalyzer
+import com.thekain.video.source.SourceAnalyzerFactory
 
 data class Submission(val operation: String = "", val busy: Boolean = false,
                       val accepted: String? = null, val error: TransferError? = null)
@@ -25,6 +26,7 @@ class TheKaiNApp : Application() {
     val graph by lazy { AppGraph(this) }
     override fun onCreate() {
         super.onCreate()
+        if (!ProcessStartup.isOwner(packageName)) return
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             try { graph.recover() }
             finally { graph.recoveryReady.complete(Unit) }
@@ -48,7 +50,7 @@ class AppGraph(val context: Context) {
     }
     // Dependency boundary for owned TLS fixtures; production always uses system trust.
     @Volatile var connections: Connections = systemConnections
-    val sourceAnalyzer = SourceAnalyzer { input -> HttpsSourceAnalyzer(connections).analyze(input) }
+    val sourceAnalyzer = SourceAnalyzerFactory.create(context) { connections }
     val engine by lazy { DownloadEngine(repository, File(context.filesDir, "transfers"),
         object : TransferAdapter {
             override suspend fun fetch(task: DownloadTask, stage: File, identity: suspend (Long?, String?, Boolean) -> Unit,

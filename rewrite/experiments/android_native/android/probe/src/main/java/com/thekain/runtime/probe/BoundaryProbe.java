@@ -37,6 +37,15 @@ public final class BoundaryProbe extends Instrumentation {
             result.putBoolean("isolated_service_flag",isolatedFlag);
             result.putBoolean("isolated_external_bind_denied",isolatedDenied);
             passed=passed && !isolatedInfo.exported && isolatedFlag && isolatedDenied;
+            ComponentName network=new ComponentName("com.thekain.runtime.lab","com.thekain.runtime.lab.RemoteHttpsService");
+            ServiceInfo networkInfo=getContext().getPackageManager().getServiceInfo(network,0);
+            boolean networkDenied=false;
+            try {
+                boolean bound=getContext().bindService(new Intent().setComponent(network),connection,Context.BIND_AUTO_CREATE);
+                networkDenied=!bound;if(bound)getContext().unbindService(connection);
+            }catch(SecurityException expected) {networkDenied=true;}
+            result.putBoolean("network_external_bind_denied",networkDenied);
+            passed=passed && !networkInfo.exported && networkDenied;
             result.putString("boundary_probe",passed?"PASS":"FAIL");finish(passed?Activity.RESULT_OK:Activity.RESULT_CANCELED,result);
         } catch(Exception failure) {
             result.putString("boundary_probe","FAIL");result.putString("error_class",failure.getClass().getSimpleName());

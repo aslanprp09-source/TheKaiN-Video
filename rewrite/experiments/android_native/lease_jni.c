@@ -8,6 +8,10 @@
 /* Owner-only libc JNI. No libpython, signals, worker PID or private key access. */
 static int owner(void) {int uid=getuid()%100000;return uid>=10000 && uid<90000;}
 static void failure(JNIEnv *env) {(*env)->ThrowNew(env,(*env)->FindClass(env,"java/io/IOException"),"LEASE_KERNEL_PROOF_FAILED");}
+JNIEXPORT jint JNICALL Java_com_thekain_runtime_lab_BrokerGuardFlags_flags(JNIEnv *env,jclass cls,jint fd) {
+    (void)cls;if(!owner() || fd<0) {failure(env);return -1;}
+    int flags=fcntl(fd,F_GETFL);if(flags<0)failure(env);return flags;
+}
 JNIEXPORT jint JNICALL Java_com_thekain_runtime_lab_LeaseNative_create(JNIEnv *env,jclass cls,jstring path) {
     (void)cls;if(!owner()) {failure(env);return -1;}
     const char *name=(*env)->GetStringUTFChars(env,path,NULL);if(!name)return -1;

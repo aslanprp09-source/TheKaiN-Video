@@ -232,3 +232,6 @@ python3 rewrite/experiments/android_native/recovery_report.py --evidence "$evide
 timeout 180 adb -s "$ANDROID_SERIAL" shell am instrument -w -r -e class com.thekain.runtime.lab.network.ControlledHttpsBrokerTest com.thekain.runtime.lab.test/androidx.test.runner.AndroidJUnitRunner > "$evidence/broker-instrumentation.txt"
 collect_broker_evidence
 python3 rewrite/experiments/android_native/broker_report.py --evidence "$evidence" --source "$(git rev-parse HEAD)" --api "$api" --pages "$pages"
+
+# Original73 gates above remain mandatory. The new owner-network and actual main-APK flow are additional.
+bash rewrite/experiments/android_native/bridge-smoke.sh "$api" "$pages" "$delivery" "$evidence"

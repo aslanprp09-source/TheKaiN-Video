@@ -31,8 +31,12 @@ public final class ControlledHttpsBroker {
     }
     public static final class Reply {
         public final int status,requestNumber;
+        public final String finalUrl,contentType;
+        public final long declaredBytes;
         private final byte[] bytes;
-        Reply(int status,int request,byte[] bytes) {this.status=status;requestNumber=request;this.bytes=bytes;}
+        Reply(int status,int request,byte[] bytes,String finalUrl,String contentType,long declaredBytes) {
+            this.status=status;requestNumber=request;this.bytes=bytes;this.finalUrl=finalUrl;this.contentType=contentType;this.declaredBytes=declaredBytes;
+        }
         public byte[] body() {return bytes.clone();}
         @Override public String toString() {return "BrokerReply(status="+status+", bytes="+bytes.length+")";}
     }
@@ -49,9 +53,14 @@ public final class ControlledHttpsBroker {
         if(policy==null || resolver==null || limits==null || (tls==null)!=(trust==null))throw new IllegalArgumentException("BROKER_CONFIG");
         this.policy=policy;this.resolver=resolver;this.limits=limits;fixtureTls=tls;fixtureTrust=trust;
     }
-    public Operation operation() {return new Operation();}
+    public Operation operation() {return new Operation(SystemClock.elapsedRealtime()+limits.timeoutMs);}
+    public Operation operationUntil(long absoluteDeadline) throws BrokerFailure {
+        long now=SystemClock.elapsedRealtime();if(absoluteDeadline<=now)throw new BrokerFailure(TIMEOUT);
+        return new Operation(Math.min(absoluteDeadline,now+limits.timeoutMs));
+    }
     public final class Operation implements AutoCloseable {
-        private final long deadline=SystemClock.elapsedRealtime()+limits.timeoutMs;
+        private final long deadline;
+        private Operation(long deadline) {this.deadline=deadline;}
         private final AtomicBoolean canceled=new AtomicBoolean(),fetching=new AtomicBoolean();
         private final AtomicReference<Call> call=new AtomicReference<>();
         private final Set<Socket> sockets=Collections.synchronizedSet(new HashSet<>());
@@ -71,8 +80,12 @@ public final class ControlledHttpsBroker {
         public int requestCount() {return requests;}
         public int payloadBytesRead() {return payloadBytes;}
         public int connectionAttempts() {return connections;}
-        private synchronized Reply commit(int status,byte[] bytes) throws BrokerFailure {
-            remaining();return new Reply(status,requests,bytes);
+        private synchronized Reply commit(Response response,PublicHttpsPolicy.Target target,byte[] bytes) throws BrokerFailure {
+            String type=response.header("Content-Type");
+            if(response.headers("Content-Type").size()>1 || type!=null && (type.length()>128 || type.chars().anyMatch(c->c<32 || c>126)))throw new BrokerFailure(HEADER_LIMIT);
+            long declared=-1;String length=response.header("Content-Length");
+            if(length!=null && length.matches("[0-9]{1,19}"))try {declared=Long.parseLong(length);}catch(NumberFormatException ignored) { }
+            remaining();return new Reply(response.code(),requests,bytes,response.request().url().toString(),type,declared);
         }
         /** Actual owned lookup/network work ended; Future cancellation alone grants no quiescence. */
         public boolean isQuiescent() {Lookup value=lookup;return !fetching.get() && call.get()==null && sockets.isEmpty() && (value==null || value.done);}
@@ -154,7 +167,7 @@ public final class ControlledHttpsBroker {
                         List<String> encodings=response.headers("Content-Encoding");
                         if(encodings.size()>1 || encodings.size()==1 && !encodings.get(0).equalsIgnoreCase("identity"))
                             throw new BrokerFailure(UNSUPPORTED_ENCODING);
-                        if(method.equals("HEAD"))return commit(status,new byte[0]);
+                        if(method.equals("HEAD"))return commit(response,target,new byte[0]);
                         ResponseBody body=response.body();if(body==null)throw new BrokerFailure(NETWORK_LOST);
                         // This pinned HTTP/1 codec has unbounded chunk-extension line parsing.
                         // Do not enter that parser; unknown/ambiguous framing is a typed refusal.
@@ -172,7 +185,7 @@ public final class ControlledHttpsBroker {
                             remaining();if(count<0)break;
                             if(count>allowance)throw new BrokerFailure(RESPONSE_LIMIT);out.write(buffer,0,count);
                         }
-                        return commit(status,out.toByteArray());
+                        return commit(response,target,out.toByteArray());
                     }catch(BrokerFailure failure) {throw failure;}
                     catch(SSLException tls) {remaining();throw new BrokerFailure(TLS_ERROR);}
                     catch(InterruptedIOException timeout) {remaining();throw new BrokerFailure(TIMEOUT);}
