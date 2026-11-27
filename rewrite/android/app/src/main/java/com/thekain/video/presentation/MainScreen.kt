@@ -239,12 +239,13 @@ data class UiActions(
             Text(formatSummary(selected), Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface, textAlign = androidx.compose.ui.text.style.TextAlign.Start)
             Icon(Icons.Default.ArrowDropDown, null)
         }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }, modifier = Modifier.semantics { testTagsAsResourceId = true }) {
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }, modifier = Modifier.semantics { testTagsAsResourceId = true }.testTag("format_options")) {
             choices.forEach { variant -> DropdownMenuItem(text = { Column {
                 Text(formatSummary(variant))
                 Text(variant.request.name, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
             } },
-                onClick = { expanded = false; actions.select(variant.id) }, modifier = Modifier.heightIn(min = 48.dp).testTag("variant_${variant.id}")) }
+                onClick = { expanded = false; actions.select(variant.id) }, modifier = Modifier.heightIn(min = 48.dp)
+                    .semantics { testTagsAsResourceId = true }.testTag("variant_${variant.id}")) }
         }
     }
     Spacer(Modifier.height(4.dp))

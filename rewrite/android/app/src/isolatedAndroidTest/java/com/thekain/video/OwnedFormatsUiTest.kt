@@ -37,7 +37,10 @@ class OwnedFormatsUiTest {
 
     private fun visible(selector: BySelector): UiObject2 {
         for (attempt in 0..6) {
-            device.findObject(selector)?.let { if (it.visibleBounds.width() > 0 && it.visibleBounds.height() > 0) return it }
+            device.findObject(selector)?.let {
+                // A clipped sliver under a fixed footer is not an actionable 48dp touch target.
+                if (it.visibleBounds.width() > 0 && it.visibleBounds.height() >= (48 * activity.resources.displayMetrics.density).toInt()) return it
+            }
             if (attempt < 6) requireNotNull(device.findObject(By.res("home_content"))).scroll(Direction.DOWN, .7f)
         }
         throw AssertionError("Actual format selector was not visible")
@@ -108,6 +111,7 @@ class OwnedFormatsUiTest {
                 UiWindowEvidence.await(activity, "formats-choice-$height")
                 val selector = visible(By.res("format_selector"))
                 assertTrue(selector.isEnabled); selector.click()
+                assertNotNull("Actual format popup did not open", device.wait(Until.findObject(By.res("format_options")), 5000))
                 for (candidate in variants) {
                     val item = requireNotNull(device.wait(Until.findObject(By.res("variant_${candidate.id}")), 5000))
                     val label = "${candidate.width} × ${candidate.height}"
@@ -174,6 +178,18 @@ class OwnedFormatsUiTest {
                 .put("actual_main_ui", true).put("unknown_size_fps_video_codec", true).put("distinct_quality_labels", true).put("descending_choices", true)
                 .put("durable_history", true).put("open_actions", true).put("distinct_outputs", true).put("runtime", runtime).put("selections", evidence)
                 .put("production_ready", false).toString())
+        } catch (failure: Throwable) {
+            // Capture before worker/file cleanup can change the failing UI. Owned disposable-emulator content only.
+            runCatching {
+                val out = java.io.ByteArrayOutputStream()
+                device.dumpWindowHierarchy(out)
+                val safe = out.toString("UTF-8").replace(Regex("https?://[^\\s\\\"<>]+"), "OWNED_URL_REDACTED").take(48 * 1024)
+                val folder = File(activity.filesDir, "main-formats-evidence").apply { mkdirs() }
+                folder.resolve("failure-ui.xml").writeText(safe)
+                device.takeScreenshot(folder.resolve("failure.png"))
+                println("FORMAT_UI_FAILURE_HIERARCHY $safe")
+            }
+            throw failure
         } finally {
             // Only disposable-emulator rows created by this test; never reset the database or user's app.
             graph.repository.all().filter { it.id !in before }.forEach { task ->
