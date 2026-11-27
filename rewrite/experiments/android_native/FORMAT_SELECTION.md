@@ -68,6 +68,9 @@ a job completed without the existing media verification.
    in both tracks and Android MediaPlayer playback. Recreate the Activity,
    reopen the database and check both original records and Open actions.
    Retain selector screenshots, history screenshot and typed process receipts.
+   Popup items expose their own resource semantics; the selector must have a
+   full 48dp visible touch target before interaction. A failing attempt retains
+   a bounded, URL-redacted hierarchy and screenshot before cleanup changes UI.
 2. Exact-grant negative cases must refuse four ungranted aliases before network,
    identity/progress callbacks or staging. No direct-backend fallback.
 
@@ -81,8 +84,11 @@ completion. Another host test runs the real pinned extractor offline under
 the installed audit hook over the committed HTML, checking both candidates
 and unknown fields against actual committed fixture bytes/hashes.
 
-All original 93 unique native cases remain separate mandatory gates; these
-two make 95 per native API. All original 41 main API35 tests and standard
+The accepted readiness fix (PR #65, merge `4086d26ec6048582cd5fe349d9e56133cc1c6183`)
+adds two real configure/crash cases to the original93. All95 remain separate
+mandatory gates; the two format cases make **97 per native API**. Both host
+intake suites and both native drivers are retained after the normal base merge.
+All original 41 main API35 tests and standard
 API26/29, JVM, Lint, host and CI-policy gates remain intact. Results and resource
 measurements belong to the exact-HEAD PR evidence, not compilation claims.
 

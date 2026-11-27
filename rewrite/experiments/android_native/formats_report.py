@@ -34,7 +34,7 @@ def inspect(ui, grant, source, api, pages):
         assert proof['source_commit'] == source and proof['transfer_only'] is True and proof['transfer_receipt'] is True
         assert proof['verified_media'] is False  # A network receipt does not claim media verification.
     return dict(owned_main_format_selection='PASS', source_commit=source, api=api, pages=pages, additional_tests=2,
-        original_93='SEPARATE_MANDATORY_GATES', physical_arm64='NOT_RUN', mux='NOT_IMPLEMENTED', youtube='NOT_IMPLEMENTED',
+        original_95='SEPARATE_MANDATORY_GATES', physical_arm64='NOT_RUN', mux='NOT_IMPLEMENTED', youtube='NOT_IMPLEMENTED',
         transfer_peak_sampled_rss_bytes=max(r['proof']['peak_rss_bytes'] for r in selections),
         transfer_max_observed_cpu_ms=max(r['proof']['observed_cpu_ms'] for r in selections),
         transfer_max_retire_ms=max(r['proof']['retire_ms'] for r in selections), production_ready=False, automatic_publication=False)

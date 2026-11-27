@@ -15,8 +15,12 @@ public final class RemoteHttpsTransport implements IsolatedTransport {
     private static final AtomicReference<RemoteHttpsTransport> LIVE=new AtomicReference<>();
     public static final class Policy implements IsolatedTransport.Factory {
         final Set<String> origins;final String fixture;final byte[] ca;final int fault;final long rss,cpu;
+        private final Runnable readyReturnBarrier;
         private volatile RemoteHttpsTransport latest;
         private Policy(Set<String> origins,String fixture,byte[] ca,int fault,long rss,long cpu) throws Exception {
+            this(origins,fixture,ca,fault,rss,cpu,null);
+        }
+        private Policy(Set<String> origins,String fixture,byte[] ca,int fault,long rss,long cpu,Runnable barrier) throws Exception {
             if(fixture==null)new PublicHttpsPolicy(origins);
             else {
                 java.net.URI uri=new java.net.URI(fixture);
@@ -25,10 +29,16 @@ public final class RemoteHttpsTransport implements IsolatedTransport {
             }
             this.origins=Collections.unmodifiableSet(new HashSet<>(origins));this.fixture=fixture;this.ca=ca==null?null:ca.clone();
             this.fault=fault;this.rss=rss;this.cpu=cpu;
+            readyReturnBarrier=barrier;
         }
         public static Policy publicOrigins(Set<String> origins) throws Exception {return new Policy(origins,null,null,0,RuntimeRequest.MAX_RSS,10000);}
         static Policy fixture(String origin,byte[] ca) throws Exception {return new Policy(Collections.singleton(origin),origin,ca,0,RuntimeRequest.MAX_RSS,10000);}
         Policy fault(int value,long rss,long cpu) throws Exception {return new Policy(origins,fixture,ca,value,rss,cpu);}
+        // Trusted instrumentation only, owned loopback fixture only. Nothing executable crosses IPC.
+        Policy holdReadyReturnForTests(Runnable barrier) throws Exception {
+            if(fixture==null || barrier==null)throw new IllegalArgumentException("OWNED_FIXTURE_ONLY");
+            return new Policy(origins,fixture,ca,fault,rss,cpu,barrier);
+        }
         public IsolatedTransport create(Context context,RuntimeRequest request,Counters counters) throws Exception {
             RemoteHttpsTransport value=new RemoteHttpsTransport(context,request,this,counters,false);latest=value;return value;
         }
@@ -58,6 +68,8 @@ public final class RemoteHttpsTransport implements IsolatedTransport {
     private volatile boolean closed,done,bound,binderDead,connected,connectionWorkDone=true,configured,guardClosed,leaseClean,kernelGone,serviceGone;
     private volatile int fatal,requests;
     private volatile String handshake="BIND_PENDING";
+    private volatile boolean readyNotified,configureReturned;
+    private volatile String configureFailure="NONE";
     private volatile long payload,peakRss,peakCpuMs,initialCpu,closeAt=-1,finishedAt;
     private final ServiceConnection connection;
     private RemoteHttpsTransport(Context context,RuntimeRequest request,Policy policy,Counters counters,boolean transfer) throws Exception {
@@ -102,10 +114,22 @@ public final class RemoteHttpsTransport implements IsolatedTransport {
                     return lease.arm(request.id);
                 }
                 public void phase(String cap,int phase) {
-                    if(!sender(cap) || closed)return;if(phase==0) {handshake="READY";ready.complete(true);}else if(phase==1)lookupStarted.complete(true);else if(phase==2)cpuStarted.complete(true);
+                    if(!sender(cap) || closed)return;
+                    if(phase==0) {
+                        readyNotified=true;handshake="CONFIGURE_ACK";
+                        if(policy.readyReturnBarrier!=null)policy.readyReturnBarrier.run();
+                    }else if(phase==1)lookupStarted.complete(true);else if(phase==2)cpuStarted.complete(true);
                 }
             });
-        }catch(Exception invalid) {fail(RuntimeResult.IPC_ERROR);}
+            configureReturned=true;
+            if(!readyNotified)throw new IOException("BROKER_READY_MISSING");
+            // The callback runs inside the configure transaction. Publishing readiness there
+            // lets a concurrent fetch kill the worker while configure is still in flight.
+            if(!closed) {handshake="READY";ready.complete(true);}
+        }catch(Exception invalid) {
+            configureFailure=invalid instanceof DeadObjectException?"DEAD_OBJECT":invalid instanceof RemoteException?"REMOTE":"PROTOCOL";
+            fail(invalid instanceof DeadObjectException?RuntimeResult.WORKER_DIED:RuntimeResult.IPC_ERROR);
+        }
         finally {connectionWorkDone=true;if(closed)lifecycle.post(this::reap);}
     }
     private int remaining() throws ChildNetworkGate.Failure {
@@ -133,7 +157,10 @@ public final class RemoteHttpsTransport implements IsolatedTransport {
                 if(offset==body.length)break;remaining();chunk=remote.read(request.id,seq,offset);remaining();chunk.validate();
             }
             synchronized(this) {remaining();return new IsolatedReply(0,body,first.status,first.finalUrl,first.contentType,first.declaredBytes);}
-        }catch(ChildNetworkGate.Failure failed) {if(failed.code==RuntimeResult.TIMEOUT)fail(RuntimeResult.TIMEOUT);throw failed;}
+        }catch(ChildNetworkGate.Failure failed) {
+            if(failed.code==RuntimeResult.TIMEOUT || failed.code==RuntimeResult.WORKER_DIED)fail(failed.code);
+            throw failed;
+        }
         catch(TimeoutException e) {fail(RuntimeResult.TIMEOUT);throw new ChildNetworkGate.Failure(RuntimeResult.TIMEOUT);}
         catch(InterruptedException e) {Thread.currentThread().interrupt();fail(RuntimeResult.CANCELED);throw new ChildNetworkGate.Failure(RuntimeResult.CANCELED);}
         catch(Exception failed) {int code=fatal!=0?fatal:closed?RuntimeResult.CANCELED:failed instanceof DeadObjectException?RuntimeResult.WORKER_DIED:RuntimeResult.IPC_ERROR;fail(code);throw new ChildNetworkGate.Failure(code);}
@@ -274,6 +301,8 @@ public final class RemoteHttpsTransport implements IsolatedTransport {
             .put("lease_clean",leaseClean).put("terminated",terminated()).put("failure",fatal).put("peak_rss_bytes",peakRss).put("observed_cpu_ms",peakCpuMs)
             .put("rss_source","kernel_VmRSS_kB_x_1024")
             .put("handshake_phase",handshake)
+            .put("ready_notification_seen",readyNotified).put("configure_returned",configureReturned)
+            .put("ready_published",ready.isDone() && !ready.isCompletedExceptionally()).put("configure_failure",configureFailure)
             .put("service_absent",serviceGone)
             .put("transfer_only",transfer)
             .put("retire_ms",finishedAt==0?-1:finishedAt-closeAt).put("requests",requests).put("payload_bytes",payload)

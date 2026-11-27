@@ -53,6 +53,7 @@ import sys
 from rewrite.experiments.android_native.bridge_report import raw
 raw(Path(sys.argv[1]),'remote-instrumentation.txt',5)
 PYREMOTE
+bash rewrite/experiments/android_native/readiness-smoke.sh "$evidence" "$api" "$pages"
 
 # A deliberate owner SIGKILL while actual DNS is stuck. This invocation is NOT counted as a passed test.
 owner_attempt=$(python3 -c 'import uuid;print(uuid.uuid4())')
