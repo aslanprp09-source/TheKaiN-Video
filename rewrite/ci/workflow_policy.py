@@ -16,6 +16,8 @@ VERIFY_CONDITION = VERIFY_BASE + " && inputs.verification_target != 'qa89'"
 QA89_CONDITION = VERIFY_BASE + " && inputs.verification_target == 'qa89'"
 NATIVE_CONDITION = "github.event_name == 'workflow_dispatch' && inputs.native_runtime_lab && !inputs.build_packages && !inputs.sign_android && !inputs.verify_artifact"
 REQUIRED_CHECKS = {'ci-policy', 'windows-tests', 'android-debug', 'android-device-tests'}
+PRIMARY_ANDROID_EXCLUSIONS = ','.join('com.thekain.video.' + name for name in (
+    'ProcessRestartTest', 'NotificationDeniedTest', 'M5VisualTest', 'DirectDownloadReliabilityTest', 'IsolatedBackendRefusalTest'))
 PUBLIC_OUTPUTS = {
     'signing-authorized': '${{ jobs.signing-policy.outputs.authorized }}',
     **{name: '${{ jobs.android-unsigned.outputs.' + name + ' }}'
@@ -142,6 +144,22 @@ def check(documents, lock):
             and legacy.get('runs-on') == 'ubuntu-24.04'
             and legacy.get('strategy') == {'fail-fast': 'false', 'matrix': {'api': ['26', '29']}},
             'Android storage boundary tests must use real hosted API 26/29 and skip verifier mode')
+    device_steps = ci['jobs'].get('android-device-tests', {}).get('steps', [])
+    primary = next((s for s in device_steps if s.get('name') == 'Run actual device integration tests'), {})
+    primary_command = ('gradle --no-daemon :app:connectedDebugAndroidTest -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true '
+        '-Pandroid.testInstrumentationRunnerArguments.listener=com.thekain.video.UiFailureListener '
+        '-Pandroid.testInstrumentationRunnerArguments.notClass=' + PRIMARY_ANDROID_EXCLUSIONS)
+    require('if' not in primary and [line for line in primary.get('run', '').splitlines() if ':app:connectedDebugAndroidTest' in line] == [primary_command],
+            'The original primary API35 suite may exclude only the separately executed fixed groups')
+    require(any(s.get('name') == 'Verify instrumentation results' and s.get('if') == 'always()' and
+                s.get('run') == 'python3 tools/report-tests.py app/build/outputs/androidTest-results/connected 41' for s in device_steps),
+            'The exact original41 count and fail-closed report remain mandatory')
+    for steps, name, command in ((device_steps, 'Additional real HTTPS cancellation, recovery and main UI tests',
+            'bash tools/direct-reliability-smoke.sh "$RUNNER_TEMP/m4-device-evidence/direct-reliability"'),
+            (legacy.get('steps', []), 'Additional direct HTTPS reliability on Android 8 and 10',
+            'gradle --no-daemon :app:installDebug :app:installDebugAndroidTest\nbash tools/direct-reliability-smoke.sh "$RUNNER_TEMP/removal-runtime/direct-reliability"\n')):
+        require(any(s.get('name') == name and 'if' not in s and s.get('run') == command for s in steps),
+                'Additional direct HTTPS and standard-backend refusal gates cannot be skipped')
     require(any(s.get('if') == 'inputs.verify_artifact && (inputs.build_packages || inputs.sign_android || !inputs.bypass_preflight_comment)'
                 and s.get('run') == 'exit 1' for s in ci['jobs']['ci-policy']['steps']),
             'Conflicting verifier/build modes must fail')

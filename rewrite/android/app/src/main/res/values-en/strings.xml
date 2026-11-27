@@ -137,5 +137,5 @@ The app uses Android media components. This APK does not bundle yt-dlp, Python o
     <string name="error_source_policy">The address or secure connection failed the safety policy. Download stopped.</string>
     <string name="error_response_limit">The response exceeds this internal build’s safe limit.</string>
     <string name="error_resource_limit">Download stopped at the memory or CPU limit.</string>
-    <string name="error_isolation_blocked">Safe network-process termination was not confirmed. Restart the app.</string>
+    <string name="error_isolation_blocked">Could not safely finish the download. Restart the app.</string>
 </resources>

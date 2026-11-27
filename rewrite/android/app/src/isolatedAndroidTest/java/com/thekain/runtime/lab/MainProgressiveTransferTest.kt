@@ -48,8 +48,12 @@ class MainProgressiveTransferTest {
         try { repo.all().filter { it.state == TransferState.COMPLETED }.forEach { publisher.deleteCompletedOutput(it) } }
         finally { db.close(); root.deleteRecursively(); server.shutdown() }
     }
-    private suspend fun task() = repo.create(DirectLinks.parse(server.url("/${UUID.randomUUID()}.mp4").toString())
-        .copy(backend = TransferBackend.ISOLATED_OWNED))
+    private suspend fun task(): DownloadTask {
+        // MockWebServer.url may reverse-resolve 127.0.0.1 to localhost on Android. The reviewed
+        // fixture grant is the exact literal/port, so construct that origin rather than widen it.
+        val request = DirectLinks.parse("https://127.0.0.1:${server.port}/${UUID.randomUUID()}.mp4")
+        return repo.create(request.copy(backend = TransferBackend.ISOLATED_OWNED))
+    }
     private fun response(bytes: ByteArray = body) = MockResponse().setHeader("Content-Type", "video/mp4").setBody(Buffer().write(bytes))
     private fun engine(adapter: TransferAdapter) = DownloadEngine(repo, root, adapter, MediaVerifier(context), publisher)
     private fun proof(adapter: IsolatedProgressiveTransfer) {
@@ -68,8 +72,8 @@ class MainProgressiveTransferTest {
     @Test fun corruptMediaNeverCompletesAndExplicitRetryVerifiesFreshBytes() = runBlocking<Unit> {
         server.enqueue(response(byteArrayOf(0, 0, 0, 12) + "ftypbroken".toByteArray()))
         val task = task(); val adapter = IsolatedProgressiveTransfer(context, policy); val engine = engine(adapter)
-        assertEquals(EngineResult.FAILED, engine.run(task.id)); proof(adapter)
-        assertEquals(TransferError.VERIFY_FAILED, repo.get(task.id).error); assertNull(repo.get(task.id).outputUri)
+        assertEquals(EngineResult.FAILED, engine.run(task.id))
+        assertEquals(TransferError.VERIFY_FAILED, repo.get(task.id).error); assertNull(repo.get(task.id).outputUri); proof(adapter)
         assertTrue(requireNotNull(adapter.lastEvidence).getBoolean("transfer_receipt")) // Receipt alone is never completion.
         repo.retry(task.id); server.enqueue(response())
         assertEquals(EngineResult.COMPLETED, engine.run(task.id)); proof(adapter)
@@ -104,14 +108,19 @@ class MainProgressiveTransferTest {
     @Test fun noSpaceAndPersistedOutOfScopeBackendCannotUseDirectTransfer() = runBlocking<Unit> {
         server.enqueue(response()); val task = task()
         val adapter = IsolatedProgressiveTransfer(context, policy, freeBytes = { 0 })
-        assertEquals(EngineResult.FAILED, engine(adapter).run(task.id)); proof(adapter)
-        assertEquals(TransferError.NO_DISK_SPACE, repo.get(task.id).error); assertNull(repo.get(task.id).outputUri)
+        assertEquals(EngineResult.FAILED, engine(adapter).run(task.id))
+        assertEquals(TransferError.NO_DISK_SPACE, repo.get(task.id).error); assertNull(repo.get(task.id).outputUri); proof(adapter)
         val unexpected = task()
         val factory = TransferAdapterFactory.create(context) { throw AssertionError("Isolated job was downgraded to direct") }
         assertEquals(EngineResult.FAILED, engine(factory).run(unexpected.id))
         assertEquals(TransferError.SOURCE_POLICY, repo.get(unexpected.id).error)
+        val alias = task.copy(id = UUID.randomUUID().toString(), url = task.url.replace("127.0.0.1", "localhost"))
+        val rejected = IsolatedProgressiveTransfer(context, policy)
+        try { rejected.fetch(alias, File(root, "alias.part"), { _, _, _ -> fail("Alias reached identity") }, { _, _ -> fail("Alias reached progress") }); fail("Alias widened fixture scope") }
+        catch (error: TransferFailure) { assertEquals(TransferError.SOURCE_POLICY, error.code) }
+        assertNull(rejected.lastEvidence); assertFalse(File(root, "alias.part").exists())
         assertEquals(1, server.requestCount)
-        record("storage", JSONObject().put("no_space", true).put("scope_refused", true).put("direct_downgrade_refused", true))
+        record("storage", JSONObject().put("no_space", true).put("scope_refused", true).put("direct_downgrade_refused", true).put("fixture_alias_refused", true))
     }
     @Test fun migrationPreservesVersionOneHistoryAndAssignsOnlyDirectBackend() = runBlocking<Unit> {
         val name = "migration-${UUID.randomUUID()}.db"

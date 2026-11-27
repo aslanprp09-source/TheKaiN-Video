@@ -137,5 +137,5 @@ jsoup — MIT.
     <string name="error_source_policy">Адрес или защищённое соединение не прошли проверку безопасности. Загрузка остановлена.</string>
     <string name="error_response_limit">Ответ превышает безопасный предел этой внутренней сборки.</string>
     <string name="error_resource_limit">Загрузка остановлена из-за ограничения памяти или процессорного времени.</string>
-    <string name="error_isolation_blocked">Безопасное завершение сетевого процесса не подтверждено. Перезапустите приложение.</string>
+    <string name="error_isolation_blocked">Не удалось безопасно завершить загрузку. Перезапустите приложение.</string>
 </resources>
