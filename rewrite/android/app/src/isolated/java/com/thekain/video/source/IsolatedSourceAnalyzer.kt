@@ -97,6 +97,8 @@ class IsolatedSourceAnalyzer(
     private fun record(out: IsolatedRuntime.Outcome, transport: JSONObject) {
         val data = JSONObject().put("id", out.result.id).put("source_commit", com.thekain.video.BuildConfig.INTERNAL_RUNTIME_SOURCE)
             .put("error", out.result.error).put("formats", out.result.formats).put("python_calls", out.result.pythonCalls)
+            .put("python_entered", out.pythonEntered).put("observer_pid", out.observerPid).put("samples", out.samples)
+            .put("worker_exit_signal", out.workerExitSignal).put("worker_exit_code", out.workerExitCode)
             .put("download_enabled", false).put("death_confirmed", out.deathConfirmed).put("canary_intact", out.ownerCanaryIntact)
             .put("worker_pid", out.workerPid).put("worker_uid", out.workerUid).put("owner_uid", android.os.Process.myUid())
             .put("observer_python_loaded", out.observerPythonLoaded).put("child_protection", out.childProtection)
