@@ -102,8 +102,12 @@ At source `9416bd4a594ec57f4a4c07278c20025bc4e98b76`, run46019812339 did not
 pass any complete native API entry. API35 and29 exposed the separate broker
 terminal-cause issue #64; API36 hit the still-unconfirmed source UI deadline
 #61. API26 reached D2 but could not find the popup container after a real tap.
-The former all-or-nothing capture produced no hierarchy log, so the actual
-popup/window state of that failure was not established.
+The former all-or-nothing capture produced no hierarchy in the raw host job
+log. Instrumentation stdout can remain in logcat rather than am instrument
+output, so this absence alone does not prove the capture failed. The artifact
+was not manually inspected and that failure's popup/window state remains
+unestablished. The driver now exports bounded/redacted saved nodes directly
+from the artifact into the host log, independently of instrumentation stdout.
 
 The next D2 candidate gives the popup a user-facing accessibility description
 instead of relying on a test tag alone to expose its noninteractive container,

@@ -11,6 +11,36 @@ ORACLE = {
 }
 
 
+def failure_nodes(path):
+    """Bounded diagnostic-only export; instrumentation stdout may stay in logcat."""
+    with path.open('rb') as stream:
+        data = stream.read(256*1024 + 1)
+    if not 0 < len(data) <= 256*1024:
+        raise ValueError('DIAGNOSTIC_SIZE')
+    row = json.loads(data)
+    if not isinstance(row, dict) or type(row.get('api')) is not int or row['api'] not in (26, 29, 35, 36) or row.get('bounded') is not True:
+        raise ValueError('DIAGNOSTIC_IDENTITY')
+    nodes = row.get('nodes')
+    if not isinstance(nodes, list) or len(nodes) > 100:
+        raise ValueError('DIAGNOSTIC_NODE_LIMIT')
+    result = []
+    for node in nodes:
+        if not isinstance(node, dict):
+            raise ValueError('DIAGNOSTIC_NODE_TYPE')
+        safe = dict(api=row['api'], diagnostic_only=True, grants_acceptance=False)
+        for key in ('id', 'package', 'class', 'text', 'description', 'bounds'):
+            value = node.get(key, '')
+            if not isinstance(value, str):
+                raise ValueError('DIAGNOSTIC_TEXT_TYPE')
+            safe[key] = re.sub(r'https?://[^\s"<>]+', 'OWNED_URL_REDACTED', value)[:256]
+        for key in ('visible', 'clickable', 'enabled', 'focused'):
+            if type(node.get(key)) is not bool:
+                raise ValueError('DIAGNOSTIC_FLAG_TYPE')
+            safe[key] = node[key]
+        result.append(safe)
+    return result
+
+
 def inspect(ui, grant, source, api, pages):
     assert re.fullmatch('[0-9a-f]{40}', source)
     for row in (ui, grant):

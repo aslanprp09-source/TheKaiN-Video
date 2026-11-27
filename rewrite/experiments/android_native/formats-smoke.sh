@@ -13,6 +13,20 @@ finish() {
   code=$?; collect
   if [ "$code" -ne 0 ]; then
     tail -100 "$evidence/instrumentation.txt" || true
+    # System.out from instrumentation is not guaranteed to appear in am instrument -w.
+    # Export each bounded/redacted saved node directly into the host job log instead.
+    python3 - "$evidence/failure-nodes.json" <<'PYFORMATFAILURE'
+from pathlib import Path
+import json,sys
+from rewrite.experiments.android_native.formats_report import failure_nodes
+try:
+    rows=failure_nodes(Path(sys.argv[1]))
+    print('FORMAT_UI_FAILURE_SNAPSHOT '+json.dumps(dict(nodes=len(rows),diagnostic_only=True,grants_acceptance=False)))
+    for row in rows:
+        print('FORMAT_UI_FAILURE_NODE '+json.dumps(row,ensure_ascii=True,sort_keys=True))
+except (OSError,ValueError,TypeError,KeyError):
+    print('FORMAT_UI_FAILURE_NODES_UNAVAILABLE: original test failure retained; no acceptance granted')
+PYFORMATFAILURE
     timeout 10 adb -s "$ANDROID_SERIAL" exec-out run-as com.thekain.video.rebuild tar -C files -cf - ui-failure-evidence > "$evidence/window-evidence.tar" 2>/dev/null || true
   fi
   exit "$code"

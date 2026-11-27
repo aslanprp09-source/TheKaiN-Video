@@ -4,12 +4,32 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import unittest
 from rewrite.experiments.android_native import test_bridge_report
-from rewrite.experiments.android_native.formats_report import ORACLE, inspect
+from rewrite.experiments.android_native.formats_report import ORACLE, inspect, failure_nodes
 
 
 class FormatsIntakeTest(unittest.TestCase):
+    def test_failure_export_is_bounded_redacted_and_never_grants_acceptance(self):
+        node = dict(id='variant_owned-90p', package='owned', text='https://example.invalid/media?token=fixture-secret',
+                    visible=True, clickable=True, enabled=True, focused=False, untrusted_extra='fixture-secret')
+        row = dict(api=26, bounded=True, nodes=[node])
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder)/'nodes.json'
+            path.write_text(json.dumps(row))
+            result = failure_nodes(path)
+            self.assertNotIn('fixture-secret', json.dumps(result))
+            self.assertEqual(result[0]['text'], 'OWNED_URL_REDACTED')
+            self.assertIs(result[0]['diagnostic_only'], True)
+            self.assertIs(result[0]['grants_acceptance'], False)
+            for bad in ([row]*101, dict(row, nodes=[node]*101), dict(row, api=True), dict(row, bounded=False),
+                        dict(row, nodes=[dict(node, text=7)]), dict(row, nodes=[dict(node, visible='true')])):
+                path.write_text(json.dumps(bad))
+                with self.assertRaises(ValueError): failure_nodes(path)
+            path.write_bytes(b' '* (256*1024+1))
+            with self.assertRaises(ValueError): failure_nodes(path)
+
     def fixture(self):
         _, main, _, source = test_bridge_report.BridgeIntakeTest().fixture()
         ui = dict(source_commit=source, api=36, pages=16384, production_ready=False,
