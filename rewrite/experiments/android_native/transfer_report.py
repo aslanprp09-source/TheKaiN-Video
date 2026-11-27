@@ -21,7 +21,7 @@ def inspect(remote,main,source,api,pages):
             assert len({proof['instance'] for proof in row['proofs']})==len(row['proofs'])
             allproofs+=row['proofs']
     assert remote['stream']['bytes']==2*1024*1024+17
-    assert all(remote['stream'][k] is True for k in ('exact_bytes','bounded_pipe','fresh')) and len(remote['stream']['proofs'])==2
+    assert all(remote['stream'][k] is True for k in ('exact_bytes','bounded_pipe','fresh','history_immutable')) and len(remote['stream']['proofs'])==2
     assert all(remote['security'][k] is True for k in ('scope_redirect','framing','size','truncation','http_errors','tls','fresh_after_each')) and len(remote['security']['proofs'])==20
     assert all(remote['lifecycle'][k] is True for k in ('actual_stuck_dns','cancel','deadline','explicit_failure','fresh_after_each'))
     assert len(remote['lifecycle']['proofs'])==4 and remote['lifecycle']['proofs'][2]['failure']==2

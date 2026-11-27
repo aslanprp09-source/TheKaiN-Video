@@ -80,7 +80,9 @@ public final class RemoteDownloadTest {
             assertNotEquals(0,t.endpointForTests().read(cap,1,0).error);
             assertEquals(1,server.getRequestCount());
         }finally {retire(t);}
-        fresh();record("stream",new JSONObject().put("bytes",body.length).put("exact_bytes",true).put("bounded_pipe",true).put("fresh",true));
+        long retiredAt=t.evidence().getLong("retire_ms");
+        fresh();assertEquals("A fresh operation rewrote the previous retirement measurement",retiredAt,t.evidence().getLong("retire_ms"));
+        record("stream",new JSONObject().put("bytes",body.length).put("exact_bytes",true).put("bounded_pipe",true).put("fresh",true).put("history_immutable",true));
     }
     @Test public void redirectTlsAndFramingLimitsRefuseBeforePublicationAndAllowFreshWorker() throws Exception {
         List<MockResponse> cases=Arrays.asList(

@@ -293,7 +293,7 @@ public final class RemoteHttpsTransport implements IsolatedTransport {
             if(previous!=null && previous.binder!=null && previous.binder.isBinderAlive())return IsolatedLease.BUSY;
             int status=lease.recover().status;
             if(status==IsolatedLease.RECOVERED || status==IsolatedLease.NO_PENDING) {
-                if(previous!=null) {previous.done=true;previous.leaseClean=true;previous.kernelGone=previous.hello!=null;previous.serviceGone=true;previous.finishedAt=SystemClock.elapsedRealtime();}
+                if(previous!=null && !previous.done) {previous.done=true;previous.leaseClean=true;previous.kernelGone=previous.hello!=null;previous.serviceGone=true;previous.finishedAt=SystemClock.elapsedRealtime();}
                 LIVE.compareAndSet(previous,null);
             }
             return status;

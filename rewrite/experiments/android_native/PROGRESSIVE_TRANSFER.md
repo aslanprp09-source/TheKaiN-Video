@@ -32,6 +32,7 @@ Public-address validation (all DNS answers), socket pinning, system TLS/hostname
 - Unchanged maximum operation deadline: **30 s**, shared as an absolute elapsed-realtime deadline across owner, Binder and Service. A shorter 5 s transfer test is additional coverage, not a changed analysis budget. Long media transfers are currently outside D1 acceptance.
 - Existing sampled network RSS maximum: **384 MiB**, CPU maximum **10 s**, sampled every **40 ms**. These are internal candidate limits, not physical-device budgets or instantaneous hard limits. Pipe/file cache accounting is not equivalent to RSS.
 - Existing retirement bound: **2500 ms**. Return to verification requires actual broker kernel absence, dead Binder, absent ServiceRecord, drained handshake/transfer RPC/read work, unchanged canary and exclusive lease guard. Unknown cleanup keeps admission blocked.
+- A fresh admission cannot rewrite an already completed worker's retirement timestamp. An additional regression compares the previous measurement before and after a genuinely fresh worker.
 - No fake pause/range resume. A partial nonresumable transfer after process loss fails closed; an explicit retry creates a new attempt/staging path. Existing failed-attempt staging retention is unchanged.
 - HTTP 403/404/429 remain distinct. No automatic retry is introduced around an unknown/long `Retry-After`. Safety/resource/cleanup failures have separate localized errors. No raw URL/query/header/exception is written to evidence.
 

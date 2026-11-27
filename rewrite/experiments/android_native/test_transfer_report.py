@@ -16,7 +16,7 @@ class TransferIntakeTest(unittest.TestCase):
             return p
         def row(name,count,flags):
             return dict(case=name,source_commit=source,api=36,pages=16384,production_ready=False,proofs=[process() for _ in range(count)],**{f:True for f in flags})
-        remote=dict(stream=row('stream',2,('exact_bytes','bounded_pipe','fresh')),
+        remote=dict(stream=row('stream',2,('exact_bytes','bounded_pipe','fresh','history_immutable')),
             security=row('security',20,('scope_redirect','framing','size','truncation','http_errors','tls','fresh_after_each')),
             lifecycle=row('lifecycle',4,('actual_stuck_dns','cancel','deadline','explicit_failure','fresh_after_each')),
             boundary=row('boundary',2,('capability','file_fd_refused','analysis_grant_refused')))
@@ -32,7 +32,7 @@ class TransferIntakeTest(unittest.TestCase):
 
     def test_no_pipeline_pass_without_real_receipt_playback_migration_and_death(self):
         remote,main,source=self.fixture();self.assertEqual(inspect(remote,main,source,36,16384)['additional_tests'],9)
-        for bad in ('missing','source','pages','pipe','binder_only','stale','not_transfer','no_deadline','no_death','hash','not_played','not_ui','receipt','migration','downgrade','corrupt_success','python_uid','http','truncated'):
+        for bad in ('missing','source','pages','pipe','binder_only','stale','history','not_transfer','no_deadline','no_death','hash','not_played','not_ui','receipt','migration','downgrade','corrupt_success','python_uid','http','truncated'):
             r,m=deepcopy(remote),deepcopy(main)
             if bad=='missing':del m['ui']
             elif bad=='source':m['ui']['source_commit']='e'*40
@@ -40,6 +40,7 @@ class TransferIntakeTest(unittest.TestCase):
             elif bad=='pipe':r['stream']['bounded_pipe']=False
             elif bad=='binder_only':r['stream']['proofs'][0]['kernel_process_gone']=False
             elif bad=='stale':r['stream']['proofs'][1]=deepcopy(r['stream']['proofs'][0])
+            elif bad=='history':r['stream']['history_immutable']=False
             elif bad=='not_transfer':m['ui']['proofs'][0]['transfer_only']=False
             elif bad=='no_deadline':m['lifecycle']['proofs'][2]['failure']=0
             elif bad=='no_death':m['lifecycle']['proofs'][2]['lease_clean']=False
