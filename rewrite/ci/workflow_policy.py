@@ -273,7 +273,11 @@ def check_native_lab(ci, lock):
         'source-build': 'python3 rewrite/experiments/android_native/build.py --work "$RUNNER_TEMP/native-lab"',
         'assemble-lab': '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \'platforms;android-35\' \'build-tools;35.0.0\'\n'
             'gradle --no-daemon -p rewrite/experiments/android_native/android :app:assembleDebug :app:assembleDebugAndroidTest :app:lintDebug :probe:assembleDebug :probe:lintDebug -PlabRuntimeDir="$RUNNER_TEMP/native-lab/package"\n'
-            'python3 rewrite/experiments/android_native/delivery.py pack --work "$RUNNER_TEMP/native-lab" --output "$RUNNER_TEMP/native-lab-delivery"\n',
+            'python3 rewrite/experiments/android_native/delivery.py pack --work "$RUNNER_TEMP/native-lab" --output "$RUNNER_TEMP/native-lab-delivery"\n'
+            'gradle --no-daemon -p rewrite/android :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest -PisolatedRuntimeDir="$RUNNER_TEMP/native-lab/package"\n'
+            'gradle --no-daemon -p rewrite/android :app:lintDebug -PisolatedRuntimeDir="$RUNNER_TEMP/native-lab/package"\n'
+            'python3 rewrite/android/tools/report-tests.py rewrite/android/app/build/test-results/testDebugUnitTest\n'
+            'python3 rewrite/experiments/android_native/main_delivery.py pack --folder "$RUNNER_TEMP/native-lab-delivery"\n',
         'build-diagnostics': 'python3 rewrite/experiments/android_native/diagnostics.py --work "$RUNNER_TEMP/native-lab"',
         'native-smoke': "bash rewrite/experiments/android_native/device-smoke.sh '${{ matrix.api }}' '${{ matrix.image }}' '${{ matrix.pages }}' "
             '"$RUNNER_TEMP/native-lab-delivery" "$RUNNER_TEMP/native-lab-evidence"',

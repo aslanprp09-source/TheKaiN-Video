@@ -15,6 +15,7 @@ static int write_all(const void *buffer,size_t count) {const char *p=buffer;whil
 static int put32(uint32_t n) {n=htonl(n);return write_all(&n,4);}
 static int get32(uint32_t *n) {if(read_all(n,4))return -1;*n=ntohl(*n);return 0;}
 static int put64(uint64_t n) {return put32((uint32_t)(n>>32)) || put32((uint32_t)n);}
+static int get64(uint64_t *n) {uint32_t high,low;if(get32(&high) || get32(&low))return -1;*n=((uint64_t)high<<32)|low;return 0;}
 static int guard_probe_stage(int stage) {return put32(10) || put32((uint32_t)stage);}
 /* Only the dedicated pre-Python negative operation installs this handler.
  * Verify the kernel's syscall number/code; do not classify an arbitrary exit as a denial. */
@@ -43,12 +44,33 @@ static PyObject *started(PyObject *module,PyObject *unused) {
     (void)module;(void)unused;uint32_t ack;
     if(put32(2) || get32(&ack) || ack)return gate_error("TOOL_FAILED");Py_RETURN_NONE;
 }
+static PyObject *fetch_info(PyObject *module,PyObject *args) {
+    (void)module;const char *url,*method;if(!PyArg_ParseTuple(args,"ss",&url,&method))return NULL;
+    size_t size=strlen(url);if(!size || size>2048 || (strcmp(method,"GET") && strcmp(method,"HEAD")))return gate_error("INVALID_URL");
+    uint32_t code,status,url_size,type_size,length;uint64_t declared;
+    if(put32(11) || put32(!strcmp(method,"HEAD")) || put32((uint32_t)size) || write_all(url,size)
+        || get32(&code) || get32(&status) || get64(&declared) || get32(&url_size) || get32(&type_size) || get32(&length)
+        || url_size>2048 || type_size>128 || length>512*1024)return gate_error("TOOL_FAILED");
+    if(code) {
+        if(status || url_size || type_size || length)return gate_error("TOOL_FAILED");
+        switch(code) {case 1:return gate_error("CANCELED");case 2:return gate_error("TIMEOUT");case 8:return gate_error("TLS_ERROR");
+            case 9:return gate_error("REQUEST_LIMIT");case 10:return gate_error("RESPONSE_LIMIT");case 14:return gate_error("OUT_OF_SCOPE_URL");
+            case 15:return gate_error("CPU_LIMIT");default:return gate_error("TOOL_FAILED");}
+    }
+    if(status!=200 || !url_size)return gate_error("TOOL_FAILED");
+    char final_url[2049],type[129];if(read_all(final_url,url_size) || read_all(type,type_size))return gate_error("TOOL_FAILED");
+    final_url[url_size]=0;type[type_size]=0;
+    if(strlen(final_url)!=url_size || strlen(type)!=type_size)return gate_error("TOOL_FAILED");
+    PyObject *body=PyBytes_FromStringAndSize(NULL,length);if(!body)return NULL;
+    if(read_all(PyBytes_AS_STRING(body),length)) {Py_DECREF(body);return gate_error("TOOL_FAILED");}
+    return Py_BuildValue("NssiL",body,final_url,type,(int)status,(long long)declared);
+}
 static PyObject *malformed(PyObject *module,PyObject *unused) {
     (void)module;(void)unused;uint32_t ack;
     if(put32(4) || put32(INT32_MAX))return gate_error("TOOL_FAILED");
     get32(&ack);return gate_error("TOOL_FAILED");
 }
-static PyMethodDef methods[]={{"memory_tls",memory_tls,METH_VARARGS,NULL},{"malformed",malformed,METH_NOARGS,NULL},{"fetch",fetch,METH_VARARGS,NULL},{"started",started,METH_NOARGS,NULL},{NULL,NULL,0,NULL}};
+static PyMethodDef methods[]={{"memory_tls",memory_tls,METH_VARARGS,NULL},{"malformed",malformed,METH_NOARGS,NULL},{"fetch",fetch,METH_VARARGS,NULL},{"fetch_info",fetch_info,METH_VARARGS,NULL},{"started",started,METH_NOARGS,NULL},{NULL,NULL,0,NULL}};
 static struct PyModuleDef transport={PyModuleDef_HEAD_INIT,"_thekain_transport",NULL,-1,methods};
 PyMODINIT_FUNC PyInit__thekain_transport(void) {
     PyObject *m=PyModule_Create(&transport);if(!m)return NULL;

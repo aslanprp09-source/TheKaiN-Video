@@ -64,6 +64,10 @@ def dispatch(raw):
                     'installed_native_extensions':os.path.dirname(ssl._ssl.__file__)==sys._thekain_native_directory,
                     'mimalloc':int(sysconfig.get_config_var('WITH_MIMALLOC')),
                     'openssl_handshake':openssl_memory_handshake()}
+        elif request.get('op')=='source_analyze':
+            from source_analysis import analyze
+            result=analyze(request['url'])
+            result.update(python=list(sys.version_info[:3]),page_size=os.sysconf('SC_PAGE_SIZE'),machine=os.uname().machine,pointer_bits=struct.calcsize('P')*8)
         elif request.get('op')=='analyze':
             import yt_dlp
             from yt_dlp.version import __version__

@@ -4,10 +4,12 @@ import com.thekain.video.domain.DirectLinks
 import com.thekain.video.domain.DirectRequest
 import java.net.URI
 
-enum class AnalysisError { INVALID_URL, UNSUPPORTED_SOURCE, NO_FORMATS, TOO_LARGE, FORBIDDEN, MISSING, RATE_LIMITED, TIMEOUT, NETWORK, UNKNOWN }
+enum class AnalysisError { INVALID_URL, UNSUPPORTED_SOURCE, NO_FORMATS, TOO_LARGE, FORBIDDEN, MISSING, RATE_LIMITED, TIMEOUT, NETWORK, UNKNOWN, BUSY, RESOURCE_LIMIT, ISOLATION_BLOCKED }
 class AnalysisFailure(val code: AnalysisError) : Exception(code.name)
 
-data class MediaVariant(val id: String, val request: DirectRequest, val bytes: Long? = null) {
+data class MediaVariant(val id: String, val request: DirectRequest, val bytes: Long? = null,
+                        val downloadAllowed: Boolean = true, val width: Int? = null, val height: Int? = null,
+                        val fps: Double? = null, val videoCodec: String? = null, val audioCodec: String? = null) {
     val audioOnly get() = request.mime.startsWith("audio/")
     val extension get() = request.name.substringAfterLast('.').uppercase(java.util.Locale.ROOT)
     override fun toString() = "MediaVariant(id=$id, mime=${request.mime}, bytes=$bytes)"

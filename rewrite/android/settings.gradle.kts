@@ -5,3 +5,4 @@ dependencyResolutionManagement {
 }
 rootProject.name = "TheKaiNVideoRebuild"
 include(":app")
+if (providers.gradleProperty("isolatedRuntimeDir").isPresent) include(":runtime-core")

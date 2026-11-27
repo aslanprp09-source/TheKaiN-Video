@@ -188,7 +188,7 @@ data class UiActions(
                 if (home.phase == AnalysisPhase.ANALYZING) OutlinedButton(onClick = actions.cancelAnalysis, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("cancel_analysis")) {
                     Text(stringResource(R.string.cancel_analysis))
                 } else Button(onClick = { keyboard?.hide(); focus.clearFocus(); if (ready) actions.download() else actions.analyze() },
-                    enabled = home.draft.isNotBlank() && !home.enqueuePending,
+                    enabled = home.draft.isNotBlank() && !home.enqueuePending && (!ready || home.variant?.downloadAllowed == true),
                     modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag(if (ready) "download_button" else "analyze_button"),
                     colors = ButtonDefaults.buttonColors(), shape = RoundedCornerShape(14.dp)) {
                     if (home.enqueuePending) CircularProgressIndicator(Modifier.size(20.dp), color = MaterialTheme.colorScheme.onPrimary, strokeWidth = 2.dp)
@@ -247,7 +247,7 @@ data class UiActions(
         }
     }
     Spacer(Modifier.height(4.dp))
-    Text(stringResource(if (choices.size == 1) R.string.single_format_reason else R.string.actual_formats_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Text(stringResource(if (!selected.downloadAllowed) R.string.format_download_unavailable else if (choices.size == 1) R.string.single_format_reason else R.string.actual_formats_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     Spacer(Modifier.height(14.dp))
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(painterResource(R.drawable.ic_library), null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -457,4 +457,7 @@ private fun AnalysisError.label() = when (this) {
     AnalysisError.TIMEOUT -> R.string.error_timeout
     AnalysisError.NETWORK -> R.string.error_network_lost
     AnalysisError.UNKNOWN -> R.string.error_unknown
+    AnalysisError.BUSY -> R.string.analysis_busy
+    AnalysisError.RESOURCE_LIMIT -> R.string.analysis_resource_limit
+    AnalysisError.ISOLATION_BLOCKED -> R.string.analysis_cleanup_blocked
 }

@@ -1,4 +1,8 @@
 <resources>
+    <string name="format_download_unavailable">Downloading this format is not available yet.</string>
+    <string name="analysis_busy">Wait for the previous analysis to finish.</string>
+    <string name="analysis_resource_limit">The source exceeded safe analysis limits.</string>
+    <string name="analysis_cleanup_blocked">The previous analysis could not finish safely. Restart the application.</string>
     <string name="app_name">TheKaiN Video</string>
     <string name="direct_hint">Direct HTTPS link to MP4, WebM, MOV, MP3 or M4A</string>
     <string name="direct_only">Direct files and static HTML5 video/audio only. Protected content and DRM are unsupported.</string>

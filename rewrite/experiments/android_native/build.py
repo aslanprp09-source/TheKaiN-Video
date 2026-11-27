@@ -219,6 +219,7 @@ def build(work, abis, source_cache=None, ndk_archive=None):
         shutil.copy2(ROOT/'thekain_lab.py',site/'thekain_lab.py')
         shutil.copy2(ROOT/'native_import.py',site/'native_import.py')
         shutil.copy2(ROOT/'bounded_transport.py',site/'bounded_transport.py')
+        shutil.copy2(ROOT/'source_analysis.py',site/'source_analysis.py')
         # Own JNI C only; no imported bootstrap that changes ART signal handling.
         run([tools/(pin['triplet']+'26-clang'),'-shared','-fPIC','-O2','-I'+str(prefix/'include/python3.14'),
              ROOT/'jni.c','-L'+str(prefix/'lib'),'-lpython3.14','-llog','-lm','-ldl',

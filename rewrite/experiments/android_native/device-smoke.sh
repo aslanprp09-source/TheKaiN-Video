@@ -76,11 +76,17 @@ memory=2048
 if [ "$pages" = 16384 ]; then memory=4096; fi
 "$ANDROID_HOME/emulator/emulator" -avd NativeLab -no-snapshot -no-window -no-audio -no-boot-anim -gpu swiftshader -memory "$memory" -cores 2 -port 5554 > "$evidence/emulator.txt" 2>&1 &
 timeout 180 adb -s "$ANDROID_SERIAL" wait-for-device
-for attempt in $(seq 1 180); do
-  if [ "$(adb -s "$ANDROID_SERIAL" shell getprop sys.boot_completed | tr -d '\r')" = 1 ]; then break; fi
+lab_boot_end=$((SECONDS+360)); lab_boot_ready=false
+while [ "$SECONDS" -lt "$lab_boot_end" ]; do
+  lab_boot_value=$(timeout 8 adb -s "$ANDROID_SERIAL" shell getprop sys.boot_completed 2> "$evidence/boot-adb-last.txt" | tr -d '\r' || true)
+  if [ "$lab_boot_value" = 1 ]; then lab_boot_ready=true; break; fi
   sleep 2
 done
-test "$(adb -s "$ANDROID_SERIAL" shell getprop sys.boot_completed | tr -d '\r')" = 1
+if [ "$lab_boot_ready" != true ]; then
+  echo "INFRA_BOOT_NOT_READY API=$api; tests_not_started=true" | tee "$evidence/boot-readiness.txt"
+  echo '::error::INFRA_BOOT_NOT_READY: emulator did not confirm boot within the existing 360s polling budget; no test PASS claimed'
+  exit 1
+fi
 adb -s "$ANDROID_SERIAL" shell getprop ro.build.version.sdk | tr -d '\r' > "$evidence/api.txt"
 if [ "$api" = 26 ]; then
   # API26 has no shell getconf. Read actual AT_PAGESZ from the 64-bit process auxv.
@@ -121,6 +127,10 @@ text=Path(sys.argv[1]).read_text();print(text)
 assert re.search(r'^OK \(1 test\)\s*$',text,re.M), 'Isolated UID real JNI/IPC bootstrap failed; full matrix is NOT passed'
 assert not any(s in text for s in ('FAILURES!!!','shortMsg=','INSTRUMENTATION_FAILED'))
 PYBOOT
+# Exercise the new boundary before the lengthy original suite for prompt actionable failures.
+# A green job still requires every original73 gate below as well as these 11 new tests.
+adb -s "$ANDROID_SERIAL" install -r -t "$delivery/probe.apk"
+bash rewrite/experiments/android_native/bridge-smoke.sh "$api" "$pages" "$delivery" "$evidence"
 timeout 600 adb -s "$ANDROID_SERIAL" shell am instrument -w -e class com.thekain.runtime.lab.NativeLabTest,com.thekain.runtime.lab.RuntimeProcessTest,com.thekain.runtime.lab.LabLifecycleTest com.thekain.runtime.lab.test/androidx.test.runner.AndroidJUnitRunner > "$evidence/instrumentation.txt" &
 driver=$!
 bash rewrite/experiments/android_native/sample-meminfo.sh "$driver" "$evidence" &

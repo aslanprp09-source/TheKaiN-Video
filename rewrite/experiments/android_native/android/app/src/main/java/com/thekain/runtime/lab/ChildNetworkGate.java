@@ -9,7 +9,7 @@ import java.security.cert.CertificateFactory;
 import java.util.concurrent.*;
 
 /** HTTPS runs on a prestarted Java thread, outside the fenced Python thread. */
-final class ChildNetworkGate implements AutoCloseable {
+final class ChildNetworkGate implements IsolatedTransport {
     static final int MAX_REQUESTS=12,MAX_RESPONSE=512*1024,MAX_TOTAL=2*1024*1024;
     public static final class Failure extends Exception {
         public final int code;
@@ -153,5 +153,6 @@ final class ChildNetworkGate implements AutoCloseable {
             disconnectTask=new CompletableFuture<Void>();
         }
     }
-    synchronized boolean terminated() {return closed && io.isTerminated() && disconnectTask!=null && disconnectTask.isDone();}
+    public synchronized boolean terminated() {return closed && io.isTerminated() && disconnectTask!=null && disconnectTask.isDone();}
+    public IsolatedReply reply(String url,String method) throws Failure {return new IsolatedReply(RuntimeResult.OK,fetch(url,method));}
 }

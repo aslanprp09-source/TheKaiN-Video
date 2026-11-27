@@ -132,7 +132,7 @@ public final class NativeRuntime implements AutoCloseable {
         long submitted=SystemClock.elapsedRealtime();
         String id=UUID.randomUUID().toString();RuntimeRequest request;
         try {
-            if(timeoutMs<100 || timeoutMs>MAX_DEADLINE_MS)throw new IllegalArgumentException();
+            if(timeoutMs<100 || timeoutMs>MAX_DEADLINE_MS || operation>RuntimeRequest.BYTE_FLOOD)throw new IllegalArgumentException();
             request=new RuntimeRequest(id,operation,url,ca,submitted+timeoutMs,rss,headroom);
         } catch(RuntimeException e) {
             request=new RuntimeRequest(id,RuntimeRequest.PROBE,null,RuntimeRequest.CA_OWN,

@@ -33,6 +33,18 @@ final class IsolatedResources {
         finally {if(file.exists())file.delete();}
     }
     static IsolatedInput prepare(Context context,RuntimeRequest request,int mode,File fixtureHome,IsolatedLease.Guard guard) throws Exception {
+        return prepare(context,request,mode,fixtureHome,guard,()->false);
+    }
+    private static void check(RuntimeRequest request,java.util.function.BooleanSupplier stop) throws IOException {
+        if(stop.getAsBoolean() || Thread.currentThread().isInterrupted())throw new IOException("RESOURCE_RETIRED");
+        if(SystemClock.elapsedRealtime()>=request.deadline)throw new IOException("RESOURCE_DEADLINE");
+    }
+    private static byte[] checkedBytes(InputStream in,int max,RuntimeRequest request,java.util.function.BooleanSupplier stop) throws Exception {
+        ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] b=new byte[16384];int n;
+        for(;;) {check(request,stop);n=in.read(b);if(n<0)break;if(out.size()+n>max)throw new IOException("RESOURCE_LIMIT");out.write(b,0,n);}
+        return out.toByteArray();
+    }
+    static IsolatedInput prepare(Context context,RuntimeRequest request,int mode,File fixtureHome,IsolatedLease.Guard guard,java.util.function.BooleanSupplier stop) throws Exception {
         if(Looper.myLooper()==Looper.getMainLooper())throw new IOException("BACKGROUND_REQUIRED");
         String abi=Build.SUPPORTED_ABIS[0];
         if(!abi.equals("x86_64") && !abi.equals("arm64-v8a"))throw new IOException("ABI");
@@ -47,7 +59,7 @@ final class IsolatedResources {
             for(Iterator<String> it=inventory.keys();it.hasNext();)entries.add(it.next());Collections.sort(entries);
             try(ZipOutputStream out=new ZipOutputStream(new FileOutputStream(zip))) {
                 for(String entry:entries) {
-                    if(SystemClock.elapsedRealtime()>=request.deadline)throw new IOException("RESOURCE_DEADLINE");
+                    check(request,stop);
                     String std="lib/python3.14/",site=std+"site-packages/";
                     if(!entry.startsWith(std) || entry.contains("..") || entry.contains("\\"))throw new IOException("RESOURCE_PATH");
                     String name=entry.startsWith(site)?entry.substring(site.length()):entry.substring(std.length());
@@ -55,22 +67,29 @@ final class IsolatedResources {
                     JSONObject expected=inventory.getJSONObject(entry);long length=expected.getLong("bytes");total+=length;
                     if(length<0 || length>32*1024*1024 || total>150L*1024*1024)throw new IOException("RESOURCE_BUDGET");
                     byte[] raw;
-                    try(InputStream in=context.getAssets().open("runtime/"+abi+"/"+entry)) {raw=bytes(in,(int)length);}
+                    try(InputStream in=context.getAssets().open("runtime/"+abi+"/"+entry)) {raw=checkedBytes(in,(int)length,request,stop);}
+                    check(request,stop);
                     if(raw.length!=length || !hex(MessageDigest.getInstance("SHA-256").digest(raw)).equals(expected.getString("sha256")))
                         throw new IOException("RESOURCE_HASH");
                     CRC32 crc=new CRC32();crc.update(raw);ZipEntry e=new ZipEntry(name);e.setMethod(ZipEntry.STORED);
                     e.setSize(raw.length);e.setCompressedSize(raw.length);e.setCrc(crc.getValue());e.setTime(0);
-                    out.putNextEntry(e);out.write(raw);out.closeEntry();
+                    out.putNextEntry(e);for(int offset=0;offset<raw.length;offset+=16384) {check(request,stop);out.write(raw,offset,Math.min(16384,raw.length-offset));}out.closeEntry();
                 }
             }
             long size=zip.length();if(size<=0 || size>160L*1024*1024)throw new IOException("ZIP_LIMIT");
             MessageDigest hash=MessageDigest.getInstance("SHA-256");
-            try(InputStream in=new FileInputStream(zip)) {byte[] b=new byte[16384];int n;while((n=in.read(b))!=-1)hash.update(b,0,n);}
+            try(InputStream in=new FileInputStream(zip)) {byte[] b=new byte[16384];int n;while((n=in.read(b))!=-1) {check(request,stop);hash.update(b,0,n);}}
             resources=ParcelFileDescriptor.open(zip,ParcelFileDescriptor.MODE_READ_ONLY);
             // These are public, ephemeral owned TLS-fixture credentials, never release signing material.
-            File home=fixtureHome==null?RuntimeAssets.prepare(context):fixtureHome;
-            try(InputStream in=new FileInputStream(new File(home,"fixtures/owned-ca.pem"))) {certificate=snapshot(context,bytes(in,16384));}
-            try(InputStream in=new FileInputStream(new File(home,"fixtures/owned-key.pem"))) {key=snapshot(context,bytes(in,16384));}
+            if(request.operation==RuntimeRequest.SOURCE_ANALYZE) {
+                // No TLS fixture credentials or mutable Python installation are needed in the product path.
+                // Fixed nonempty sealed sentinels retain the existing exec-FD layout; memory TLS probing is not requested.
+                certificate=snapshot(context,new byte[]{0});key=snapshot(context,new byte[]{0});
+            }else {
+                File home=fixtureHome==null?RuntimeAssets.prepare(context):fixtureHome;
+                try(InputStream in=new FileInputStream(new File(home,"fixtures/owned-ca.pem"))) {certificate=snapshot(context,bytes(in,16384));}
+                try(InputStream in=new FileInputStream(new File(home,"fixtures/owned-key.pem"))) {key=snapshot(context,bytes(in,16384));}
+            }
             String digest=hex(hash.digest());if(mode==IsolatedInput.BAD_DIGEST)digest="0000000000000000000000000000000000000000000000000000000000000000";
             if(!zip.delete())throw new IOException("RESOURCE_UNLINK");
             return new IsolatedInput(request,mode,resources,certificate,key,size,digest,context.getFileStreamPath("isolated-owner-canary").getAbsolutePath(),guard);

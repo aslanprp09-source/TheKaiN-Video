@@ -16,6 +16,7 @@ public final class IsolatedRuntime implements AutoCloseable {
     private static final long SAMPLE=40,CLEANUP=2500;
     private final Context context;
     private final File fixtureHome;
+    private final IsolatedTransport.Factory sourceTransport;
     private final IsolatedLease lease;
     private final Executor notificationExecutor;
     private final HandlerThread thread=new HandlerThread("isolated-supervisor");
@@ -34,11 +35,18 @@ public final class IsolatedRuntime implements AutoCloseable {
     }
     // Test seam for delayed notifications, never an IPC-controlled executor.
     IsolatedRuntime(Context context,File fixtureHome,Executor notificationExecutor) {
+        this(context,fixtureHome,notificationExecutor,null);
+    }
+    public static IsolatedRuntime forSourceAnalysis(Context context,IsolatedTransport.Factory transport) {
+        if(transport==null)throw new IllegalArgumentException("SOURCE_TRANSPORT_REQUIRED");
+        return new IsolatedRuntime(context,null,null,transport);
+    }
+    private IsolatedRuntime(Context context,File fixtureHome,Executor notificationExecutor,IsolatedTransport.Factory sourceTransport) {
         try {
             if(!ProcessIdentity.read("/proc/self/cmdline",512).split("\u0000",2)[0].equals(context.getPackageName()))
                 throw new IllegalStateException("OWNER_REQUIRED");
         }catch(IOException e) {throw new IllegalStateException("OWNER_IDENTITY_UNAVAILABLE",e);}
-        this.context=context.getApplicationContext();this.fixtureHome=fixtureHome;this.notificationExecutor=notificationExecutor;lease=new IsolatedLease(this.context);
+        this.context=context.getApplicationContext();this.fixtureHome=fixtureHome;this.sourceTransport=sourceTransport;this.notificationExecutor=notificationExecutor;lease=new IsolatedLease(this.context);
         thread.start();supervisor=new Handler(thread.getLooper());
     }
     public final class Operation {
@@ -55,7 +63,7 @@ public final class IsolatedRuntime implements AutoCloseable {
         final AtomicBoolean fetching=new AtomicBoolean();
         volatile boolean canceled,retiring,finished,preparing,configuring,canaryWritten;
         volatile int requests;volatile long payload;
-        volatile ChildNetworkGate gate;
+        volatile IsolatedTransport gate;
         volatile Snapshot kernel;IBinder binder;IIsolatedOwner ownerEndpoint;
         IResourceOwner observerEndpoint;IIsolatedWorker worker;
         volatile int peerPid,peerUid,observerPid,observerUid;volatile long observerStart,lastSample,sequence,observerPeak,observerCpu;
@@ -87,6 +95,9 @@ public final class IsolatedRuntime implements AutoCloseable {
         return notificationExecutor==null?source.thenApplyAsync(v->v):source.thenApplyAsync(v->v,notificationExecutor);
     }
     public static final class Outcome {
+        private final IsolatedTransport transport;
+        /** Snapshot from this exact operation, off the supervisor; never a mutable global 'latest' pointer. */
+        public JSONObject transportEvidence() throws Exception {return transport==null?null:transport.evidence();}
         public final RuntimeResult result;
         public final int workerPid,workerUid,observerPid,observerUid,securityDenials,requests;
         public final long observerStartTicks,observerPeakRssBytes,observerCpuTicks;
@@ -96,6 +107,7 @@ public final class IsolatedRuntime implements AutoCloseable {
         public final long startTicks,samples,peakRssBytes,cpuTicks,observedCpuMs,virtualBefore,addressLimit,cpuLimit;
         public final long elapsedMs,retireToExitMs,cancelToExitMs,payloadBytes,resourceInputBytes;
         Outcome(Operation o,boolean dead) {
+            transport=o.gate;
             result=o.result!=null && o.error==o.result.error?o.result:new RuntimeResult(o.id,o.error);
             workerPid=o.kernel==null?0:o.kernel.pid;workerUid=o.kernel==null?-1:o.kernel.uid;
             startTicks=o.kernel==null?0:o.kernel.start;instance=o.instance;securityDenials=o.denials;
@@ -110,7 +122,12 @@ public final class IsolatedRuntime implements AutoCloseable {
             requests=o.requests;payloadBytes=o.payload;resourceInputBytes=o.resourceBytes;
         }
     }
+    public Operation analyzeSource(String url,long timeoutMs) {
+        if(sourceTransport==null)throw new IllegalStateException("SOURCE_TRANSPORT_REQUIRED");
+        return submit(RuntimeRequest.SOURCE_ANALYZE,url,RuntimeRequest.CA_OWN,timeoutMs,RuntimeRequest.MAX_RSS,IsolatedInput.NORMAL);
+    }
     public Operation submit(int operation,String url,int ca,long timeoutMs) {
+        if(operation==RuntimeRequest.SOURCE_ANALYZE)throw new IllegalArgumentException("USE_SOURCE_ENTRYPOINT");
         return submit(operation,url,ca,timeoutMs,RuntimeRequest.MAX_RSS,IsolatedInput.NORMAL);
     }
     synchronized Operation submit(int operation,String url,int ca,long timeoutMs,long rss,int mode) {
@@ -130,23 +147,26 @@ public final class IsolatedRuntime implements AutoCloseable {
         }
     }
     private void prepare(Operation o) {
-        IsolatedInput input=null;ChildNetworkGate gate=null;
+        IsolatedInput input=null;IsolatedTransport gate=null;
         try {
             try(FileOutputStream out=context.openFileOutput("isolated-owner-canary",Context.MODE_PRIVATE)) {
                 out.write(("owner-only-"+o.id).getBytes(java.nio.charset.StandardCharsets.US_ASCII));
             }
             o.canaryWritten=true;
             o.guard=lease.createGuard(o.id);o.leaseObservation="GUARD_CREATED";
-            input=IsolatedResources.prepare(context,o.request,o.mode,fixtureHome,o.guard);
+            input=IsolatedResources.prepare(context,o.request,o.mode,fixtureHome,o.guard,()->o.canceled || o.retiring);
+            if(o.canceled || o.retiring)throw new IOException("RESOURCE_RETIRED");
             // Counters and all HTTPS IO belong to the trusted owner, not the isolated UID.
-            gate=new ChildNetworkGate(o.request,new IRuntimeCallback.Stub() {
+            gate=o.request.operation==RuntimeRequest.SOURCE_ANALYZE
+                ?sourceTransport.create(context,o.request,(requests,bytes)->{o.requests=requests;o.payload=bytes;})
+                :new ChildNetworkGate(o.request,new IRuntimeCallback.Stub() {
                 public boolean ready(String id,String instance,long ticks) {return false;}
                 public void phase(String id,int phase) { }
                 public void limits(String id,long before,long limit,long cpu) { }
                 public void completed(RuntimeResult result) { }
                 public void network(String id,int requests,long bytes) {o.requests=requests;o.payload=bytes;}
             },fixtureHome==null?RuntimeAssets.prepare(context):fixtureHome);
-            IsolatedInput prepared=input;ChildNetworkGate transport=gate;
+            IsolatedInput prepared=input;IsolatedTransport transport=gate;
             supervisor.post(()->{o.gate=transport;o.resourceBytes=prepared.bytes;o.preparing=false;
                 if(!current(o) || o.retiring) {prepared.close();transport.close();return;}
                 try {lease.reserve(o.id,o.guard);o.leaseObservation="RESERVED";bind(o,prepared);}
@@ -273,14 +293,15 @@ public final class IsolatedRuntime implements AutoCloseable {
                 if(!sender(o,capability) || o.kernel==null || o.gate==null)return new IsolatedReply(RuntimeResult.IPC_ERROR,null);
                 if(SystemClock.elapsedRealtime()>=o.request.deadline)return new IsolatedReply(RuntimeResult.TIMEOUT,null);
                 if(!("GET".equals(method)||"HEAD".equals(method)))return new IsolatedReply(RuntimeResult.INVALID_REQUEST,null);
-                try {RuntimeRequest.validateUrl(url);if(o.request.url==null || new java.net.URI(url).getPort()!=new java.net.URI(o.request.url).getPort())
+                try {if(o.request.operation==RuntimeRequest.SOURCE_ANALYZE)RuntimeRequest.validateSourceUrl(url);else RuntimeRequest.validateUrl(url);
+                    if(o.request.url==null || o.request.operation!=RuntimeRequest.SOURCE_ANALYZE && new java.net.URI(url).getPort()!=new java.net.URI(o.request.url).getPort())
                     return new IsolatedReply(RuntimeResult.OUT_OF_SCOPE,null);}
                 catch(Exception e) {return new IsolatedReply(RuntimeResult.OUT_OF_SCOPE,null);}
                 if(!o.fetching.compareAndSet(false,true))return new IsolatedReply(RuntimeResult.BUSY,null);
                 try {
-                    byte[] body=o.gate.fetch(url,method);
+                    IsolatedReply reply=o.gate.reply(url,method);
                     if(!sender(o,capability) || SystemClock.elapsedRealtime()>=o.request.deadline)return new IsolatedReply(RuntimeResult.CANCELED,null);
-                    return new IsolatedReply(RuntimeResult.OK,body);
+                    return reply;
                 }catch(ChildNetworkGate.Failure e) {return new IsolatedReply(e.code,null);}
                 finally {o.fetching.set(false);}
             }
@@ -296,9 +317,14 @@ public final class IsolatedRuntime implements AutoCloseable {
                     try {
                         if(result==null || !o.id.equals(result.id) || denials<0 || denials>255)throw new IllegalArgumentException();
                         result.validate();
+                        if(result.error==RuntimeResult.OK && o.request.operation==RuntimeRequest.SOURCE_ANALYZE) {
+                            if(result.analysis==null || !java.net.URI.create(o.request.url).getHost().equals(result.analysis.host))throw new IllegalArgumentException("SOURCE_RESULT_REQUIRED");
+                            try {sourceTransport.validate(result.analysis);}catch(Exception invalid) {throw new IllegalArgumentException("SOURCE_RESULT_SCOPE");}
+                        }
                         if(result.error==RuntimeResult.OK && (o.childProtection!=255 || !o.observerNonDumpable || o.procFailureSince>=0 || SystemClock.elapsedRealtime()-o.lastSample>1000 || !o.pythonEntered || o.address<=0 || o.cpuLimit<=0
                                 || result.pythonCalls!=1 || denials!=(o.mode==IsolatedInput.SECURITY?255:31)))
                             throw new IllegalArgumentException("INCOMPLETE_SUCCESS_PROOF");
+                        if(o.gate!=null && o.gate.failure()!=RuntimeResult.OK)result=new RuntimeResult(o.id,o.gate.failure());
                         o.result=result.error==RuntimeResult.OK && o.peak>o.request.rssLimit
                             ?new RuntimeResult(o.id,RuntimeResult.MEMORY_LIMIT):result;o.denials=denials;
                     }catch(RuntimeException e) {o.result=new RuntimeResult(o.id,RuntimeResult.IPC_ERROR);}
@@ -403,7 +429,7 @@ public final class IsolatedRuntime implements AutoCloseable {
             List<ActivityManager.RunningServiceInfo> services=manager.getRunningServices(100);
             if(services==null)return true;
             for(ActivityManager.RunningServiceInfo service:services)
-                if(service.service!=null && type.getName().equals(service.service.getClassName()))return true;
+                if(service.service!=null && context.getPackageName().equals(service.service.getPackageName()) && type.getName().equals(service.service.getClassName()))return true;
             return false;
         }catch(RuntimeException e) {return true;}
     }
@@ -434,6 +460,7 @@ public final class IsolatedRuntime implements AutoCloseable {
         synchronized(this) {
             if(!leaseClean)o.error=RuntimeResult.CLEANUP_FAILED;
             else if(o.error==0 && SystemClock.elapsedRealtime()>=o.request.deadline)o.error=RuntimeResult.TIMEOUT;
+            else if(o.error==0 && o.gate!=null && o.gate.failure()!=RuntimeResult.OK)o.error=o.gate.failure();
             o.finished=true;o.trace.mark("COMPLETED");Outcome out=new Outcome(o,dead);record(o,out);
             if(leaseClean) {synchronized(IsolatedLease.COORDINATOR) {
                 o.ownerEndpoint=null;o.observerEndpoint=null;o.worker=null;active=null;LIVE=null;LEASE.set(false);

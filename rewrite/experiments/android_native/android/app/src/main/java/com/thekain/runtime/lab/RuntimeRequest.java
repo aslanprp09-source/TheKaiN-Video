@@ -7,7 +7,7 @@ import java.net.URI;
 /** The broker creates IDs/deadlines; callers choose only these fixed lab operations. */
 public final class RuntimeRequest implements Parcelable {
     public static final int PROBE=1, ANALYZE=2, BLOCK_EXEC=3, HANG=4, CRASH=5,
-        MEMORY=6, BAD_REPLY=7, OUTPUT_FLOOD=8, REQUEST_FLOOD=9, DIRECT_SOCKET=10, BYTE_FLOOD=11;
+        MEMORY=6, BAD_REPLY=7, OUTPUT_FLOOD=8, REQUEST_FLOOD=9, DIRECT_SOCKET=10, BYTE_FLOOD=11, SOURCE_ANALYZE=12;
     public static final int CA_OWN=1, CA_WRONG=2;
     public static final long MAX_RSS=384L*1024*1024, MAX_HEADROOM=256L*1024*1024;
     public final String id, url;
@@ -23,12 +23,21 @@ public final class RuntimeRequest implements Parcelable {
         ca=in.readInt();deadline=in.readLong();rssLimit=in.readLong();virtualHeadroom=in.readLong();validate();
     }
     void validate() {
-        Wire.check(id!=null && id.matches("[0-9a-f-]{36}") && operation>=PROBE && operation<=BYTE_FLOOD);
+        Wire.check(id!=null && id.matches("[0-9a-f-]{36}") && operation>=PROBE && operation<=SOURCE_ANALYZE);
         Wire.check(ca==CA_OWN || ca==CA_WRONG);
         Wire.check(deadline>0 && rssLimit>=64L*1024*1024 && rssLimit<=MAX_RSS);
         Wire.check(virtualHeadroom>=64L*1024*1024 && virtualHeadroom<=MAX_HEADROOM);
-        if(operation==ANALYZE || operation==REQUEST_FLOOD || operation==BYTE_FLOOD) validateUrl(url);
+        if(operation==SOURCE_ANALYZE)validateSourceUrl(url);
+        else if(operation==ANALYZE || operation==REQUEST_FLOOD || operation==BYTE_FLOOD) validateUrl(url);
         else Wire.check(url==null);
+    }
+    static void validateSourceUrl(String url) {
+        Wire.check(url!=null && url.length()<=2048 && url.chars().allMatch(c->c>=33 && c<127) && !url.contains("\\"));
+        try {
+            URI uri=new URI(url);
+            Wire.check("https".equals(uri.getScheme()) && uri.getHost()!=null && uri.getRawUserInfo()==null && uri.getRawFragment()==null
+                && uri.getPort()!=0 && uri.getPort()>=-1 && uri.getPort()<=65535);
+        }catch(java.net.URISyntaxException e) {Wire.check(false);}
     }
     static void validateUrl(String url) {
         Wire.check(url!=null && url.length()<=2048 && url.chars().allMatch(c->c>=33 && c<127));

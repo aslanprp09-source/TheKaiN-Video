@@ -14,6 +14,17 @@ class WorkflowPolicyTest(unittest.TestCase):
     def test_committed_workflows_meet_the_policy(self):
         self.assertEqual(check(self.docs, self.lock), [])
 
+    def test_internal_main_bridge_cannot_skip_receipts_unit_checks_or_use_release_variant(self):
+        for variant in ('no-receipt','no-jvm','no-lint','release','foreign-package'):
+            self.setUp();steps=self.docs['.github/workflows/rewrite-ci.yml']['jobs']['native-runtime-build']['steps']
+            build=next(s for s in steps if s.get('id')=='assemble-lab')
+            if variant=='no-receipt':build['run']=build['run'].replace('python3 rewrite/experiments/android_native/main_delivery.py pack','echo disabled')
+            elif variant=='no-jvm':build['run']=build['run'].replace(':app:testDebugUnitTest','')
+            elif variant=='no-lint':build['run']=build['run'].replace('gradle --no-daemon -p rewrite/android :app:lintDebug','echo skipped')
+            elif variant=='release':build['run']=build['run'].replace(':app:assembleDebug',':app:assembleRelease')
+            else:build['run']=build['run'].replace('$RUNNER_TEMP/native-lab/package','/tmp/foreign-runtime')
+            with self.subTest(variant=variant):self.assertTrue(check(self.docs,self.lock))
+
     def test_native_lab_cannot_gain_signing_inputs_foreign_artifacts_or_skip_real_devices(self):
         for variant in ('default-on', 'automatic', 'conflict', 'environment', 'token', 'write',
                         'extra-command', 'skip', 'cache', 'artifact', 'run', 'matrix', 'ref', 'upload'):

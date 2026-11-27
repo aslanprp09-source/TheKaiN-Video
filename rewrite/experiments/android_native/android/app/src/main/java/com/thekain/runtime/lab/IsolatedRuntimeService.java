@@ -31,7 +31,9 @@ public final class IsolatedRuntimeService extends Service {
     static boolean inWorker() {
         try {
             String name=ProcessIdentity.read("/proc/self/cmdline",512).split("\u0000",2)[0];
-            return (name.equals(NAME) || name.equals(COMPONENT_PROCESS_NAME)) && android.os.Process.myUid()%100000>=90000;
+            String product="com.thekain.video.rebuild:isolated_python";
+            return (name.equals(NAME) || name.equals(COMPONENT_PROCESS_NAME) || name.equals(product)
+                || name.equals(product+":com.thekain.runtime.lab.IsolatedRuntimeService")) && android.os.Process.myUid()%100000>=90000;
         }catch(IOException e) {return false;}
     }
     private static void die() {
@@ -155,7 +157,7 @@ public final class IsolatedRuntimeService extends Service {
                             rejected?RuntimeResult.IPC_ERROR:RuntimeResult.NATIVE_FAILED),0);
                         return; // Unexpected descriptor acceptance must fail the strict test.
                     }
-                    String[] names={"","probe","analyze","block_exec","hang","crash","memory","bad_reply","output_flood","request_flood","direct_socket","byte_flood"};
+                    String[] names={"","probe","analyze","block_exec","hang","crash","memory","bad_reply","output_flood","request_flood","direct_socket","byte_flood","source_analyze"};
                     JSONObject json=new JSONObject().put("op",input.mode==IsolatedInput.SECURITY?"isolated_security":input.mode==IsolatedInput.CHILD_FRAME?"malformed_channel":names[request.operation]);
                     if(request.url!=null)json.put("url",request.url);
                     if(input.mode==IsolatedInput.SECURITY)json.put("owner_canary",input.canaryPath);
@@ -197,12 +199,19 @@ public final class IsolatedRuntimeService extends Service {
                             owner.completed(request.id,new RuntimeResult(request.id,proof==1?RuntimeResult.INVALID_REQUEST:RuntimeResult.WORKER_DIED),0);return;
                         }else if(tag==2 && limits && !started) {
                             started=true;owner.phase(request.id);out.writeInt(0);out.flush();
-                        }else if(tag==1 && started && ++fetches<=13) {
+                        }else if((tag==1 || tag==11 && request.operation==RuntimeRequest.SOURCE_ANALYZE) && started && ++fetches<=13) {
                             int method=in.readInt(),length=in.readInt();
                             if((method!=0 && method!=1) || length<1 || length>2048)throw new IOException("CHILD_REQUEST_BOUNDS");
                             byte[] address=new byte[length];in.readFully(address);
                             IsolatedReply reply=owner.fetch(request.id,new String(address,java.nio.charset.StandardCharsets.US_ASCII),method==1?"HEAD":"GET");
-                            out.writeInt(reply.error);out.writeInt(reply.body==null?0:reply.body.length);if(reply.body!=null)out.write(reply.body);out.flush();
+                            out.writeInt(reply.error);
+                            if(tag==11) {
+                                byte[] finalUrl=reply.finalUrl==null?new byte[0]:reply.finalUrl.getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+                                byte[] type=reply.contentType==null?new byte[0]:reply.contentType.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                                out.writeInt(reply.status);out.writeLong(reply.declaredBytes);out.writeInt(finalUrl.length);out.writeInt(type.length);
+                                out.writeInt(reply.body==null?0:reply.body.length);out.write(finalUrl);out.write(type);if(reply.body!=null)out.write(reply.body);
+                            }else {out.writeInt(reply.body==null?0:reply.body.length);if(reply.body!=null)out.write(reply.body);}
+                            out.flush();
                         }else if(tag==4 && started) {
                             int length=in.readInt();if(length<1 || length>65536)throw new IOException("CHILD_OUTPUT_BOUNDS");
                             byte[] raw=new byte[length];in.readFully(raw);String text=new String(raw,java.nio.charset.StandardCharsets.UTF_8);

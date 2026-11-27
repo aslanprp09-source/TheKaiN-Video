@@ -33,7 +33,9 @@ public final class IsolatedInput implements Parcelable,AutoCloseable {
         Wire.check(guard!=null && guardDevice>=0 && guardInode>0);
         Wire.check(resources!=null && certificate!=null && key!=null && bytes>0 && bytes<=160L*1024*1024);
         Wire.check(canaryPath!=null && canaryPath.length()<=512 && canaryPath.startsWith("/")
-            && canaryPath.endsWith("/com.thekain.runtime.lab/files/isolated-owner-canary") && !canaryPath.contains("..") && canaryPath.indexOf(0)<0);
+            && (canaryPath.endsWith("/com.thekain.runtime.lab/files/isolated-owner-canary")
+                || canaryPath.endsWith("/com.thekain.video.rebuild/files/isolated-owner-canary"))
+            && !canaryPath.contains("..") && canaryPath.indexOf(0)<0);
         Wire.check(sha256!=null && sha256.matches("[0-9a-f]{64}"));
     }
     @Override public void writeToParcel(Parcel p,int flags) {

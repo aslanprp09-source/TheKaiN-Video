@@ -1,0 +1,6 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <service android:name="com.thekain.runtime.lab.IsolatedRuntimeService" android:process=":isolated_python" android:exported="false" android:isolatedProcess="true" android:stopWithTask="true"/>
+        <service android:name="com.thekain.runtime.lab.RemoteHttpsService" android:process=":https_broker" android:exported="false" android:stopWithTask="true"/>
+    </application>
+</manifest>

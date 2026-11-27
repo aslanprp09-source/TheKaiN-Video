@@ -22,6 +22,7 @@ final class IsolatedLease {
     private static final int LINUX_O_CLOEXEC=0x80000;
     final AtomicFile file;
     final Context context;
+    private final String prefix;
     static final class Guard implements AutoCloseable {
         final String id;final ParcelFileDescriptor fd;final long device,inode;
         Guard(String id,ParcelFileDescriptor fd,long device,long inode) {this.id=id;this.fd=fd;this.device=device;this.inode=inode;}
@@ -31,12 +32,17 @@ final class IsolatedLease {
         final int status;final String id;final int previousOwner;final long device,inode;
         Recovery(int status,String id,int owner,long device,long inode) {this.status=status;this.id=id;previousOwner=owner;this.device=device;this.inode=inode;}
     }
-    IsolatedLease(Context context) {this.context=context;file=new AtomicFile(new File(context.getFilesDir(),"isolated-pending.json"));}
+    IsolatedLease(Context context) {this(context,"isolated");}
+    IsolatedLease(Context context,String prefix) {
+        if(!prefix.equals("isolated") && !prefix.equals("https"))throw new IllegalArgumentException("LEASE_NAMESPACE");
+        this.context=context;this.prefix=prefix;file=new AtomicFile(new File(context.getFilesDir(),prefix+"-pending.json"));
+    }
     private int boot() throws Exception {
         int count=Settings.Global.getInt(context.getContentResolver(),Settings.Global.BOOT_COUNT);
         if(count<0)throw new IOException("BOOT_COUNT_UNAVAILABLE");return count;
     }
     private boolean exists() {return file.getBaseFile().exists() || new File(file.getBaseFile()+".bak").exists();}
+    boolean pending() {synchronized(COORDINATOR) {return exists();}}
     private JSONObject read() throws Exception {
         try(InputStream in=file.openRead()) {return new JSONObject(new String(IsolatedResources.bytes(in,4096),StandardCharsets.UTF_8));}
     }
@@ -47,7 +53,7 @@ final class IsolatedLease {
     private File guardFile(String id) throws IOException {
         try {if(!UUID.fromString(id).toString().equals(id))throw new IllegalArgumentException();}
         catch(Exception e) {throw new IOException("LEASE_ID");}
-        return new File(context.getFilesDir(),"isolated-lease-"+id+".lock");
+        return new File(context.getFilesDir(),prefix+"-lease-"+id+".lock");
     }
     Guard createGuard(String id) throws Exception {
         ParcelFileDescriptor fd=ParcelFileDescriptor.adoptFd(LeaseNative.create(guardFile(id).getAbsolutePath()));
@@ -166,7 +172,7 @@ final class IsolatedLease {
                 boolean sameOwner=j.getInt("owner_pid")==android.os.Process.myPid() && j.getLong("owner_start")==ProcessIdentity.selfStartTicks();
                 if(!sameOwner && !previousOwnerGone(j))return new Recovery(BUSY,"",0,0,0);
                 stage="OWNER_CANARY";
-                if(!("owner-only-"+j.getString("id")).equals(ProcessIdentity.read(new File(context.getFilesDir(),"isolated-owner-canary").getPath(),128)))
+                if(!("owner-only-"+j.getString("id")).equals(ProcessIdentity.read(new File(context.getFilesDir(),prefix+"-owner-canary").getPath(),128)))
                     return new Recovery(UNVERIFIED,"",0,0,0);
                 stage="KERNEL_GUARD";return finish(j,false);
             }catch(Exception e) {
