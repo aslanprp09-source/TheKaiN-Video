@@ -35,6 +35,7 @@ Public-address validation (all DNS answers), socket pinning, system TLS/hostname
 - A fresh admission cannot rewrite an already completed worker's retirement timestamp. An additional regression compares the previous measurement before and after a genuinely fresh worker.
 - No fake pause/range resume. A partial nonresumable transfer after process loss fails closed; an explicit retry creates a new attempt/staging path. Existing failed-attempt staging retention is unchanged.
 - HTTP 403/404/429 remain distinct. No automatic retry is introduced around an unknown/long `Retry-After`. Safety/resource/cleanup failures have separate localized errors. No raw URL/query/header/exception is written to evidence.
+- Network failures are translated only at the blocking network primitives. Staging and repository callback exceptions retain their identity for the existing engine's storage/cancellation classifier. A real-stream progress callback injecting Android `SQLiteFullException` must produce `NO_DISK_SPACE`, never a network/IPC error or published output.
 
 ## Persistence and compatibility
 

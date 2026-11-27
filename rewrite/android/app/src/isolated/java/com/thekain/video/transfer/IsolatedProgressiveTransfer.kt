@@ -38,7 +38,9 @@ class IsolatedProgressiveTransfer(private val context: Context, private val poli
                     val value = block()
                     if (continuation.isActive) continuation.resumeWith(Result.success(value))
                 } catch (error: Exception) {
-                    if (continuation.isActive) continuation.resumeWith(Result.failure(error))
+                    if (error is java.util.concurrent.TimeoutException) live.get()?.expireDownload()
+                    val code = live.get()?.failure() ?: RuntimeResult.IPC_ERROR
+                    if (continuation.isActive) continuation.resumeWith(Result.failure(TransferFailure(map(code))))
                 }
             })
         }
@@ -49,7 +51,13 @@ class IsolatedProgressiveTransfer(private val context: Context, private val poli
             withTimeout(timeoutMillis) {
                 // Creation does not do DNS/TLS, wait for Binder, or load Python. Keeping assignment
                 // in the coroutine prevents an untracked late transport after canceled acquisition.
-                val transport = RemoteHttpsTransport.forDownloadUntil(context, policy, task.url, deadline)
+                val transport = try { RemoteHttpsTransport.forDownloadUntil(context, policy, task.url, deadline) }
+                catch (error: Exception) {
+                    if (SystemClock.elapsedRealtime() >= deadline) throw TransferFailure(TransferError.TIMEOUT)
+                    val classified = DownloadEngine.classify(error)
+                    if (classified.code in setOf(TransferError.NO_DISK_SPACE, TransferError.PERMISSION_DENIED)) throw classified
+                    throw TransferFailure(TransferError.ISOLATION_BLOCKED)
+                }
                 live.set(transport)
                 currentCoroutineContext().ensureActive()
                 val session = network { transport.openDownload() }
@@ -80,7 +88,8 @@ class IsolatedProgressiveTransfer(private val context: Context, private val poli
                         }
                         throw TransferFailure(map(result.error))
                     }
-                    policy.validateCandidate(result.finalUrl)
+                    try { policy.validateCandidate(result.finalUrl) }
+                    catch (_: Exception) { throw TransferFailure(TransferError.SOURCE_POLICY) }
                     if (result.finalUrl != task.url || result.contentType?.substringBefore(';')?.trim()?.lowercase(java.util.Locale.ROOT) !in
                         setOf("video/mp4", "application/octet-stream") || bytes != result.bytes)
                         throw TransferFailure(TransferError.VERIFY_FAILED)
@@ -95,10 +104,9 @@ class IsolatedProgressiveTransfer(private val context: Context, private val poli
             live.get()?.expireDownload()
             throw TransferFailure(TransferError.TIMEOUT)
         } catch (cancelled: CancellationException) { throw cancelled }
-        catch (failure: TransferFailure) { throw failure }
-        catch (_: Exception) {
-            throw TransferFailure(map(live.get()?.failure() ?: RuntimeResult.IPC_ERROR))
-        } finally {
+        // File and repository callback errors keep their identity for DownloadEngine.classify.
+        // In particular ENOSPC/SQLiteFullException and the engine's RequestedStop must not become IPC errors.
+        finally {
             withContext(NonCancellable + Dispatchers.IO) {
                 live.get()?.let { transport ->
                     transport.close()

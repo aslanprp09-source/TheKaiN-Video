@@ -30,7 +30,7 @@ def inspect(remote,main,source,api,pages):
     assert main['verification']['verified_bytes']==2428 and len(main['verification']['proofs'])==2
     assert all(main['lifecycle'][k] is True for k in ('cancel','deadline','actual_http','no_late_writes','fresh_after_each'))
     assert len(main['lifecycle']['proofs'])==4 and main['lifecycle']['proofs'][2]['failure']==2
-    assert all(main['storage'][k] is True for k in ('no_space','scope_refused','direct_downgrade_refused','fixture_alias_refused')) and len(main['storage']['proofs'])==1
+    assert all(main['storage'][k] is True for k in ('no_space','callback_storage_error','scope_refused','direct_downgrade_refused','fixture_alias_refused')) and len(main['storage']['proofs'])==2
     assert all(main['migration'][k] is True for k in ('v1_history_preserved','old_backend_direct','new_backend_durable')) and not main['migration']['proofs']
     ui=main['ui'];assert all(ui[k] is True for k in ('actual_main_ui','playback','durable_history','open_action'))
     assert ui['verified_bytes']==2428 and ui['sha256']=='dd201a3b814b113ca98749902195b996a1e2f608247bdd22d2044b4c0dfd5cb2'

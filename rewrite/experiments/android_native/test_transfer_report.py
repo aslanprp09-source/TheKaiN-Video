@@ -23,7 +23,7 @@ class TransferIntakeTest(unittest.TestCase):
         remote['stream']['bytes']=2*1024*1024+17;remote['lifecycle']['proofs'][2]['failure']=2
         main=dict(verification=row('verification',2,('corrupt_refused','receipt_not_completion','retry_fresh')),
             lifecycle=row('lifecycle',4,('cancel','deadline','actual_http','no_late_writes','fresh_after_each')),
-            storage=row('storage',1,('no_space','scope_refused','direct_downgrade_refused','fixture_alias_refused')),
+            storage=row('storage',2,('no_space','callback_storage_error','scope_refused','direct_downgrade_refused','fixture_alias_refused')),
             migration=row('migration',0,('v1_history_preserved','old_backend_direct','new_backend_durable')),
             ui=row('ui',1,('actual_main_ui','playback','durable_history','open_action')))
         main['verification']['verified_bytes']=2428;main['lifecycle']['proofs'][2]['failure']=2
@@ -32,7 +32,7 @@ class TransferIntakeTest(unittest.TestCase):
 
     def test_no_pipeline_pass_without_real_receipt_playback_migration_and_death(self):
         remote,main,source=self.fixture();self.assertEqual(inspect(remote,main,source,36,16384)['additional_tests'],9)
-        for bad in ('missing','source','pages','pipe','binder_only','stale','history','not_transfer','no_deadline','no_death','hash','not_played','not_ui','receipt','migration','downgrade','alias','corrupt_success','python_uid','http','truncated'):
+        for bad in ('missing','source','pages','pipe','binder_only','stale','history','not_transfer','no_deadline','no_death','hash','not_played','not_ui','receipt','migration','downgrade','alias','callback_storage','corrupt_success','python_uid','http','truncated'):
             r,m=deepcopy(remote),deepcopy(main)
             if bad=='missing':del m['ui']
             elif bad=='source':m['ui']['source_commit']='e'*40
@@ -51,6 +51,7 @@ class TransferIntakeTest(unittest.TestCase):
             elif bad=='migration':m['migration']['v1_history_preserved']=False
             elif bad=='downgrade':m['storage']['direct_downgrade_refused']=False
             elif bad=='alias':m['storage']['fixture_alias_refused']=False
+            elif bad=='callback_storage':m['storage']['callback_storage_error']=False
             elif bad=='corrupt_success':m['verification']['receipt_not_completion']=False
             elif bad=='python_uid':m['ui']['isolated_python']['worker_uid']=10001
             elif bad=='http':r['security']['http_errors']=False

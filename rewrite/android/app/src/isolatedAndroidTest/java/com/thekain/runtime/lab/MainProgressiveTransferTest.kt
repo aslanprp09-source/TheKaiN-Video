@@ -110,6 +110,17 @@ class MainProgressiveTransferTest {
         val adapter = IsolatedProgressiveTransfer(context, policy, freeBytes = { 0 })
         assertEquals(EngineResult.FAILED, engine(adapter).run(task.id))
         assertEquals(TransferError.NO_DISK_SPACE, repo.get(task.id).error); assertNull(repo.get(task.id).outputUri); proof(adapter)
+        server.enqueue(response()); val callbackTask = task(); val callbackAdapter = IsolatedProgressiveTransfer(context, policy)
+        val storageFailure = object : TransferAdapter {
+            override suspend fun fetch(task: DownloadTask, stage: File, identity: suspend (Long?, String?, Boolean) -> Unit,
+                progress: suspend (Long, Long?) -> Unit): File = callbackAdapter.fetch(task, stage, identity, { bytes, total ->
+                    if (bytes > 0) throw android.database.sqlite.SQLiteFullException("OWNED_STORAGE_FAULT")
+                    progress(bytes, total)
+                })
+        }
+        assertEquals(EngineResult.FAILED, engine(storageFailure).run(callbackTask.id))
+        assertEquals(TransferError.NO_DISK_SPACE, repo.get(callbackTask.id).error)
+        assertNull(repo.get(callbackTask.id).outputUri); assertNull(repo.get(callbackTask.id).digest); proof(callbackAdapter)
         val unexpected = task()
         val factory = TransferAdapterFactory.create(context) { throw AssertionError("Isolated job was downgraded to direct") }
         assertEquals(EngineResult.FAILED, engine(factory).run(unexpected.id))
@@ -119,8 +130,8 @@ class MainProgressiveTransferTest {
         try { rejected.fetch(alias, File(root, "alias.part"), { _, _, _ -> fail("Alias reached identity") }, { _, _ -> fail("Alias reached progress") }); fail("Alias widened fixture scope") }
         catch (error: TransferFailure) { assertEquals(TransferError.SOURCE_POLICY, error.code) }
         assertNull(rejected.lastEvidence); assertFalse(File(root, "alias.part").exists())
-        assertEquals(1, server.requestCount)
-        record("storage", JSONObject().put("no_space", true).put("scope_refused", true).put("direct_downgrade_refused", true).put("fixture_alias_refused", true))
+        assertEquals(2, server.requestCount)
+        record("storage", JSONObject().put("no_space", true).put("callback_storage_error", true).put("scope_refused", true).put("direct_downgrade_refused", true).put("fixture_alias_refused", true))
     }
     @Test fun migrationPreservesVersionOneHistoryAndAssignsOnlyDirectBackend() = runBlocking<Unit> {
         val name = "migration-${UUID.randomUUID()}.db"
