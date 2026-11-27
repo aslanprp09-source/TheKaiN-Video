@@ -8,7 +8,7 @@ object TransferAdapterFactory {
         override suspend fun fetch(task: com.thekain.video.data.DownloadTask, stage: java.io.File,
             identity: suspend (Long?, String?, Boolean) -> Unit, progress: suspend (Long, Long?) -> Unit): java.io.File {
             if (task.backend == TransferBackend.DIRECT) return DirectTransfer(connections()).fetch(task, stage, identity, progress)
-            if (task.url != SourceAnalyzerFactory.ownedVideo || task.mime != "video/mp4")
+            if (!SourceAnalyzerFactory.permitsOwnedVideo(task.url) || task.mime != "video/mp4")
                 throw TransferFailure(TransferError.SOURCE_POLICY)
             return IsolatedProgressiveTransfer(context, com.thekain.runtime.lab.RemoteHttpsTransport.Policy.publicOrigins(
                 setOf("https://raw.githubusercontent.com"))).fetch(task, stage, identity, progress)
