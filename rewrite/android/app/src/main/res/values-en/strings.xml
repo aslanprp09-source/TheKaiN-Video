@@ -76,6 +76,7 @@
     <string name="home_empty_text">Paste a direct HTTPS link or an open HTML5 page containing a media file.</string>
     <string name="recent">Recent downloads</string>
     <string name="format">Format</string>
+    <string name="available_formats">Available formats</string>
     <string name="video">Video</string>
     <string name="audio_only">Audio only</string>
     <string name="single_format_reason">The source provides one file. Quality is not converted.</string>

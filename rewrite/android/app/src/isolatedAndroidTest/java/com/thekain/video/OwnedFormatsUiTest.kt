@@ -4,6 +4,9 @@ import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaPlayer
 import android.net.Uri
+import android.graphics.Rect
+import android.os.SystemClock
+import android.view.accessibility.AccessibilityNodeInfo
 import androidx.lifecycle.ViewModelProvider
 import androidx.room.Room
 import androidx.test.ext.junit.rules.ActivityScenarioRule
@@ -13,6 +16,7 @@ import androidx.test.uiautomator.*
 import com.thekain.video.data.*
 import com.thekain.video.domain.*
 import com.thekain.video.presentation.MainViewModel
+import com.thekain.video.presentation.localized
 import com.thekain.video.source.*
 import com.thekain.video.storage.MediaVerifier
 import com.thekain.video.transfer.TransferAdapterFactory
@@ -39,11 +43,68 @@ class OwnedFormatsUiTest {
         for (attempt in 0..6) {
             device.findObject(selector)?.let {
                 // A clipped sliver under a fixed footer is not an actionable 48dp touch target.
-                if (it.visibleBounds.width() > 0 && it.visibleBounds.height() >= (48 * activity.resources.displayMetrics.density).toInt()) return it
+                if (it.visibleBounds.width() > 0 && it.visibleBounds.height() >= (48 * activity.resources.displayMetrics.density).toInt()) {
+                    // A scroll gesture returning does not prove the following tap has stable coordinates.
+                    val deadline = SystemClock.uptimeMillis() + 1500
+                    var previous: Rect? = null
+                    while (SystemClock.uptimeMillis() < deadline) {
+                        val current = device.findObject(selector)
+                        val bounds = current?.visibleBounds
+                        if (current != null && bounds != null && bounds == previous && bounds.width() > 0 &&
+                            bounds.height() >= (48 * activity.resources.displayMetrics.density).toInt()) return current
+                        previous = bounds?.let(::Rect)
+                        SystemClock.sleep(100)
+                    }
+                    throw AssertionError("Actual format selector did not stop moving before its single tap")
+                }
             }
             if (attempt < 6) requireNotNull(device.findObject(By.res("home_content"))).scroll(Direction.DOWN, .7f)
         }
         throw AssertionError("Actual format selector was not visible")
+    }
+
+    private fun captureFormatFailure() {
+        val folder = File(activity.filesDir, "main-formats-evidence")
+        fun capture(name: String, action: () -> Unit) {
+            runCatching { action() }.onFailure { println("FORMAT_UI_CAPTURE_ERROR $name ${it.javaClass.simpleName}") }
+        }
+        capture("folder") { check(folder.mkdirs() || folder.isDirectory) }
+        // Independent captures: a failing/hung hierarchy dump must not discard screenshot or node evidence.
+        capture("screenshot") { check(device.takeScreenshot(folder.resolve("failure.png"))) }
+        fun safe(value: CharSequence?) = value?.toString().orEmpty()
+            .replace(Regex("https?://[^\\s\\\"<>]+"), "OWNED_URL_REDACTED").take(256)
+        capture("nodes") {
+            val queue = java.util.ArrayDeque<AccessibilityNodeInfo>()
+            instrumentation.uiAutomation.rootInActiveWindow?.let(queue::add)
+            val rows = JSONArray()
+            try {
+                while (queue.isNotEmpty() && rows.length() < 100) {
+                    val node = queue.removeFirst()
+                    try {
+                        val rect = Rect(); node.getBoundsInScreen(rect)
+                        rows.put(JSONObject().put("id", safe(node.viewIdResourceName)).put("package", safe(node.packageName))
+                            .put("class", safe(node.className)).put("text", safe(node.text)).put("description", safe(node.contentDescription))
+                            .put("bounds", rect.toShortString()).put("visible", node.isVisibleToUser).put("clickable", node.isClickable)
+                            .put("enabled", node.isEnabled).put("focused", node.isFocused).put("window", node.windowId))
+                        for (index in 0 until minOf(node.childCount, 16)) {
+                            if (queue.size + rows.length() >= 100) break
+                            node.getChild(index)?.let(queue::add)
+                        }
+                    } finally { node.recycle() }
+                }
+            } finally { while (queue.isNotEmpty()) queue.removeFirst().recycle() }
+            val snapshot = JSONObject().put("api", android.os.Build.VERSION.SDK_INT).put("nodes", rows)
+                .put("bounded", true).toString()
+            // Print first: an artifact write failure must not hide the actual accessibility snapshot.
+            println("FORMAT_UI_FAILURE_NODES $snapshot")
+            folder.resolve("failure-nodes.json").writeText(snapshot)
+        }
+        capture("hierarchy") {
+            val out = java.io.ByteArrayOutputStream(); device.dumpWindowHierarchy(out)
+            val safe = out.toString("UTF-8").replace(Regex("https?://[^\\s\\\"<>]+"), "OWNED_URL_REDACTED").take(48 * 1024)
+            println("FORMAT_UI_FAILURE_HIERARCHY $safe")
+            folder.resolve("failure-ui.xml").writeText(safe)
+        }
     }
 
     @Test fun exactOwnedGrantsDoNotAuthorizeAliasesQueriesOrAnotherRepositoryPath() = runBlocking<Unit> {
@@ -111,9 +172,12 @@ class OwnedFormatsUiTest {
                 UiWindowEvidence.await(activity, "formats-choice-$height")
                 val selector = visible(By.res("format_selector"))
                 assertTrue(selector.isEnabled); selector.click()
-                assertNotNull("Actual format popup did not open", device.wait(Until.findObject(By.res("format_options")), 5000))
+                val popup = device.wait(Until.findObject(By.res("format_options")), 5000)
+                assertNotNull("Actual format popup did not open", popup)
+                assertEquals(activity.localized().getString(R.string.available_formats), popup!!.contentDescription)
                 for (candidate in variants) {
                     val item = requireNotNull(device.wait(Until.findObject(By.res("variant_${candidate.id}")), 5000))
+                    assertTrue(item.isEnabled); assertTrue(item.isClickable)
                     val label = "${candidate.width} × ${candidate.height}"
                     assertTrue(item.text.orEmpty().contains(label) || item.findObject(By.textContains(label)) != null)
                 }
@@ -180,15 +244,7 @@ class OwnedFormatsUiTest {
                 .put("production_ready", false).toString())
         } catch (failure: Throwable) {
             // Capture before worker/file cleanup can change the failing UI. Owned disposable-emulator content only.
-            runCatching {
-                val out = java.io.ByteArrayOutputStream()
-                device.dumpWindowHierarchy(out)
-                val safe = out.toString("UTF-8").replace(Regex("https?://[^\\s\\\"<>]+"), "OWNED_URL_REDACTED").take(48 * 1024)
-                val folder = File(activity.filesDir, "main-formats-evidence").apply { mkdirs() }
-                folder.resolve("failure-ui.xml").writeText(safe)
-                device.takeScreenshot(folder.resolve("failure.png"))
-                println("FORMAT_UI_FAILURE_HIERARCHY $safe")
-            }
+            captureFormatFailure()
             throw failure
         } finally {
             // Only disposable-emulator rows created by this test; never reset the database or user's app.

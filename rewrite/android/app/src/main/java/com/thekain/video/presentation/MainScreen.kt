@@ -232,6 +232,7 @@ data class UiActions(
     val choices = source.variants.filter { it.audioOnly == selected.audioOnly }
         .sortedWith(compareByDescending<MediaVariant> { it.height }.thenByDescending { it.width }.thenByDescending { it.fps })
     var expanded by remember { mutableStateOf(false) }
+    val formatsDescription = stringResource(R.string.available_formats)
     Text(stringResource(R.string.format), style = MaterialTheme.typography.labelLarge)
     Box {
         OutlinedButton(onClick = { expanded = true }, enabled = choices.size > 1 && !home.enqueuePending,
@@ -239,7 +240,10 @@ data class UiActions(
             Text(formatSummary(selected), Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface, textAlign = androidx.compose.ui.text.style.TextAlign.Start)
             Icon(Icons.Default.ArrowDropDown, null)
         }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }, modifier = Modifier.semantics { testTagsAsResourceId = true }.testTag("format_options")) {
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }, modifier = Modifier.semantics {
+            testTagsAsResourceId = true
+            contentDescription = formatsDescription
+        }.testTag("format_options")) {
             choices.forEach { variant -> DropdownMenuItem(text = { Column {
                 Text(formatSummary(variant))
                 Text(variant.request.name, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)

@@ -3,7 +3,7 @@ set -Eeuo pipefail
 evidence="${1:?evidence}/formats"; api="${2:?API}"; pages="${3:?pages}"
 mkdir -p "$evidence"
 collect() {
-  for name in ui.json grant.json choices-180.png choices-90.png history.png failure-ui.xml failure.png; do
+  for name in ui.json grant.json choices-180.png choices-90.png history.png failure-ui.xml failure-nodes.json failure.png; do
     timeout 8 adb -s "$ANDROID_SERIAL" exec-out run-as com.thekain.video.rebuild cat "files/main-formats-evidence/$name" > "$evidence/$name" 2>/dev/null || true
   done
   timeout 8 adb -s "$ANDROID_SERIAL" exec-out run-as com.thekain.video.rebuild cat files/isolated-source-evidence.jsonl > "$evidence/source-journal.jsonl" 2>/dev/null || true

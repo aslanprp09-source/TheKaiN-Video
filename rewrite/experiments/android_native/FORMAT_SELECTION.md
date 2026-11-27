@@ -69,8 +69,12 @@ a job completed without the existing media verification.
    reopen the database and check both original records and Open actions.
    Retain selector screenshots, history screenshot and typed process receipts.
    Popup items expose their own resource semantics; the selector must have a
-   full 48dp visible touch target before interaction. A failing attempt retains
-   a bounded, URL-redacted hierarchy and screenshot before cleanup changes UI.
+   full 48dp visible touch target and stable coordinates before its single tap.
+   The popup has a localized accessibility description, and the existing popup
+   resource-ID assertion remains mandatory alongside enabled/clickable items.
+   A failing attempt independently captures a screenshot, bounded URL-redacted
+   accessibility-node snapshot (also printed in the raw log), and hierarchy
+   before cleanup changes UI. One diagnostic failure cannot erase the others.
 2. Exact-grant negative cases must refuse four ungranted aliases before network,
    identity/progress callbacks or staging. No direct-backend fallback.
 
@@ -91,6 +95,24 @@ intake suites and both native drivers are retained after the normal base merge.
 All original 41 main API35 tests and standard
 API26/29, JVM, Lint, host and CI-policy gates remain intact. Results and resource
 measurements belong to the exact-HEAD PR evidence, not compilation claims.
+
+## Native285 failures and pending correction
+
+At source `9416bd4a594ec57f4a4c07278c20025bc4e98b76`, run46019812339 did not
+pass any complete native API entry. API35 and29 exposed the separate broker
+terminal-cause issue #64; API36 hit the still-unconfirmed source UI deadline
+#61. API26 reached D2 but could not find the popup container after a real tap.
+The former all-or-nothing capture produced no hierarchy log, so the actual
+popup/window state of that failure was not established.
+
+The next D2 candidate gives the popup a user-facing accessibility description
+instead of relying on a test tag alone to expose its noninteractive container,
+checks stable full-height selector bounds before a single tap, and separates
+diagnostic collection. This is a candidate accessibility/harness correction,
+not a proven API26 root cause or full matrix PASS. It preserves the popup,
+choice/order/selection, actual-media and history assertions. Runtime PR #66
+is developed separately against the rebuild base; a new approved-base merge,
+complete current-source matrix and independent review are still required.
 
 ## Limits
 
