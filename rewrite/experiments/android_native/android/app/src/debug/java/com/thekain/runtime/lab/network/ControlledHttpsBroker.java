@@ -11,7 +11,7 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.*;
 import static com.thekain.runtime.lab.network.BrokerFailure.Code.*;
 
-/** Candidate owner-side component only. Not connected to Python IPC or product SourceAnalyzer. */
+/** Pinned bounded HTTP engine. Trusted disposable Service only; Python receives no network authority. */
 public final class ControlledHttpsBroker {
     interface Resolver {List<InetAddress> lookup(String host) throws Exception;}
     private static final AtomicInteger DNS_IDS=new AtomicInteger();
@@ -65,7 +65,8 @@ public final class ControlledHttpsBroker {
         private final AtomicReference<Call> call=new AtomicReference<>();
         private final Set<Socket> sockets=Collections.synchronizedSet(new HashSet<>());
         private volatile Lookup lookup;
-        private volatile int requests,payloadBytes,connections;
+        private volatile int requests,connections;
+        private volatile long payloadBytes;
         private final class Lookup {
             final CompletableFuture<List<InetAddress>> result=new CompletableFuture<>();
             volatile boolean done;volatile Thread thread;
@@ -78,7 +79,7 @@ public final class ControlledHttpsBroker {
             return (int)left;
         }
         public int requestCount() {return requests;}
-        public int payloadBytesRead() {return payloadBytes;}
+        public long payloadBytesRead() {return payloadBytes;}
         public int connectionAttempts() {return connections;}
         private synchronized Reply commit(Response response,PublicHttpsPolicy.Target target,byte[] bytes) throws BrokerFailure {
             String type=response.header("Content-Type");
@@ -120,6 +121,17 @@ public final class ControlledHttpsBroker {
             }
         }
         public Reply fetch(String input,String method) throws BrokerFailure {
+            return fetchInternal(input,method,null);
+        }
+        /** A trusted transfer-only caller supplies a pipe, never a filesystem path or Python callback.
+         * Analysis limits are unchanged. Transfers have one fixed 512 MiB cap and the SAME 30 s deadline.
+         * Memory stays bounded by the 8 KiB copy buffer and kernel pipe backpressure.
+         */
+        public Reply streamTo(String input,OutputStream pipe) throws BrokerFailure {
+            if(pipe==null)throw new IllegalArgumentException("PIPE_REQUIRED");
+            return fetchInternal(input,"GET",pipe);
+        }
+        private Reply fetchInternal(String input,String method,OutputStream pipe) throws BrokerFailure {
             if(!fetching.compareAndSet(false,true))throw new BrokerFailure(BUSY);
             try {
                 remaining();
@@ -156,6 +168,9 @@ public final class ControlledHttpsBroker {
                         if(response.headers().byteCount()>limits.headerBytes)throw new BrokerFailure(HEADER_LIMIT);
                         int status=response.code();
                         if(status==301 || status==302 || status==303 || status==307 || status==308) {
+                            // D1 grants one immutable progressive URL. Do not widen that grant by
+                            // following even a same-origin redirect. Analysis redirect rules stay unchanged.
+                            if(pipe!=null)throw new BrokerFailure(OUT_OF_SCOPE);
                             String location=response.header("Location");
                             if(location==null || location.length()>2048)throw new BrokerFailure(INVALID_URL);
                             if(redirects++>=limits.redirects)throw new BrokerFailure(REQUEST_LIMIT);
@@ -174,18 +189,24 @@ public final class ControlledHttpsBroker {
                         List<String> lengths=response.headers("Content-Length");
                         if(response.header("Transfer-Encoding")!=null || lengths.size()!=1 || !lengths.get(0).matches("[0-9]{1,19}")
                                 || body.contentLength()<0)throw new BrokerFailure(UNSUPPORTED_FRAMING);
-                        if(body.contentLength()>Math.min(limits.bodyBytes,limits.totalBytes-payloadBytes))throw new BrokerFailure(RESPONSE_LIMIT);
-                        ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] buffer=new byte[8192];
+                        long bodyLimit=pipe==null?limits.bodyBytes:512L*1024*1024;
+                        long aggregateLimit=pipe==null?limits.totalBytes:512L*1024*1024;
+                        if(body.contentLength()>Math.min(bodyLimit,aggregateLimit-payloadBytes))throw new BrokerFailure(RESPONSE_LIMIT);
+                        ByteArrayOutputStream out=pipe==null?new ByteArrayOutputStream():null;
+                        byte[] buffer=new byte[8192];long written=0;
                         InputStream in=body.byteStream();
                         while(true) {
-                            remaining();int allowance=Math.min(limits.bodyBytes-out.size(),limits.totalBytes-payloadBytes);
+                            remaining();long allowance=Math.min(bodyLimit-written,aggregateLimit-payloadBytes);
                             if(allowance<0)throw new BrokerFailure(RESPONSE_LIMIT);
-                            int count=in.read(buffer,0,Math.min(buffer.length,allowance+1));
+                            int count=in.read(buffer,0,(int)Math.min(buffer.length,allowance+1));
                             if(count>0)payloadBytes+=count; // Count bytes even if cancellation/deadline wins immediately after this read.
                             remaining();if(count<0)break;
-                            if(count>allowance)throw new BrokerFailure(RESPONSE_LIMIT);out.write(buffer,0,count);
+                            if(count>allowance)throw new BrokerFailure(RESPONSE_LIMIT);
+                            if(pipe==null)out.write(buffer,0,count);else pipe.write(buffer,0,count);
+                            written+=count;remaining();
                         }
-                        return commit(response,target,out.toByteArray());
+                        if(written!=body.contentLength())throw new BrokerFailure(NETWORK_LOST);
+                        return commit(response,target,out==null?new byte[0]:out.toByteArray());
                     }catch(BrokerFailure failure) {throw failure;}
                     catch(SSLException tls) {remaining();throw new BrokerFailure(TLS_ERROR);}
                     catch(InterruptedIOException timeout) {remaining();throw new BrokerFailure(TIMEOUT);}

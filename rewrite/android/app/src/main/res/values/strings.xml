@@ -133,4 +133,9 @@ jsoup — MIT.
     <string name="kib">КиБ</string>
     <string name="mib">МиБ</string>
     <string name="gib">ГиБ</string>
+    <string name="format_technical">Разрешение: %1$s · FPS: %2$s\nВидео: %3$s · Аудио: %4$s</string>
+    <string name="error_source_policy">Адрес или защищённое соединение не прошли проверку безопасности. Загрузка остановлена.</string>
+    <string name="error_response_limit">Ответ превышает безопасный предел этой внутренней сборки.</string>
+    <string name="error_resource_limit">Загрузка остановлена из-за ограничения памяти или процессорного времени.</string>
+    <string name="error_isolation_blocked">Не удалось безопасно завершить загрузку. Перезапустите приложение.</string>
 </resources>

@@ -24,13 +24,16 @@ data class DownloadTask(
     val error: TransferError? = null,
     val outputUri: String? = null,
     val verifiedBytes: Long? = null,
-    val digest: String? = null
+    val digest: String? = null,
+    @ColumnInfo(defaultValue = "'DIRECT'") val backend: TransferBackend = TransferBackend.DIRECT
 ) {
     override fun toString() = "DownloadTask(id=$id, state=$state, bytes=$bytes)"
     val percent: Int? get() = TransferRules.percent(state, bytes, total)
 }
 
 class Converters {
+    @TypeConverter fun backend(value: String): TransferBackend = TransferBackend.valueOf(value)
+    @TypeConverter fun backend(value: TransferBackend): String = value.name
     @TypeConverter fun state(value: String): TransferState = TransferState.valueOf(value)
     @TypeConverter fun state(value: TransferState): String = value.name
     @TypeConverter fun error(value: String?): TransferError? = value?.let(TransferError::valueOf)
@@ -47,9 +50,18 @@ interface DownloadDao {
     @Query("DELETE FROM downloads WHERE id=:id AND state='COMPLETED'") suspend fun removeCompleted(id: String): Int
 }
 
-@Database(entities = [DownloadTask::class], version = 1, exportSchema = true)
+@Database(entities = [DownloadTask::class], version = 2, exportSchema = true)
 @TypeConverters(Converters::class)
-abstract class DownloadsDb : RoomDatabase() { abstract fun downloads(): DownloadDao }
+abstract class DownloadsDb : RoomDatabase() {
+    abstract fun downloads(): DownloadDao
+    companion object {
+        val MIGRATION_1_2 = object : androidx.room.migration.Migration(1, 2) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE downloads ADD COLUMN backend TEXT NOT NULL DEFAULT 'DIRECT'")
+            }
+        }
+    }
+}
 
 class DownloadRepository(val db: DownloadsDb) {
     val changes = db.downloads().observe()
@@ -60,7 +72,7 @@ class DownloadRepository(val db: DownloadsDb) {
     suspend fun removeCompleted(id: String): Boolean = db.downloads().removeCompleted(id) == 1
 
     suspend fun create(request: DirectRequest): DownloadTask {
-        val task = DownloadTask(UUID.randomUUID().toString(), request.url, request.name, request.mime)
+        val task = DownloadTask(UUID.randomUUID().toString(), request.url, request.name, request.mime, backend = request.backend)
         db.downloads().insert(task)
         return task
     }

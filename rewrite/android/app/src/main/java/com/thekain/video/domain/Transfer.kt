@@ -13,13 +13,17 @@ enum class TransferState {
 enum class TransferError {
     INVALID_URL, REMOTE_FORBIDDEN, REMOTE_MISSING, RATE_LIMITED, REMOTE_SERVER,
     NETWORK_LOST, TIMEOUT, NO_DISK_SPACE, PERMISSION_DENIED, VERIFY_FAILED,
-    RESUME_UNSUPPORTED, INTERRUPTED, BACKGROUND_RESTRICTED, DRM_PROTECTED, UNKNOWN
+    RESUME_UNSUPPORTED, INTERRUPTED, BACKGROUND_RESTRICTED, DRM_PROTECTED, UNKNOWN,
+    SOURCE_POLICY, RESPONSE_LIMIT, RESOURCE_LIMIT, ISOLATION_BLOCKED
 }
 
 class TransferFailure(val code: TransferError, val retryable: Boolean = false,
                       val retryAfterMillis: Long = 0) : Exception(code.name)
 
-data class DirectRequest(val url: String, val name: String, val mime: String) {
+enum class TransferBackend { DIRECT, ISOLATED_OWNED }
+
+data class DirectRequest(val url: String, val name: String, val mime: String,
+                         val backend: TransferBackend = TransferBackend.DIRECT) {
     override fun toString() = "DirectRequest(name=$name)" // Never print signed source URLs.
 }
 

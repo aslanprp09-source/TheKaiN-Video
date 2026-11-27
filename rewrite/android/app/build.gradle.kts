@@ -39,6 +39,8 @@ android {
         packaging.jniLibs.useLegacyPackaging = true
         packaging.jniLibs.keepDebugSymbols.add("**/*.so")
         androidResources.ignoreAssetsPattern = "thekain-internal-dont-ignore-anything"
+    } else {
+        sourceSets.getByName("androidTest").java.srcDir("src/standardAndroidTest/java")
     }
     bundle { language { enableSplit = false } }
     val signingValues = listOf("THEKAIN_KEYSTORE", "THEKAIN_STORE_PASSWORD", "THEKAIN_KEY_ALIAS", "THEKAIN_KEY_PASSWORD")

@@ -30,3 +30,14 @@ timeout 240 adb -s "$serial" shell am instrument -w -r \
   -e class com.thekain.video.DirectDownloadReliabilityTest \
   com.thekain.video.rebuild.test/androidx.test.runner.AndroidJUnitRunner > "$artifacts/instrumentation.txt"
 python3 tools/report-direct-reliability.py "$artifacts/instrumentation.txt"
+timeout 45 adb -s "$serial" shell am instrument -w -r \
+  -e class com.thekain.video.IsolatedBackendRefusalTest \
+  com.thekain.video.rebuild.test/androidx.test.runner.AndroidJUnitRunner > "$artifacts/standard-isolated-refusal.txt"
+python3 - "$artifacts/standard-isolated-refusal.txt" <<'PYREFUSAL'
+from pathlib import Path
+import re,sys
+text=Path(sys.argv[1]).read_text();print(text)
+assert re.search(r'^OK \(1 test\)\s*$',text,re.M)
+assert len(re.findall(r'^INSTRUMENTATION_STATUS_CODE: 0\s*$',text,re.M))==1
+assert not re.search(r'FAILURES!!!|shortMsg=|INSTRUMENTATION_(?:FAILED|ABORTED)|INSTRUMENTATION_STATUS_CODE: -[1-4]\b',text)
+PYREFUSAL

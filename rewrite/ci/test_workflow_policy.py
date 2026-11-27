@@ -14,6 +14,19 @@ class WorkflowPolicyTest(unittest.TestCase):
     def test_committed_workflows_meet_the_policy(self):
         self.assertEqual(check(self.docs, self.lock), [])
 
+    def test_original41_and_separate_standard_refusal_cannot_replace_or_skip_each_other(self):
+        for variant in ('original-excluded', 'new-not-separated', 'count42', 'primary-skipped', 'extra-skipped', 'legacy-skipped'):
+            self.setUp();jobs=self.docs['.github/workflows/rewrite-ci.yml']['jobs'];steps=jobs['android-device-tests']['steps']
+            primary=next(s for s in steps if s.get('name')=='Run actual device integration tests')
+            if variant=='original-excluded':primary['run']=primary['run'].replace('IsolatedBackendRefusalTest','M4InstrumentationTest')
+            elif variant=='new-not-separated':primary['run']=primary['run'].replace(',com.thekain.video.IsolatedBackendRefusalTest','')
+            elif variant=='count42':
+                report=next(s for s in steps if s.get('name')=='Verify instrumentation results');report['run']=report['run'].replace(' 41',' 42')
+            elif variant=='primary-skipped':primary['if']='false'
+            elif variant=='extra-skipped':next(s for s in steps if s.get('name')=='Additional real HTTPS cancellation, recovery and main UI tests')['if']='false'
+            else:next(s for s in jobs['android-legacy-device-tests']['steps'] if s.get('name')=='Additional direct HTTPS reliability on Android 8 and 10')['if']='false'
+            with self.subTest(variant=variant):self.assertTrue(check(self.docs,self.lock))
+
     def test_internal_main_bridge_cannot_skip_receipts_unit_checks_or_use_release_variant(self):
         for variant in ('no-receipt','no-jvm','no-lint','release','foreign-package'):
             self.setUp();steps=self.docs['.github/workflows/rewrite-ci.yml']['jobs']['native-runtime-build']['steps']

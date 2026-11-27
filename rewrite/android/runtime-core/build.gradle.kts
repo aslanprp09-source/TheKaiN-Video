@@ -12,7 +12,7 @@ android {
         // Share the reviewed core verbatim. Do not include either laboratory UI/Application or QA fixture server.
         val core = lab.resolve("main/java/com/thekain/runtime/lab").listFiles()!!.filter { it.extension == "java" }
             .map { "com/thekain/runtime/lab/" + it.name }
-        java.setIncludes((core + listOf("BrokerHello", "BrokerConfig", "BrokerChunk", "BrokerProcess", "BrokerGuardFlags", "RemoteHttpsService", "RemoteHttpsTransport")
+        java.setIncludes((core + listOf("BrokerHello", "BrokerConfig", "BrokerChunk", "BrokerDownload", "BrokerProcess", "BrokerGuardFlags", "RemoteHttpsService", "RemoteHttpsTransport")
             .map { "com/thekain/runtime/lab/$it.java" } + "com/thekain/runtime/lab/network/*.java").toSet())
         aidl.srcDirs(lab.resolve("main/aidl"), lab.resolve("debug/aidl"))
         assets.srcDir(runtimeDir.map { "$it/assets" })
