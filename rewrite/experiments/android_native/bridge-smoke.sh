@@ -101,3 +101,4 @@ timeout 100 adb -s "$ANDROID_SERIAL" shell am instrument -w -r -e class com.thek
 adb -s "$ANDROID_SERIAL" exec-out screencap -p > "$evidence/main-isolated-ui.png"
 collect
 python3 rewrite/experiments/android_native/bridge_report.py --evidence "$evidence" --source "$(git rev-parse HEAD)" --api "$api" --pages "$pages"
+bash rewrite/experiments/android_native/transfer-smoke.sh "$evidence" "$api" "$pages"

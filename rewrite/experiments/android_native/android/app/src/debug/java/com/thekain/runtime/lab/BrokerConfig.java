@@ -6,9 +6,13 @@ import java.util.*;
 public final class BrokerConfig implements Parcelable,AutoCloseable {
     final String id,fixture;final String[] origins;final long deadline,device,inode;
     final long rssLimit,cpuMs;final int fault;final byte[] ca;final ParcelFileDescriptor guard;
+    final boolean transfer;
     BrokerConfig(String id,long deadline,String[] origins,String fixture,byte[] ca,int fault,long rss,long cpu,IsolatedLease.Guard guard) {
+        this(id,deadline,origins,fixture,ca,fault,rss,cpu,guard,false);
+    }
+    BrokerConfig(String id,long deadline,String[] origins,String fixture,byte[] ca,int fault,long rss,long cpu,IsolatedLease.Guard guard,boolean transfer) {
         this.id=id;this.deadline=deadline;this.origins=origins.clone();this.fixture=fixture;this.ca=ca==null?null:ca.clone();
-        this.fault=fault;rssLimit=rss;cpuMs=cpu;this.guard=guard.fd;device=guard.device;inode=guard.inode;validate();
+        this.fault=fault;rssLimit=rss;cpuMs=cpu;this.guard=guard.fd;device=guard.device;inode=guard.inode;this.transfer=transfer;validate();
     }
     static String string(Parcel p,int max,boolean nullable) {
         Wire.check(p.dataAvail()<=49152);String value=p.readString();Wire.check(value==null?nullable:value.length()<=max);return value;
@@ -17,7 +21,8 @@ public final class BrokerConfig implements Parcelable,AutoCloseable {
         id=string(p,36,false);deadline=p.readLong();int n=p.readInt();Wire.check(n>0 && n<=8);origins=new String[n];
         for(int i=0;i<n;i++)origins[i]=string(p,280,false);fixture=string(p,280,true);
         int length=p.readInt();Wire.check(length>=-1 && length<=16384);ca=length<0?null:new byte[length];if(ca!=null)p.readByteArray(ca);
-        fault=p.readInt();rssLimit=p.readLong();cpuMs=p.readLong();device=p.readLong();inode=p.readLong();guard=ParcelFileDescriptor.CREATOR.createFromParcel(p);
+        fault=p.readInt();rssLimit=p.readLong();cpuMs=p.readLong();device=p.readLong();inode=p.readLong();
+        int mode=p.readInt();Wire.check(mode==0 || mode==1);transfer=mode==1;guard=ParcelFileDescriptor.CREATOR.createFromParcel(p);
         try {validate();}catch(RuntimeException e) {close();throw e;}
     }
     void validate() {
@@ -30,7 +35,7 @@ public final class BrokerConfig implements Parcelable,AutoCloseable {
     public void writeToParcel(Parcel p,int flags) {
         validate();p.writeString(id);p.writeLong(deadline);p.writeInt(origins.length);for(String origin:origins)p.writeString(origin);
         p.writeString(fixture);p.writeInt(ca==null?-1:ca.length);if(ca!=null)p.writeByteArray(ca);
-        p.writeInt(fault);p.writeLong(rssLimit);p.writeLong(cpuMs);p.writeLong(device);p.writeLong(inode);guard.writeToParcel(p,flags);
+        p.writeInt(fault);p.writeLong(rssLimit);p.writeLong(cpuMs);p.writeLong(device);p.writeLong(inode);p.writeInt(transfer?1:0);guard.writeToParcel(p,flags);
     }
     public int describeContents() {return CONTENTS_FILE_DESCRIPTOR;}
     public void close() {try {guard.close();}catch(IOException ignored){}}

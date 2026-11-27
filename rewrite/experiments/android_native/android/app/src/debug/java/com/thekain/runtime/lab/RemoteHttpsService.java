@@ -20,6 +20,7 @@ public final class RemoteHttpsService extends Service {
     private volatile int ownerPid;
     private volatile boolean armed;
     private long sequence;private int delivered;
+    private final AtomicBoolean downloadUsed=new AtomicBoolean();
     private byte[] body;private ControlledHttpsBroker.Reply reply;
     static String processName(Context context) {return context.getPackageName()+":https_broker";}
     private boolean process() {
@@ -49,6 +50,9 @@ public final class RemoteHttpsService extends Service {
     }
     private BrokerChunk failed(int code,long seq) {
         ControlledHttpsBroker.Operation op=operation;
+        // The analysis-lane parcel cannot carry transfer-sized counters. Wrong-lane calls get
+        // a fixed refusal, never overflow that parcel or expose streaming counters.
+        if(config!=null && config.transfer)return BrokerChunk.failure(code,Math.max(1,seq),0,0);
         return BrokerChunk.failure(code,Math.max(1,seq),op==null?0:op.requestCount(),op==null?0:op.payloadBytesRead());
     }
     private final IRemoteHttps.Stub binder=new IRemoteHttps.Stub() {
@@ -89,6 +93,7 @@ public final class RemoteHttpsService extends Service {
         }
         public BrokerChunk fetch(String cap,long seq,String url,String method) {
             if(!authorized(cap))return failed(config!=null && SystemClock.elapsedRealtime()>=config.deadline?RuntimeResult.TIMEOUT:RuntimeResult.IPC_ERROR,seq);
+            if(config.transfer)return failed(RuntimeResult.OUT_OF_SCOPE,seq);
             if(!fetching.compareAndSet(false,true))return failed(RuntimeResult.BUSY,seq);
             try {
                 synchronized(RemoteHttpsService.this) {
@@ -105,11 +110,33 @@ public final class RemoteHttpsService extends Service {
             finally {fetching.set(false);}
         }
         public BrokerChunk read(String cap,long seq,int offset) {
-            if(!authorized(cap) || fetching.get())return failed(RuntimeResult.IPC_ERROR,seq);
+            if(!authorized(cap) || config.transfer || fetching.get())return failed(RuntimeResult.IPC_ERROR,seq);
             synchronized(RemoteHttpsService.this) {
                 if(seq!=sequence || body==null || offset!=delivered || offset>=body.length)return failed(RuntimeResult.IPC_ERROR,seq);
                 return chunk(offset);
             }
+        }
+        public BrokerDownload download(String cap,String url,ParcelFileDescriptor pipe) {
+            if(pipe==null)return BrokerDownload.failure(RuntimeResult.INVALID_REQUEST,0);
+            try(ParcelFileDescriptor descriptor=pipe) {
+                if(!authorized(cap) || !config.transfer)return BrokerDownload.failure(RuntimeResult.OUT_OF_SCOPE,0);
+                if(!downloadUsed.compareAndSet(false,true) || !fetching.compareAndSet(false,true))return BrokerDownload.failure(RuntimeResult.BUSY,0);
+                try {
+                    RuntimeRequest.validateSourceUrl(url);
+                    StructStat stat=Os.fstat(descriptor.getFileDescriptor());
+                    int flags=BrokerGuardFlags.flags(descriptor.getFd());
+                    if(!OsConstants.S_ISFIFO(stat.st_mode) || (flags&OsConstants.O_ACCMODE)!=OsConstants.O_WRONLY)
+                        return BrokerDownload.failure(RuntimeResult.INVALID_REQUEST,0);
+                    if(config.fault==2) {die();return BrokerDownload.failure(RuntimeResult.WORKER_DIED,0);}
+                    try(OutputStream output=new ParcelFileDescriptor.AutoCloseOutputStream(descriptor)) {
+                        ControlledHttpsBroker.Reply value=operation.streamTo(url,output);
+                        if(!authorized(cap))return BrokerDownload.failure(RuntimeResult.TIMEOUT,0);
+                        return new BrokerDownload(0,value.status,operation.payloadBytesRead(),value.declaredBytes,value.finalUrl,value.contentType);
+                    }
+                }catch(BrokerFailure failed) {return BrokerDownload.failure(map(failed),failed.httpStatus);}
+                catch(Exception invalid) {return BrokerDownload.failure(RuntimeResult.INVALID_REQUEST,0);}
+                finally {fetching.set(false);}
+            }catch(IOException invalid) {return BrokerDownload.failure(RuntimeResult.IPC_ERROR,0);}
         }
         public void retire(String cap) {
             if(config!=null && config.id.equals(cap) && Binder.getCallingUid()==getApplicationInfo().uid && Binder.getCallingPid()==ownerPid)die();

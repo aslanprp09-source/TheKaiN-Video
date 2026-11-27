@@ -39,7 +39,7 @@ class AppGraph(val context: Context) {
     private val actions = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mutableSubmission = MutableStateFlow(Submission())
     val submission = mutableSubmission.asStateFlow()
-    val db = Room.databaseBuilder(context, DownloadsDb::class.java, "downloads.db").build()
+    val db = Room.databaseBuilder(context, DownloadsDb::class.java, "downloads.db").addMigrations(DownloadsDb.MIGRATION_1_2).build()
     val repository = DownloadRepository(db)
     val verifier = MediaVerifier(context)
     val publisher = MediaPublisher(context, verifier)
@@ -52,11 +52,7 @@ class AppGraph(val context: Context) {
     @Volatile var connections: Connections = systemConnections
     val sourceAnalyzer = SourceAnalyzerFactory.create(context) { connections }
     val engine by lazy { DownloadEngine(repository, File(context.filesDir, "transfers"),
-        object : TransferAdapter {
-            override suspend fun fetch(task: DownloadTask, stage: File, identity: suspend (Long?, String?, Boolean) -> Unit,
-                                       progress: suspend (Long, Long?) -> Unit): File =
-                DirectTransfer(connections).fetch(task, stage, identity, progress)
-        }, verifier, publisher) }
+        TransferAdapterFactory.create(context) { connections }, verifier, publisher) }
 
     @Synchronized fun submit(request: DirectRequest): String? {
         if (mutableSubmission.value.busy) return null

@@ -30,7 +30,7 @@ public final class RemoteHttpsTransport implements IsolatedTransport {
         static Policy fixture(String origin,byte[] ca) throws Exception {return new Policy(Collections.singleton(origin),origin,ca,0,RuntimeRequest.MAX_RSS,10000);}
         Policy fault(int value,long rss,long cpu) throws Exception {return new Policy(origins,fixture,ca,value,rss,cpu);}
         public IsolatedTransport create(Context context,RuntimeRequest request,Counters counters) throws Exception {
-            RemoteHttpsTransport value=new RemoteHttpsTransport(context,request,this,counters);latest=value;return value;
+            RemoteHttpsTransport value=new RemoteHttpsTransport(context,request,this,counters,false);latest=value;return value;
         }
         public JSONObject evidence() throws Exception {RemoteHttpsTransport value=latest;return value==null?new JSONObject().put("not_started",true):value.evidence();}
         RemoteHttpsTransport latest() {return latest;}
@@ -42,6 +42,8 @@ public final class RemoteHttpsTransport implements IsolatedTransport {
     }
     private final Context context;
     private final RuntimeRequest request;
+    private final boolean transfer;
+    private volatile DownloadSession download;
     private final Counters counters;
     private final IsolatedLease lease;
     private final IsolatedLease.Guard guard;
@@ -58,8 +60,8 @@ public final class RemoteHttpsTransport implements IsolatedTransport {
     private volatile String handshake="BIND_PENDING";
     private volatile long payload,peakRss,peakCpuMs,initialCpu,closeAt=-1,finishedAt;
     private final ServiceConnection connection;
-    private RemoteHttpsTransport(Context context,RuntimeRequest request,Policy policy,Counters counters) throws Exception {
-        this.context=context.getApplicationContext();this.request=request;this.counters=counters;lease=new IsolatedLease(this.context,"https");
+    private RemoteHttpsTransport(Context context,RuntimeRequest request,Policy policy,Counters counters,boolean transfer) throws Exception {
+        this.context=context.getApplicationContext();this.request=request;this.counters=counters;this.transfer=transfer;lease=new IsolatedLease(this.context,"https");
         if(!ProcessIdentity.read("/proc/self/cmdline",512).split("\u0000",2)[0].equals(context.getPackageName()))throw new IOException("BROKER_OWNER_REQUIRED");
         RemoteHttpsTransport previous=LIVE.get();if(previous!=null && previous.terminated())LIVE.compareAndSet(previous,null);
         if(!LIVE.compareAndSet(null,this))throw new IOException("BROKER_BUSY");
@@ -91,7 +93,7 @@ public final class RemoteHttpsTransport implements IsolatedTransport {
             hello=value;initialCpu=actual.cpu;peakRss=actual.rss;
             if(closed)return;
             if(actual.rss>policy.rss) {fail(RuntimeResult.MEMORY_LIMIT);return;}
-            BrokerConfig config=new BrokerConfig(request.id,request.deadline,policy.origins.toArray(new String[0]),policy.fixture,policy.ca,policy.fault,policy.rss,policy.cpu,guard);
+            BrokerConfig config=new BrokerConfig(request.id,request.deadline,policy.origins.toArray(new String[0]),policy.fixture,policy.ca,policy.fault,policy.rss,policy.cpu,guard,transfer);
             configured=true;handshake="CONFIGURE";
             remote.configure(config,new IRemoteHttpsOwner.Stub() {
                 private boolean sender(String cap) {return request.id.equals(cap) && hello!=null && Binder.getCallingPid()==hello.pid && Binder.getCallingUid()==android.os.Process.myUid();}
@@ -108,9 +110,11 @@ public final class RemoteHttpsTransport implements IsolatedTransport {
     }
     private int remaining() throws ChildNetworkGate.Failure {
         if(closed)throw new ChildNetworkGate.Failure(fatal==0?RuntimeResult.CANCELED:fatal);
-        long left=request.deadline-SystemClock.elapsedRealtime();if(left<=0)throw new ChildNetworkGate.Failure(RuntimeResult.TIMEOUT);return (int)left;
+        long left=request.deadline-SystemClock.elapsedRealtime();
+        if(left<=0) {fail(RuntimeResult.TIMEOUT);throw new ChildNetworkGate.Failure(RuntimeResult.TIMEOUT);}return (int)left;
     }
     public IsolatedReply reply(String url,String method) throws ChildNetworkGate.Failure {
+        if(transfer)throw new ChildNetworkGate.Failure(RuntimeResult.OUT_OF_SCOPE);
         if(!fetching.compareAndSet(false,true))throw new ChildNetworkGate.Failure(RuntimeResult.BUSY);
         try {
             remaining();ready.get(remaining(),TimeUnit.MILLISECONDS);remaining();
@@ -135,6 +139,73 @@ public final class RemoteHttpsTransport implements IsolatedTransport {
         catch(Exception failed) {int code=fatal!=0?fatal:closed?RuntimeResult.CANCELED:failed instanceof DeadObjectException?RuntimeResult.WORKER_DIED:RuntimeResult.IPC_ERROR;fail(code);throw new ChildNetworkGate.Failure(code);}
         finally {fetching.set(false);if(closed)lifecycle.post(this::reap);}
     }
+    /** Trusted app transfer only; no Python operation is submitted or bound. Same admission/kill/lease proof. */
+    public static RemoteHttpsTransport forDownload(Context context,Policy policy,String url,long timeoutMs) throws Exception {
+        if(timeoutMs<100 || timeoutMs>30000)throw new IllegalArgumentException("TRANSFER_DEADLINE");
+        return forDownloadUntil(context,policy,url,SystemClock.elapsedRealtime()+timeoutMs);
+    }
+    public static RemoteHttpsTransport forDownloadUntil(Context context,Policy policy,String url,long deadline) throws Exception {
+        long left=deadline-SystemClock.elapsedRealtime();
+        if(left<100 || left>30000)throw new IllegalArgumentException("TRANSFER_DEADLINE");
+        policy.validateCandidate(url);
+        int recovered=recover(context);if(recovered!=IsolatedLease.NO_PENDING && recovered!=IsolatedLease.RECOVERED)throw new IOException("BROKER_RECOVERY_REQUIRED");
+        RuntimeRequest request=new RuntimeRequest(UUID.randomUUID().toString(),RuntimeRequest.SOURCE_ANALYZE,url,RuntimeRequest.CA_OWN,
+            deadline,RuntimeRequest.MAX_RSS,RuntimeRequest.MAX_HEADROOM);
+        return new RemoteHttpsTransport(context,request,policy,(count,bytes)->{},true);
+    }
+    public void expireDownload() {
+        if(!transfer)throw new IllegalStateException("TRANSFER_REQUIRED");
+        fail(RuntimeResult.TIMEOUT);
+    }
+    public DownloadSession openDownload() throws Exception {
+        if(!transfer || !fetching.compareAndSet(false,true))throw new IOException("TRANSFER_ADMISSION");
+        ParcelFileDescriptor[] pipe=null;
+        try {
+            remaining();ready.get(remaining(),TimeUnit.MILLISECONDS);remaining();
+            pipe=ParcelFileDescriptor.createPipe();
+            DownloadSession session=new DownloadSession(pipe[0]);download=session;
+            remaining();
+            final ParcelFileDescriptor writer=pipe[1];requests=1;
+            connectionIo.execute(()->{
+                try {
+                    remaining();BrokerDownload value=remote.download(request.id,request.url,writer);value.validate();
+                    session.result.complete(value);
+                }catch(Exception failed) {session.result.completeExceptionally(new IOException("TRANSFER_IPC"));}
+                finally {try {writer.close();}catch(IOException ignored){}if(closed)lifecycle.post(this::reap);}
+            });
+            return session;
+        }catch(Exception failed) {
+            if(pipe!=null)for(ParcelFileDescriptor fd:pipe)try {fd.close();}catch(IOException ignored){}
+            fetching.set(false);fail(failed instanceof TimeoutException?RuntimeResult.TIMEOUT:RuntimeResult.IPC_ERROR);throw failed;
+        }
+    }
+    public final class DownloadSession implements AutoCloseable {
+        private final CompletableFuture<BrokerDownload> result=new CompletableFuture<>();
+        private final InputStream input;
+        private boolean sessionClosed,reading;
+        private long received;
+        private boolean eof;
+        private DownloadSession(ParcelFileDescriptor reader) {input=new ParcelFileDescriptor.AutoCloseInputStream(reader);}
+        /** Only a blocking primitive: never writes a file or invokes application callbacks. */
+        public int read(byte[] bytes) throws Exception {
+            synchronized(this) {if(sessionClosed || reading)throw new IOException("TRANSFER_CLOSED");reading=true;}
+            try {
+                remaining();int count=input.read(bytes);remaining();
+                if(count<0)eof=true;else {received+=count;if(received>BrokerDownload.MAX_BYTES)throw new IOException("TRANSFER_LIMIT");}
+                return count;
+            }finally {synchronized(this) {reading=false;if(sessionClosed)fetching.set(false);}if(closed)lifecycle.post(RemoteHttpsTransport.this::reap);}
+        }
+        public BrokerDownload receipt() throws Exception {
+            remaining();BrokerDownload value=result.get(remaining(),TimeUnit.MILLISECONDS);remaining();value.validate();
+            if(!eof || value.error==0 && received!=value.bytes)throw new IOException("TRANSFER_RECEIPT");
+            payload=received;return value;
+        }
+        @Override public void close() {
+            synchronized(this) {sessionClosed=true;if(!reading)fetching.set(false);}
+            try {input.close();}catch(IOException ignored){}
+            if(closed)lifecycle.post(RemoteHttpsTransport.this::reap);
+        }
+    }
     private void watch(Policy policy) {
         if(closed)return;
         if(SystemClock.elapsedRealtime()>=request.deadline) {fail(RuntimeResult.TIMEOUT);return;}
@@ -158,6 +229,9 @@ public final class RemoteHttpsTransport implements IsolatedTransport {
         if(code!=0)android.util.Log.w("TheKaiNHttps","BROKER_RETIRE_"+code+"_"+handshake);
         // A queued handshake must run its closed check/finally; removing it would leave a false in-flight flag.
         ready.completeExceptionally(new IOException("BROKER_RETIRED"));connectionIo.shutdown();lifecycle.post(this::reap);
+        // The local write end is owned by the draining RPC task. Killing the broker releases its
+        // write end; the task's finally releases ours, so a blocked read ends without fake EOF proof.
+        DownloadSession active=download;if(active!=null)active.close();
     }
     private boolean serviceExists() {
         try {
@@ -201,6 +275,7 @@ public final class RemoteHttpsTransport implements IsolatedTransport {
             .put("rss_source","kernel_VmRSS_kB_x_1024")
             .put("handshake_phase",handshake)
             .put("service_absent",serviceGone)
+            .put("transfer_only",transfer)
             .put("retire_ms",finishedAt==0?-1:finishedAt-closeAt).put("requests",requests).put("payload_bytes",payload)
             .put("owner_python_loaded",ProcessIdentity.read("/proc/self/maps",2*1024*1024).contains("libpython"))
             .put("production_ready",false);

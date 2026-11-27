@@ -31,4 +31,8 @@ fun TransferError.label(): Int = when (this) {
     TransferError.BACKGROUND_RESTRICTED -> R.string.error_background_restricted
     TransferError.DRM_PROTECTED -> R.string.error_drm_protected
     TransferError.UNKNOWN -> R.string.error_unknown
+    TransferError.SOURCE_POLICY -> R.string.error_source_policy
+    TransferError.RESPONSE_LIMIT -> R.string.error_response_limit
+    TransferError.RESOURCE_LIMIT -> R.string.error_resource_limit
+    TransferError.ISOLATION_BLOCKED -> R.string.error_isolation_blocked
 }

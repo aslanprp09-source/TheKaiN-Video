@@ -247,6 +247,11 @@ data class UiActions(
         }
     }
     Spacer(Modifier.height(4.dp))
+    val dimensions = if (selected.width != null && selected.height != null) "${selected.width} × ${selected.height}" else "—"
+    val fps = selected.fps?.let { String.format(Locale.ROOT, "%.2f", it).trimEnd('0').trimEnd('.') } ?: "—"
+    Text(stringResource(R.string.format_technical, dimensions, fps, selected.videoCodec ?: "—", selected.audioCodec ?: "—"),
+        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.testTag("format_technical"))
     Text(stringResource(if (!selected.downloadAllowed) R.string.format_download_unavailable else if (choices.size == 1) R.string.single_format_reason else R.string.actual_formats_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     Spacer(Modifier.height(14.dp))
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
