@@ -12,12 +12,14 @@ collect() {
   timeout 8 adb -s "$ANDROID_SERIAL" exec-out run-as com.thekain.runtime.lab cat files/network-owner-death-marker.json > "$evidence/network-owner-death-marker.json" 2>/dev/null || true
   timeout 8 adb -s "$ANDROID_SERIAL" exec-out run-as com.thekain.runtime.lab cat files/network-owner-recovery.json > "$evidence/network-owner-recovery.json" 2>/dev/null || true
   timeout 8 adb -s "$ANDROID_SERIAL" exec-out run-as com.thekain.video.rebuild cat files/isolated-source-evidence.jsonl > "$evidence/main-source-journal.jsonl" 2>/dev/null || true
+  timeout 8 adb -s "$ANDROID_SERIAL" exec-out run-as com.thekain.video.rebuild cat files/isolated-evidence.jsonl > "$evidence/main-runtime-journal.jsonl" 2>/dev/null || true
   timeout 8 adb -s "$ANDROID_SERIAL" exec-out run-as com.thekain.video.rebuild cat files/main-isolated-evidence/preview.png > "$evidence/main-isolated-preview.png" 2>/dev/null || true
   timeout 10 adb -s "$ANDROID_SERIAL" exec-out run-as com.thekain.video.rebuild tar -C files -cf - ui-failure-evidence > "$evidence/main-window-evidence.tar" 2>/dev/null || true
 }
 finish() {
   code=$?;collect
   if [ "$code" -ne 0 ]; then
+    python3 -m rewrite.experiments.android_native.source_failure_diagnostics --source "$evidence/main-source-journal.jsonl" --runtime "$evidence/main-runtime-journal.jsonl" --commit "$(git rev-parse HEAD)" || true
     python3 - "$evidence/main-source-journal.jsonl" <<'PYSOURCEFAILURE'
 from pathlib import Path
 import json,sys
@@ -32,6 +34,8 @@ if path.exists() and path.stat().st_size<=256*1024:
 PYSOURCEFAILURE
     timeout 8 adb -s "$ANDROID_SERIAL" logcat -d -s TheKaiNHttps:I '*:S' | tail -120 > "$evidence/remote-lifecycle.txt" || true
     tail -60 "$evidence/remote-lifecycle.txt"
+    timeout 8 adb -s "$ANDROID_SERIAL" logcat -d -s TheKaiNIsolated:I '*:S' | tail -100 > "$evidence/source-lifecycle.txt" || true
+    tail -100 "$evidence/source-lifecycle.txt"
     for name in remote-instrumentation remote-owner-preparation remote-owner-recovery-instrumentation main-analysis-instrumentation main-ui-instrumentation main-boundary; do
       if [ -f "$evidence/$name.txt" ]; then tail -100 "$evidence/$name.txt"; fi
     done

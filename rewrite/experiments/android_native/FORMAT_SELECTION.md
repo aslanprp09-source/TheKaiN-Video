@@ -1,5 +1,12 @@
 # Real progressive format selection in the internal main APK
 
+Approved source startup diagnostics (PR67, rebuild merge
+`1af20b32a67b49d003bf5eeab015cfe17bcd0a0e`) are incorporated by normal merge.
+Both host intake suites and the existing driver groups are preserved. The
+baseline remains95 native cases plus these2 format cases,97 per API. Runtime
+PR66 is still separate; its accepted merge and a fresh combined matrix are
+required before this PR can be reviewed. PR67 did not establish a #61 fix.
+
 Issue #62 follows approved PR #57. This is a small continuation of stage D,
 not a declaration of YouTube, arbitrary-site, separate-track or mux support.
 
