@@ -21,10 +21,15 @@ from rewrite.experiments.android_native.bytecode_assets import compile_tree
 class NativeIntakeTests(unittest.TestCase):
     def test_isolated_bootstrap_refuses_source_fallback_without_breaking_original_jni_path(self):
         import importlib.util
+        import types
         from unittest.mock import patch
         path=Path(__file__).parent/'native_import.py'
         spec=importlib.util.spec_from_file_location('owned_native_import',path)
-        module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+        module=importlib.util.module_from_spec(spec)
+        # This is a pure bootstrap-guard test, not an Android extension-loader
+        # execution. Supply the stat symbol explicitly so Windows needs no posix module.
+        with patch.dict(sys.modules,{'posix':types.SimpleNamespace(stat=os.stat)}):
+            spec.loader.exec_module(module)
         for location,blocked in (('/proc/self/fd/3/native_import.py',True),
                 ('/proc/self/fd/3/native_import.pyc',False),('/owned/native_import.py',False)):
             with self.subTest(location=location),patch.object(module,'__file__',location),\
