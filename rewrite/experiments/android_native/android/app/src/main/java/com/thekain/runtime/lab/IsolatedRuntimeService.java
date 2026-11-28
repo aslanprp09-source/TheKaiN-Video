@@ -93,6 +93,10 @@ public final class IsolatedRuntimeService extends Service {
     private boolean pythonLoaded() throws IOException {
         return ProcessIdentity.read("/proc/self/maps",2*1024*1024).contains("libpython3.14.so");
     }
+    private void sourcePhase(String stage) {
+        if(request.operation==RuntimeRequest.SOURCE_ANALYZE)
+            android.util.Log.i("TheKaiNIsolated","SOURCE_PHASE_"+stage+"_id="+request.id);
+    }
     private void run(IsolatedInput input) {
         String stage="SUPERVISOR_IDENTITY";
         try(IsolatedInput ignored=input) {
@@ -198,12 +202,15 @@ public final class IsolatedRuntimeService extends Service {
                             owner.credentialDenied(request.id,proof);completed=true;
                             owner.completed(request.id,new RuntimeResult(request.id,proof==1?RuntimeResult.INVALID_REQUEST:RuntimeResult.WORKER_DIED),0);return;
                         }else if(tag==2 && limits && !started) {
-                            started=true;owner.phase(request.id);out.writeInt(0);out.flush();
+                            stage="DISPATCH_OWNER_HANDSHAKE";sourcePhase(stage);
+                            started=true;owner.phase(request.id);out.writeInt(0);out.flush();stage="DISPATCH_RUNNING";sourcePhase(stage);
                         }else if((tag==1 || tag==11 && request.operation==RuntimeRequest.SOURCE_ANALYZE) && started && ++fetches<=13) {
                             int method=in.readInt(),length=in.readInt();
                             if((method!=0 && method!=1) || length<1 || length>2048)throw new IOException("CHILD_REQUEST_BOUNDS");
                             byte[] address=new byte[length];in.readFully(address);
+                            stage="OWNER_FETCH_PENDING";sourcePhase(stage);
                             IsolatedReply reply=owner.fetch(request.id,new String(address,java.nio.charset.StandardCharsets.US_ASCII),method==1?"HEAD":"GET");
+                            stage="OWNER_FETCH_RETURNED";sourcePhase(stage);
                             out.writeInt(reply.error);
                             if(tag==11) {
                                 byte[] finalUrl=reply.finalUrl==null?new byte[0]:reply.finalUrl.getBytes(java.nio.charset.StandardCharsets.US_ASCII);
