@@ -220,6 +220,13 @@ def build(work, abis, source_cache=None, ndk_archive=None):
         shutil.copy2(ROOT/'native_import.py',site/'native_import.py')
         shutil.copy2(ROOT/'bounded_transport.py',site/'bounded_transport.py')
         shutil.copy2(ROOT/'source_analysis.py',site/'source_analysis.py')
+        # The already source-built host compiler has the target's exact CPython
+        # version. Generate checked-hash .pyc beside retained sources; both enter
+        # the same per-file inventory and sealed FD. No runtime cache or download.
+        bytecode_receipt=work/(abi+'-bytecode.json')
+        run([host/'python','-I','-B',ROOT/'bytecode_assets.py','--root',dest/'lib/python3.14',
+             '--python-version',PROFILE['sources']['cpython']['version'],
+             '--receipt',bytecode_receipt],work,env,work/(abi+'-bytecode.log'))
         # Own JNI C only; no imported bootstrap that changes ART signal handling.
         run([tools/(pin['triplet']+'26-clang'),'-shared','-fPIC','-O2','-I'+str(prefix/'include/python3.14'),
              ROOT/'jni.c','-L'+str(prefix/'lib'),'-lpython3.14','-llog','-lm','-ldl',
@@ -239,7 +246,8 @@ def build(work, abis, source_cache=None, ndk_archive=None):
         files = {str(p.relative_to(dest)):{'bytes':p.stat().st_size,'sha256':digest(p)}
                  for p in sorted(dest.rglob('*')) if p.is_file()}
         (package/'assets'/('inventory-'+abi+'.json')).write_text(json.dumps(files,sort_keys=True)+'\n')
-        report['abis'][abi]={'elf':observed,'asset_files':len(files),'asset_bytes':sum(v['bytes'] for v in files.values())}
+        report['abis'][abi]={'elf':observed,'asset_files':len(files),'asset_bytes':sum(v['bytes'] for v in files.values()),
+                            'python_bytecode':json.loads(bytecode_receipt.read_text())}
     legal = package/'assets/legal';legal.mkdir()
     # Preserve root and bundled-library notices; no claim of final distribution signoff.
     notices = {}

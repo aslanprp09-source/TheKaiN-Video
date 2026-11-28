@@ -28,6 +28,10 @@ class InstalledExtensions:
 
 
 def install(directory):
+    # Isolated execution must actually use the generated sealed bytecode. Keep
+    # the original filesystem-based JNI laboratory path separately unchanged.
+    if __file__.startswith('/proc/self/fd/3/') and not __file__.endswith('.pyc'):
+        raise RuntimeError('SEALED_BYTECODE_REQUIRED')
     if not directory.startswith('/') or '/..' in directory:
         raise RuntimeError('INVALID_INSTALLED_NATIVE_DIRECTORY')
     sys._thekain_native_directory = directory

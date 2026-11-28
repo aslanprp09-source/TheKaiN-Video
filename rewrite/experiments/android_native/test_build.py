@@ -15,9 +15,101 @@ import zipfile
 
 from rewrite.experiments.android_native.build import deny_build_network,elf_report
 from rewrite.experiments.android_native.delivery import PROFILE,verify_runtime_assets
+from rewrite.experiments.android_native.bytecode_assets import compile_tree
 
 
 class NativeIntakeTests(unittest.TestCase):
+    def test_isolated_bootstrap_refuses_source_fallback_without_breaking_original_jni_path(self):
+        import importlib.util
+        import types
+        from unittest.mock import patch
+        path=Path(__file__).parent/'native_import.py'
+        spec=importlib.util.spec_from_file_location('owned_native_import',path)
+        module=importlib.util.module_from_spec(spec)
+        # This is a pure bootstrap-guard test, not an Android extension-loader
+        # execution. Supply the stat symbol explicitly so Windows needs no posix module.
+        with patch.dict(sys.modules,{'posix':types.SimpleNamespace(stat=os.stat)}):
+            spec.loader.exec_module(module)
+        for location,blocked in (('/proc/self/fd/3/native_import.py',True),
+                ('/proc/self/fd/3/native_import.pyc',False),('/owned/native_import.py',False)):
+            with self.subTest(location=location),patch.object(module,'__file__',location),\
+                    patch.object(sys,'meta_path',list(sys.meta_path)),\
+                    patch.object(sys,'_thekain_native_directory',None,create=True):
+                if blocked:
+                    with self.assertRaisesRegex(RuntimeError,'SEALED_BYTECODE_REQUIRED'):module.install('/system/owned')
+                else:module.install('/system/owned')
+
+    def test_checked_bytecode_is_deterministic_retains_source_and_assertions_and_loads_from_zip(self):
+        import marshal
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp); outputs=[]
+            for name in ('first','different-runner-path'):
+                tree=root/name;tree.mkdir();(tree/'owned.py').write_bytes(b'value=42\nassert value == 42\n')
+                (tree/'empty.py').write_bytes(b'')
+                (tree/'refusal.py').write_bytes(b'assert False, "OWNED_ASSERT_RETAINED"\n')
+                receipt=compile_tree(tree,sys.version_info[:3]);self.assertEqual(receipt['bytecode_files'],3)
+                self.assertEqual(receipt['invalidation'],'CHECKED_HASH');self.assertEqual(receipt['optimize'],0)
+                payload=(tree/'owned.pyc').read_bytes();outputs.append(payload)
+                code=marshal.loads(payload[16:]);self.assertEqual(code.co_filename,'/thekain-sealed/owned.py')
+                # optimize=0 must retain actual assert behavior, not just a receipt claim.
+                with self.assertRaisesRegex(AssertionError,'OWNED_ASSERT_RETAINED'):
+                    exec(marshal.loads((tree/'refusal.pyc').read_bytes()[16:]),{})
+                # Existing generated files cannot be silently recompiled/adopted.
+                with self.assertRaisesRegex(RuntimeError,'BYTECODE_INPUT'):compile_tree(tree,sys.version_info[:3])
+                archive=root/(name+'.zip')
+                with zipfile.ZipFile(archive,'w') as z:
+                    for p in tree.iterdir():z.write(p,p.name)
+                result=subprocess.run([sys.executable,'-I','-B','-c',
+                    'import sys;sys.path.insert(0,sys.argv[1]);import owned;assert owned.value==42;'
+                    'assert owned.__file__.endswith("owned.pyc");print("ZIP_PYC_PASS")',str(archive)],capture_output=True,text=True,timeout=10)
+                self.assertEqual((result.returncode,result.stdout.strip()),(0,'ZIP_PYC_PASS'),result.stderr)
+            self.assertEqual(outputs[0],outputs[1])
+            # Checked hashes must reject a stale source/bytecode pairing, rather than
+            # trusting the old value or timestamp. zipimport recompiles changed source.
+            archive=root/'changed-source.zip'
+            with zipfile.ZipFile(archive,'w') as z:
+                z.writestr('owned.py',b'value=99\n');z.writestr('owned.pyc',outputs[0])
+            result=subprocess.run([sys.executable,'-I','-B','-c',
+                'import sys;sys.path.insert(0,sys.argv[1]);import owned;assert owned.value==99',str(archive)],
+                capture_output=True,text=True,timeout=10)
+            self.assertEqual(result.returncode,0,result.stderr)
+
+    def test_bytecode_refuses_compiler_mismatch_supplied_bytecode_and_symlink(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);(root/'owned.py').write_text('value=42\n')
+            with self.assertRaisesRegex(RuntimeError,'BYTECODE_COMPILER_VERSION'):compile_tree(root,(0,0,0))
+            self.assertFalse((root/'owned.pyc').exists())
+            (root/'injected.pyc').write_bytes(b'untrusted')
+            with self.assertRaisesRegex(RuntimeError,'BYTECODE_INPUT'):compile_tree(root,sys.version_info[:3])
+            (root/'injected.pyc').unlink()
+            if os.name != 'nt':
+                (root/'linked.py').symlink_to(root/'owned.py')
+                with self.assertRaisesRegex(RuntimeError,'BYTECODE_INPUT'):compile_tree(root,sys.version_info[:3])
+
+    def test_asset_inventory_rejects_bytecode_tampering_omission_and_unlisted_code(self):
+        with tempfile.TemporaryDirectory() as temp:
+            tree=Path(temp);(tree/'owned.py').write_bytes(b'assert True\n')
+            compile_tree(tree,sys.version_info[:3]);assets={p.name:p.read_bytes() for p in tree.iterdir()}
+            inventory={'lib/python3.14/'+name:{'bytes':len(raw),'sha256':hashlib.sha256(raw).hexdigest()} for name,raw in assets.items()}
+            raw=json.dumps(inventory).encode()
+            report={'asset_inventory_sha256':{abi:hashlib.sha256(raw).hexdigest() for abi in PROFILE['abis']},
+                'abis':{abi:{'asset_files':2,'asset_bytes':sum(map(len,assets.values()))} for abi in PROFILE['abis']}}
+            for variant in ('valid','tampered','missing','extra'):
+                with self.subTest(variant=variant):
+                    stream=io.BytesIO()
+                    with zipfile.ZipFile(stream,'w') as z:
+                        for abi in PROFILE['abis']:
+                            z.writestr('assets/inventory-'+abi+'.json',raw)
+                            for name,data in assets.items():
+                                if variant=='missing' and name.endswith('.pyc'):continue
+                                if variant=='tampered' and name.endswith('.pyc'):data=data[:-1]+bytes([data[-1]^1])
+                                z.writestr(f'assets/runtime/{abi}/lib/python3.14/{name}',data)
+                        if variant=='extra':z.writestr('assets/runtime/x86_64/injected.pyc',b'untrusted')
+                    with zipfile.ZipFile(stream) as z:
+                        if variant=='valid':verify_runtime_assets(z,report)
+                        else:
+                            with self.assertRaises(RuntimeError):verify_runtime_assets(z,report)
+
     @unittest.skipUnless(sys.platform=='linux' and platform.machine()=='x86_64','Linux kernel flock/OFD contract; Android matrix mandatory')
     def test_guard_lock_survives_owner_close_and_cannot_be_released_before_child_exit(self):
         source=r"""
@@ -282,6 +374,20 @@ int main(int argc,char **argv) {
             subprocess.run(['gcc','-std=gnu11','-Wall','-Wextra','-Werror','-I',str(Path(__file__).parent),
                 '-I',str(include),str(root/'test.c'),'-L',str(lib),'-lpython'+version,
                 '-Wl,-rpath,'+str(lib),'-lm','-ldl','-o',str(root/'probe')],check=True,capture_output=True,timeout=30)
+            result=subprocess.run([str(root/'probe'),str(archive)],capture_output=True,text=True,timeout=15)
+            self.assertEqual(result.returncode,0,result.stderr)
+            self.assertEqual(result.stdout.strip(),'FD_IMPORT_WITHOUT_REOPEN_PASS')
+            # Preserve the original source-only proof above; additionally require
+            # generated bytecode to work under the identical sealed-FD/open fence.
+            tree=root/'bytecode';(tree/'encodings').mkdir(parents=True)
+            for name in ('__init__.py','aliases.py','utf_8.py','ascii.py','latin_1.py'):
+                (tree/'encodings'/name).write_bytes((stdlib/'encodings'/name).read_bytes())
+            (tree/'sealed_demo.py').write_bytes(b'VALUE = 6 * 7\n')
+            compile_tree(tree,sys.version_info[:3])
+            with zipfile.ZipFile(archive,'w',compression=zipfile.ZIP_STORED) as z:
+                for file in sorted(tree.rglob('*')):
+                    if file.is_file() and file.name != 'sealed_demo.py':
+                        z.write(file,file.relative_to(tree).as_posix())
             result=subprocess.run([str(root/'probe'),str(archive)],capture_output=True,text=True,timeout=15)
             self.assertEqual(result.returncode,0,result.stderr)
             self.assertEqual(result.stdout.strip(),'FD_IMPORT_WITHOUT_REOPEN_PASS')
