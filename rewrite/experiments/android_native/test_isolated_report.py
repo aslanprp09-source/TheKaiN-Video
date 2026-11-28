@@ -1,15 +1,24 @@
 import copy
 import unittest
-from .isolated_report import validate,validate_frame
+from .isolated_report import validate,validate_frame,FRAME_MODE
 
 
 class IsolatedEvidenceTest(unittest.TestCase):
     def test_frame_refusal_needs_held_live_samples_exact_ipc_and_six_current_process_proofs(self):
         import uuid
+        import re
+        from pathlib import Path
+        java=Path(__file__).parent/'android/app/src/main/java/com/thekain/runtime/lab'
+        for filename,constants in (('IsolatedInput.java',{'CHILD_FRAME':FRAME_MODE}),
+                ('RuntimeRequest.java',{'PROBE':1,'ANALYZE':2}),('RuntimeResult.java',{'IPC_ERROR':5})):
+            source_text=(java/filename).read_text()
+            for name,value in constants.items():
+                match=re.search(r'\b'+name+r'\s*=\s*(\d+)\b',source_text)
+                self.assertIsNotNone(match,name);self.assertEqual(int(match[1]),value,name)
         source='a'*40;rows=[];cycles=[]
         for i in range(3):
             old=copy.deepcopy(self.fixture()[0]);fresh=copy.deepcopy(old)
-            old.update(id=str(uuid.UUID(int=100+i*2)),instance='old-'+str(i),operation=1,mode=5,error=5,samples=12,worker_pid=200+i*2)
+            old.update(id=str(uuid.UUID(int=100+i*2)),instance='old-'+str(i),operation=1,mode=FRAME_MODE,error=5,samples=12,worker_pid=200+i*2)
             fresh.update(id=str(uuid.UUID(int=101+i*2)),instance='fresh-'+str(i),operation=2,mode=0,error=0,worker_pid=201+i*2)
             rows.extend((old,fresh));cycles.append(dict(id=old['id'],pid=old['worker_pid'],start_ticks=old['start_ticks'],
                 fresh_id=fresh['id'],fresh_pid=fresh['worker_pid'],fresh_start_ticks=fresh['start_ticks'],
@@ -20,7 +29,7 @@ class IsolatedEvidenceTest(unittest.TestCase):
                 ('fresh_id',cycles[0]['id']),('pid',999),('fresh_start_ticks',999)):
             changed=copy.deepcopy(frame);changed['cycles'][0][key]=value
             with self.subTest(key=key),self.assertRaises(AssertionError):validate_frame(changed,rows,source,35,4096)
-        for key,value in (('error',4),('death_confirmed',False),('samples',2),('observer_python_loaded',True)):
+        for key,value in (('error',4),('mode',5),('death_confirmed',False),('samples',2),('observer_python_loaded',True)):
             changed=copy.deepcopy(rows);changed[0][key]=value
             with self.subTest(key=key),self.assertRaises(AssertionError):validate_frame(frame,changed,source,35,4096)
         for changed in (dict(frame,source_commit='b'*40),dict(frame,cycles=cycles[:2]),dict(frame,pages=16384)):

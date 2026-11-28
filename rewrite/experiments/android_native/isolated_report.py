@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 import re
 
+FRAME_MODE=6  # IsolatedInput.CHILD_FRAME; IPC_FLOOD is a different mode (5).
+
 
 def validate(rows):
     assert rows, 'Missing isolated evidence'
@@ -74,7 +76,7 @@ def validate_frame(frame, rows, source, api, pages):
         assert type(before) is int and type(after) is int and before>0 and after>=before+5
         gaps.append(after-before)
         old,fresh=indexed[cycle['id']],indexed[cycle['fresh_id']]
-        assert old['operation']==1 and old['mode']==5 and old['error']==5 and old['samples']>=after
+        assert old['operation']==1 and old['mode']==FRAME_MODE and old['error']==5 and old['samples']>=after
         assert fresh['operation']==2 and fresh['mode']==0 and fresh['error']==0 and fresh['requests']==1 and fresh['payload_bytes']>0
         for row,prefix in ((old,''),(fresh,'fresh_')):
             assert re.fullmatch('[0-9a-f-]{36}',row['id'])
