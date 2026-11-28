@@ -107,3 +107,4 @@ adb -s "$ANDROID_SERIAL" exec-out screencap -p > "$evidence/main-isolated-ui.png
 collect
 python3 rewrite/experiments/android_native/bridge_report.py --evidence "$evidence" --source "$(git rev-parse HEAD)" --api "$api" --pages "$pages"
 bash rewrite/experiments/android_native/transfer-smoke.sh "$evidence" "$api" "$pages"
+bash rewrite/experiments/android_native/formats-smoke.sh "$evidence" "$api" "$pages"

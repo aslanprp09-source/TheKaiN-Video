@@ -76,6 +76,7 @@
     <string name="home_empty_text">Вставьте прямую HTTPS-ссылку или ссылку на открытую HTML5-страницу с медиафайлом.</string>
     <string name="recent">Последние загрузки</string>
     <string name="format">Формат</string>
+    <string name="available_formats">Доступные форматы</string>
     <string name="video">Видео</string>
     <string name="audio_only">Только аудио</string>
     <string name="single_format_reason">Источник предоставляет один файл. Качество не преобразуется.</string>

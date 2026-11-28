@@ -230,20 +230,26 @@ data class UiActions(
         }
     }
     val choices = source.variants.filter { it.audioOnly == selected.audioOnly }
+        .sortedWith(compareByDescending<MediaVariant> { it.height }.thenByDescending { it.width }.thenByDescending { it.fps })
     var expanded by remember { mutableStateOf(false) }
+    val formatsDescription = stringResource(R.string.available_formats)
     Text(stringResource(R.string.format), style = MaterialTheme.typography.labelLarge)
     Box {
         OutlinedButton(onClick = { expanded = true }, enabled = choices.size > 1 && !home.enqueuePending,
             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("format_selector"), shape = RoundedCornerShape(10.dp)) {
-            Text("${selected.extension} · ${bytes(selected.bytes)}", Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface, textAlign = androidx.compose.ui.text.style.TextAlign.Start)
+            Text(formatSummary(selected), Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface, textAlign = androidx.compose.ui.text.style.TextAlign.Start)
             Icon(Icons.Default.ArrowDropDown, null)
         }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }, modifier = Modifier.semantics {
+            testTagsAsResourceId = true
+            contentDescription = formatsDescription
+        }.testTag("format_options")) {
             choices.forEach { variant -> DropdownMenuItem(text = { Column {
-                Text("${variant.extension} · ${bytes(variant.bytes)}")
+                Text(formatSummary(variant))
                 Text(variant.request.name, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
             } },
-                onClick = { expanded = false; actions.select(variant.id) }, modifier = Modifier.heightIn(min = 48.dp).testTag("variant_${variant.id}")) }
+                onClick = { expanded = false; actions.select(variant.id) }, modifier = Modifier.heightIn(min = 48.dp)
+                    .semantics { testTagsAsResourceId = true }.testTag("variant_${variant.id}")) }
         }
     }
     Spacer(Modifier.height(4.dp))
@@ -258,6 +264,15 @@ data class UiActions(
         Icon(painterResource(R.drawable.ic_library), null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(stringResource(if (Build.VERSION.SDK_INT >= 29) R.string.destination_public else R.string.destination_private), style = MaterialTheme.typography.bodySmall)
     }
+}
+
+@Composable private fun formatSummary(variant: MediaVariant): String {
+    val dimensions = when {
+        variant.width != null && variant.height != null -> "${variant.width} × ${variant.height}"
+        variant.height != null -> "${variant.height}p"
+        else -> null
+    }
+    return listOfNotNull(dimensions, variant.extension, bytes(variant.bytes)).joinToString(" · ")
 }
 
 @Composable private fun Preview(poster: ByteArray?, modifier: Modifier) {

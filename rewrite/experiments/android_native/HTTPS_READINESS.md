@@ -67,6 +67,9 @@ and all other original93 native cases remain mandatory; the total is95
 unique cases per API. Main API35 retains all original41, plus its existing
 separate groups. Standard API26/29, JVM, Lint, host and policy gates remain.
 
+The subsequent D2 format-selection group adds two more cases. When both drivers
+are present the full native inventory is97; neither replaces the other.
+
 Reproduce only on a disposable emulator with the same-run source-built lab:
 
 ```

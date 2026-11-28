@@ -16,6 +16,7 @@ from rewrite.experiments.android_native import test_source_analysis
 from rewrite.experiments.android_native import test_bridge_report
 from rewrite.experiments.android_native import test_transfer_report
 from rewrite.experiments.android_native import test_readiness_report
+from rewrite.experiments.android_native import test_formats_report
 from rewrite.experiments.android_native import test_source_failure_diagnostics
 
 
@@ -37,5 +38,6 @@ def load_tests(loader,tests,pattern):
     tests.addTests(loader.loadTestsFromModule(test_bridge_report))
     tests.addTests(loader.loadTestsFromModule(test_transfer_report))
     tests.addTests(loader.loadTestsFromModule(test_readiness_report))
+    tests.addTests(loader.loadTestsFromModule(test_formats_report))
     tests.addTests(loader.loadTestsFromModule(test_source_failure_diagnostics))
     return tests
