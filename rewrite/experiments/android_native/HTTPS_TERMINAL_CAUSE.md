@@ -1,5 +1,12 @@
 # HTTPS first terminal cause — issue #64 follow-up
 
+Approved source startup diagnostics from PR67 are incorporated by a normal
+merge of rebuild `1af20b32a67b49d003bf5eeab015cfe17bcd0a0e`. Both host intake
+suites and both runtime drivers remain mandatory. The diagnostic change adds
+no native test cases: this combined branch still requires97 per API. PR67's
+green95-case matrix did not establish or close the source timeout #61.
+The refreshed exact HEAD must pass its own full matrix before fresh review.
+
 ## Observed failures, not retry acceptance
 
 PR #65 fixed configure-return admission and passed its complete native matrix.

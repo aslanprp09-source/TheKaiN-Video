@@ -49,12 +49,27 @@ public final class IsolatedRuntime implements AutoCloseable {
         this.context=context.getApplicationContext();this.fixtureHome=fixtureHome;this.sourceTransport=sourceTransport;this.notificationExecutor=notificationExecutor;lease=new IsolatedLease(this.context);
         thread.start();supervisor=new Handler(thread.getLooper());
     }
+    private enum SourceStage {SUBMITTED,PREPARATION_STARTED,RESOURCES_READY,NETWORK_CLIENT_CREATED,BIND_REQUESTED,SERVICE_CONNECTED,
+        SUPERVISOR_AUTHENTICATED,CHILD_ANNOUNCED,LIMITS_ARMED,PYTHON_ENTERED,FIRST_FETCH_ENTERED,FIRST_FETCH_RETURNED,RETIRING,COMPLETED}
+    /** First observation per fixed stage, bounded to the enum. Diagnostics never grant death/admission. */
+    private static final class SourceTimeline {
+        private final EnumMap<SourceStage,long[]> events=new EnumMap<>(SourceStage.class);
+        synchronized void mark(SourceStage stage) {if(!events.containsKey(stage))events.put(stage,new long[]{SystemClock.elapsedRealtime(),System.currentTimeMillis()});}
+        synchronized JSONObject snapshot() throws org.json.JSONException {
+            org.json.JSONArray rows=new org.json.JSONArray();
+            for(Map.Entry<SourceStage,long[]> e:events.entrySet())rows.put(new JSONObject().put("phase",e.getKey().name())
+                .put("elapsed_ms",e.getValue()[0]).put("wall_ms",e.getValue()[1]));
+            return new JSONObject().put("limit",SourceStage.values().length).put("events",rows).put("diagnostic_only",true).put("grants_death_proof",false);
+        }
+    }
     public final class Operation {
         public final String id;
         final RuntimeRequest request;final int mode;
         final long submitted;
         final CompletableFuture<Outcome> future=new CompletableFuture<>();
         final OperationTrace trace=new OperationTrace();
+        final SourceTimeline sourceTimeline=new SourceTimeline();
+        void sourcePhase(SourceStage stage) {if(request.operation==RuntimeRequest.SOURCE_ANALYZE)sourceTimeline.mark(stage);}
         volatile String leaseObservation="NOT_RESERVED",serviceObservation="NOT_OBSERVED";
         volatile long serviceObservedAt;
         volatile String diagnosticService="NOT_OBSERVED";volatile long diagnosticServiceAt;
@@ -75,7 +90,7 @@ public final class IsolatedRuntime implements AutoCloseable {
         RuntimeResult result;
         long samples,peak,cpu,before,address,cpuLimit,resourceBytes,cancelAt=-1,retireAt,cleanupDeadline;
         volatile long procFailureSince=-1;
-        Operation(RuntimeRequest request,int mode,long submitted) {this.request=request;this.mode=mode;id=request.id;this.submitted=submitted;trace.mark("SUBMITTED");}
+        Operation(RuntimeRequest request,int mode,long submitted) {this.request=request;this.mode=mode;id=request.id;this.submitted=submitted;trace.mark("SUBMITTED");sourcePhase(SourceStage.SUBMITTED);}
         public CompletableFuture<Outcome> completion() {return notification(future);}
         public CompletableFuture<Integer> whenPythonStarted() {return notification(started);}
         /** Blocking waits belong off the main thread and do not depend on notification dispatch. */
@@ -147,6 +162,7 @@ public final class IsolatedRuntime implements AutoCloseable {
         }
     }
     private void prepare(Operation o) {
+        o.sourcePhase(SourceStage.PREPARATION_STARTED);
         IsolatedInput input=null;IsolatedTransport gate=null;
         try {
             try(FileOutputStream out=context.openFileOutput("isolated-owner-canary",Context.MODE_PRIVATE)) {
@@ -155,6 +171,7 @@ public final class IsolatedRuntime implements AutoCloseable {
             o.canaryWritten=true;
             o.guard=lease.createGuard(o.id);o.leaseObservation="GUARD_CREATED";
             input=IsolatedResources.prepare(context,o.request,o.mode,fixtureHome,o.guard,()->o.canceled || o.retiring);
+            o.sourcePhase(SourceStage.RESOURCES_READY);
             if(o.canceled || o.retiring)throw new IOException("RESOURCE_RETIRED");
             // Counters and all HTTPS IO belong to the trusted owner, not the isolated UID.
             gate=o.request.operation==RuntimeRequest.SOURCE_ANALYZE
@@ -166,6 +183,7 @@ public final class IsolatedRuntime implements AutoCloseable {
                 public void completed(RuntimeResult result) { }
                 public void network(String id,int requests,long bytes) {o.requests=requests;o.payload=bytes;}
             },fixtureHome==null?RuntimeAssets.prepare(context):fixtureHome);
+            o.sourcePhase(SourceStage.NETWORK_CLIENT_CREATED);
             IsolatedInput prepared=input;IsolatedTransport transport=gate;
             supervisor.post(()->{o.gate=transport;o.resourceBytes=prepared.bytes;o.preparing=false;
                 if(!current(o) || o.retiring) {prepared.close();transport.close();return;}
@@ -192,7 +210,7 @@ public final class IsolatedRuntime implements AutoCloseable {
                     int pid=Binder.getCallingPid(),uid=Binder.getCallingUid();
                     if(!current(o) || o.observerPid!=0 || !o.id.equals(cap) || start<=0 || !nonDumpable
                             || pid<=0 || pid==android.os.Process.myPid() || uid==android.os.Process.myUid() || uid%100000<90000)return false;
-                    o.observerPid=pid;o.observerUid=uid;o.observerStart=start;o.observerNonDumpable=nonDumpable;return true;
+                    o.observerPid=pid;o.observerUid=uid;o.observerStart=start;o.observerNonDumpable=nonDumpable;o.sourcePhase(SourceStage.SUPERVISOR_AUTHENTICATED);return true;
                 }
             }
             public boolean sample(String cap,long sequence,long measuredAt,int pid,int uid,long start,long cpu,long rss,long vm,
@@ -229,12 +247,13 @@ public final class IsolatedRuntime implements AutoCloseable {
         };
     }
     private void bind(Operation o,IsolatedInput input) {
+        o.sourcePhase(SourceStage.BIND_REQUESTED);
         // Keep pending descriptors owned even if binding fails or the callback never arrives.
         oInput.put(o,input);
         o.connection=new ServiceConnection() {
             public void onServiceConnected(ComponentName component,IBinder binder) {
                 supervisor.post(()->{
-                    o.connected=true;o.binder=binder;
+                    o.connected=true;o.binder=binder;o.sourcePhase(SourceStage.SERVICE_CONNECTED);
                     try {
                         binder.linkToDeath(()->supervisor.post(()->{o.binderDead=true;if(current(o) && !o.retiring)retire(o,RuntimeResult.WORKER_DIED);}),0);
                         if(current(o) && !o.retiring) {
@@ -268,11 +287,11 @@ public final class IsolatedRuntime implements AutoCloseable {
                 synchronized(IsolatedRuntime.this) {
                     if(!sender(o,capability) || o.peerPid!=0 || childPid<=0 || childPid==o.observerPid || childPid==android.os.Process.myPid()
                             || instance==null || !instance.matches("[0-9a-f-]{36}"))return false;
-                    o.peerPid=childPid;o.peerUid=o.observerUid;o.instance=instance;return true;
+                    o.peerPid=childPid;o.peerUid=o.observerUid;o.instance=instance;o.sourcePhase(SourceStage.CHILD_ANNOUNCED);return true;
                 }
             }
             @Override public void phase(String capability) {
-                synchronized(IsolatedRuntime.this) {if(sender(o,capability) && o.kernel!=null && o.childProtection==255) {o.pythonEntered=true;o.trace.mark("STARTED");o.started.complete(o.kernel.pid);}}
+                synchronized(IsolatedRuntime.this) {if(sender(o,capability) && o.kernel!=null && o.childProtection==255) {o.pythonEntered=true;o.trace.mark("STARTED");o.sourcePhase(SourceStage.PYTHON_ENTERED);o.started.complete(o.kernel.pid);}}
             }
             @Override public boolean limits(String capability,long before,long address,long cpu,int childProtection) {
                 synchronized(IsolatedRuntime.this) {
@@ -286,7 +305,7 @@ public final class IsolatedRuntime implements AutoCloseable {
                 o.leaseObservation="ARMED";
                 synchronized(IsolatedRuntime.this) {
                     if(!sender(o,capability))return false;
-                    o.before=before;o.address=address;o.cpuLimit=cpu;o.childProtection=childProtection;return true;
+                    o.before=before;o.address=address;o.cpuLimit=cpu;o.childProtection=childProtection;o.sourcePhase(SourceStage.LIMITS_ARMED);return true;
                 }
             }
             @Override public IsolatedReply fetch(String capability,String url,String method) {
@@ -298,12 +317,13 @@ public final class IsolatedRuntime implements AutoCloseable {
                     return new IsolatedReply(RuntimeResult.OUT_OF_SCOPE,null);}
                 catch(Exception e) {return new IsolatedReply(RuntimeResult.OUT_OF_SCOPE,null);}
                 if(!o.fetching.compareAndSet(false,true))return new IsolatedReply(RuntimeResult.BUSY,null);
+                o.sourcePhase(SourceStage.FIRST_FETCH_ENTERED);
                 try {
                     IsolatedReply reply=o.gate.reply(url,method);
                     if(!sender(o,capability) || SystemClock.elapsedRealtime()>=o.request.deadline)return new IsolatedReply(RuntimeResult.CANCELED,null);
                     return reply;
                 }catch(ChildNetworkGate.Failure e) {return new IsolatedReply(e.code,null);}
-                finally {o.fetching.set(false);}
+                finally {o.sourcePhase(SourceStage.FIRST_FETCH_RETURNED);o.fetching.set(false);}
             }
             @Override public void credentialDenied(String capability,int proof) {
                 synchronized(IsolatedRuntime.this) {
@@ -353,7 +373,7 @@ public final class IsolatedRuntime implements AutoCloseable {
         synchronized(this) {
             if(!current(o) || o.retiring)return;o.retiring=true;o.retireAt=SystemClock.elapsedRealtime();
             o.error=o.canceled?RuntimeResult.CANCELED:o.retireAt>=o.request.deadline?RuntimeResult.TIMEOUT:error;
-            if(o.retireAt>=o.request.deadline)o.trace.mark("DEADLINE");o.trace.mark("RETIRING");
+            if(o.retireAt>=o.request.deadline)o.trace.mark("DEADLINE");o.trace.mark("RETIRING");o.sourcePhase(SourceStage.RETIRING);
         }
         // Keep the trusted isolated supervisor alive until it has killed/reaped the native child.
         IsolatedInput pending=oInput.remove(o);if(pending!=null)pending.close();
@@ -461,7 +481,7 @@ public final class IsolatedRuntime implements AutoCloseable {
             if(!leaseClean)o.error=RuntimeResult.CLEANUP_FAILED;
             else if(o.error==0 && SystemClock.elapsedRealtime()>=o.request.deadline)o.error=RuntimeResult.TIMEOUT;
             else if(o.error==0 && o.gate!=null && o.gate.failure()!=RuntimeResult.OK)o.error=o.gate.failure();
-            o.finished=true;o.trace.mark("COMPLETED");Outcome out=new Outcome(o,dead);record(o,out);
+            o.finished=true;o.trace.mark("COMPLETED");o.sourcePhase(SourceStage.COMPLETED);Outcome out=new Outcome(o,dead);record(o,out);
             if(leaseClean) {synchronized(IsolatedLease.COORDINATOR) {
                 o.ownerEndpoint=null;o.observerEndpoint=null;o.worker=null;active=null;LIVE=null;LEASE.set(false);
             }} // Otherwise uncertainty and admission remain reserved.
@@ -484,6 +504,7 @@ public final class IsolatedRuntime implements AutoCloseable {
                 .put("observer_peak_rss_bytes",r.observerPeakRssBytes).put("observer_cpu_ticks",r.observerCpuTicks)
                 .put("observer_python_loaded",r.observerPythonLoaded).put("observer_non_dumpable",r.observerNonDumpable).put("child_protection",r.childProtection).put("worker_exit_signal",r.workerExitSignal).put("worker_exit_code",r.workerExitCode).put("credential_denial_proof",r.credentialDenialProof)
                 .put("elapsed_ms",r.elapsedMs).put("retire_to_exit_ms",r.retireToExitMs).put("cancel_to_exit_ms",r.cancelToExitMs);
+            if(o.request.operation==RuntimeRequest.SOURCE_ANALYZE)j.put("source_timeline",o.sourceTimeline.snapshot());
             File file=new File(context.getFilesDir(),"isolated-evidence.jsonl");
             try(FileOutputStream out=new FileOutputStream(file,file.length()<=1024*1024)) {out.write((j+"\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));}
         }catch(Exception e) {android.util.Log.e("TheKaiNIsolated","EVIDENCE_WRITE_FAILED");}
