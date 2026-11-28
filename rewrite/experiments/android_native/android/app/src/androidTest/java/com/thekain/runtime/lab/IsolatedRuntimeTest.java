@@ -105,8 +105,35 @@ public final class IsolatedRuntimeTest extends RuntimeTestSupport {
         recovery(out);
     }
     @Test public void oversizedNativeChildFrameCannotAllocateInSupervisorAndFreshRecoveryWorks() throws Exception {
-        IsolatedRuntime.Outcome out=finish(submit(RuntimeRequest.PROBE,null,IsolatedInput.CHILD_FRAME,30000));
-        assertEquals(RuntimeResult.IPC_ERROR,out.result.error);assertTrue(out.pythonEntered);identity(out);recovery(out);
+        org.json.JSONArray rows=new org.json.JSONArray();
+        try {for(int cycle=0;cycle<3;cycle++) {
+            long[] sequences=new long[2];java.util.concurrent.atomic.AtomicReference<Throwable> failure=new java.util.concurrent.atomic.AtomicReference<>();
+            java.util.concurrent.atomic.AtomicInteger calls=new java.util.concurrent.atomic.AtomicInteger();
+            isolated.protocolRefusalProbe=operation->{
+                try {
+                    assertEquals(1,calls.incrementAndGet());sequences[0]=isolated.liveFrameProbeSequence(operation);
+                    healthyMain();long until=SystemClock.elapsedRealtime()+1000;
+                    do {sequences[1]=isolated.liveFrameProbeSequence(operation);
+                        if(sequences[1]>=sequences[0]+5)break;
+                        SystemClock.sleep(10); // Only the held test callback, never normal execution or UI.
+                    }while(SystemClock.elapsedRealtime()<until);
+                    assertTrue("Five live kernel observations while the result callback is held",sequences[1]>=sequences[0]+5);
+                }catch(Throwable error) {failure.set(error);throw new IllegalStateException("FRAME_PROBE_FAILED",error);}
+            };
+            IsolatedRuntime.Outcome out=finish(submit(RuntimeRequest.PROBE,null,IsolatedInput.CHILD_FRAME,30000));
+            assertNull("Held protocol-refusal probe failed",failure.get());assertEquals(1,calls.get());
+            assertEquals(RuntimeResult.IPC_ERROR,out.result.error);assertTrue(out.pythonEntered);identity(out);
+            IsolatedRuntime.Outcome fresh=recovery(out);
+            rows.put(new org.json.JSONObject().put("id",out.result.id).put("pid",out.workerPid).put("start_ticks",out.startTicks)
+                .put("before_sequence",sequences[0]).put("after_sequence",sequences[1]).put("returned",out.result.error)
+                .put("fresh_id",fresh.result.id).put("fresh_pid",fresh.workerPid).put("fresh_start_ticks",fresh.startTicks));
+        }}finally {isolated.protocolRefusalProbe=null;}
+        org.json.JSONObject report=new org.json.JSONObject().put("source_commit",BuildConfig.QA_SOURCE_COMMIT)
+            .put("api",android.os.Build.VERSION.SDK_INT).put("pages",android.system.Os.sysconf(android.system.OsConstants._SC_PAGESIZE))
+            .put("case","frame-refusal").put("cycles",rows).put("production_ready",false);
+        try(FileOutputStream stream=new FileOutputStream(new File(context.getFilesDir(),"frame-refusal.json"))) {
+            stream.write(report.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        }
     }
     @Test public void platformCredentialSyscallIsDeniedAndFreshAnalysisRecovers() throws Exception {
         IsolatedRuntime.Outcome out=finish(submit(RuntimeRequest.PROBE,null,IsolatedInput.PLATFORM_CREDENTIAL,30000));

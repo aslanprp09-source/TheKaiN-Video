@@ -1,9 +1,30 @@
 import copy
 import unittest
-from .isolated_report import validate
+from .isolated_report import validate,validate_frame
 
 
 class IsolatedEvidenceTest(unittest.TestCase):
+    def test_frame_refusal_needs_held_live_samples_exact_ipc_and_six_current_process_proofs(self):
+        import uuid
+        source='a'*40;rows=[];cycles=[]
+        for i in range(3):
+            old=copy.deepcopy(self.fixture()[0]);fresh=copy.deepcopy(old)
+            old.update(id=str(uuid.UUID(int=100+i*2)),instance='old-'+str(i),operation=1,mode=5,error=5,samples=12,worker_pid=200+i*2)
+            fresh.update(id=str(uuid.UUID(int=101+i*2)),instance='fresh-'+str(i),operation=2,mode=0,error=0,worker_pid=201+i*2)
+            rows.extend((old,fresh));cycles.append(dict(id=old['id'],pid=old['worker_pid'],start_ticks=old['start_ticks'],
+                fresh_id=fresh['id'],fresh_pid=fresh['worker_pid'],fresh_start_ticks=fresh['start_ticks'],
+                before_sequence=4,after_sequence=10,returned=5))
+        frame=dict(case='frame-refusal',source_commit=source,api=35,pages=4096,cycles=cycles,production_ready=False)
+        self.assertEqual(validate_frame(frame,rows,source,35,4096)['real_process_proofs'],6)
+        for key,value in (('returned',4),('after_sequence',8),('before_sequence',0),('after_sequence',True),
+                ('fresh_id',cycles[0]['id']),('pid',999),('fresh_start_ticks',999)):
+            changed=copy.deepcopy(frame);changed['cycles'][0][key]=value
+            with self.subTest(key=key),self.assertRaises(AssertionError):validate_frame(changed,rows,source,35,4096)
+        for key,value in (('error',4),('death_confirmed',False),('samples',2),('observer_python_loaded',True)):
+            changed=copy.deepcopy(rows);changed[0][key]=value
+            with self.subTest(key=key),self.assertRaises(AssertionError):validate_frame(frame,changed,source,35,4096)
+        for changed in (dict(frame,source_commit='b'*40),dict(frame,cycles=cycles[:2]),dict(frame,pages=16384)):
+            with self.assertRaises(AssertionError):validate_frame(changed,rows,source,35,4096)
     def fixture(self):
         rows=[]
         for i,error in enumerate((0,1,2,4,5,6,7,8,9,10,11,14)):

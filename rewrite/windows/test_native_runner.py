@@ -24,7 +24,7 @@ runpy.run_path(SCRIPT,run_name="__main__")
         with tempfile.TemporaryDirectory() as directory:
             out=subprocess.run([sys.executable,'-I','-c',code],cwd=directory,capture_output=True,text=True,timeout=30)
         self.assertEqual(out.returncode,0,out.stdout+out.stderr)
-        self.assertIn('4 tests, 0 failures, 0 errors, 0 skipped',out.stdout)
+        self.assertIn('5 tests, 0 failures, 0 errors, 0 skipped',out.stdout)
 
 
 if __name__=='__main__':unittest.main()
