@@ -1,5 +1,10 @@
 # Confirming configure return before HTTPS admission
 
+Follow-up: native #285 exposed a separate terminal-cause race after this
+admission fix was merged. Issue #64 remains open; see
+[HTTPS_TERMINAL_CAUSE.md](HTTPS_TERMINAL_CAUSE.md). Its two additional cases
+bring the mandatory inventory on that follow-up branch to97 per API.
+
 Issue #64 follows the API35 failure in native run #279, job140539419514,
 HEAD `c0a73a1ad810082ad8c649f4d6051a0cb929de98`. The original strict broker
 crash test expected WORKER_DIED (4), but received IPC_ERROR (5). No assertion

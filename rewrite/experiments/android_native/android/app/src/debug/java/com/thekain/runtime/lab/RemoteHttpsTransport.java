@@ -15,12 +15,12 @@ public final class RemoteHttpsTransport implements IsolatedTransport {
     private static final AtomicReference<RemoteHttpsTransport> LIVE=new AtomicReference<>();
     public static final class Policy implements IsolatedTransport.Factory {
         final Set<String> origins;final String fixture;final byte[] ca;final int fault;final long rss,cpu;
-        private final Runnable readyReturnBarrier;
+        private final Runnable readyReturnBarrier,failureReturnBarrier;
         private volatile RemoteHttpsTransport latest;
         private Policy(Set<String> origins,String fixture,byte[] ca,int fault,long rss,long cpu) throws Exception {
-            this(origins,fixture,ca,fault,rss,cpu,null);
+            this(origins,fixture,ca,fault,rss,cpu,null,null);
         }
-        private Policy(Set<String> origins,String fixture,byte[] ca,int fault,long rss,long cpu,Runnable barrier) throws Exception {
+        private Policy(Set<String> origins,String fixture,byte[] ca,int fault,long rss,long cpu,Runnable barrier,Runnable failureBarrier) throws Exception {
             if(fixture==null)new PublicHttpsPolicy(origins);
             else {
                 java.net.URI uri=new java.net.URI(fixture);
@@ -29,7 +29,7 @@ public final class RemoteHttpsTransport implements IsolatedTransport {
             }
             this.origins=Collections.unmodifiableSet(new HashSet<>(origins));this.fixture=fixture;this.ca=ca==null?null:ca.clone();
             this.fault=fault;this.rss=rss;this.cpu=cpu;
-            readyReturnBarrier=barrier;
+            readyReturnBarrier=barrier;failureReturnBarrier=failureBarrier;
         }
         public static Policy publicOrigins(Set<String> origins) throws Exception {return new Policy(origins,null,null,0,RuntimeRequest.MAX_RSS,10000);}
         static Policy fixture(String origin,byte[] ca) throws Exception {return new Policy(Collections.singleton(origin),origin,ca,0,RuntimeRequest.MAX_RSS,10000);}
@@ -37,7 +37,11 @@ public final class RemoteHttpsTransport implements IsolatedTransport {
         // Trusted instrumentation only, owned loopback fixture only. Nothing executable crosses IPC.
         Policy holdReadyReturnForTests(Runnable barrier) throws Exception {
             if(fixture==null || barrier==null)throw new IllegalArgumentException("OWNED_FIXTURE_ONLY");
-            return new Policy(origins,fixture,ca,fault,rss,cpu,barrier);
+            return new Policy(origins,fixture,ca,fault,rss,cpu,barrier,null);
+        }
+        Policy holdFailureReturnForTests(Runnable barrier) throws Exception {
+            if(fixture==null || barrier==null)throw new IllegalArgumentException("OWNED_FIXTURE_ONLY");
+            return new Policy(origins,fixture,ca,fault,rss,cpu,null,barrier);
         }
         public IsolatedTransport create(Context context,RuntimeRequest request,Counters counters) throws Exception {
             RemoteHttpsTransport value=new RemoteHttpsTransport(context,request,this,counters,false);latest=value;return value;
@@ -52,6 +56,7 @@ public final class RemoteHttpsTransport implements IsolatedTransport {
     }
     private final Context context;
     private final RuntimeRequest request;
+    private final Runnable failureReturnBarrier;
     private final boolean transfer;
     private volatile DownloadSession download;
     private final Counters counters;
@@ -70,10 +75,13 @@ public final class RemoteHttpsTransport implements IsolatedTransport {
     private volatile String handshake="BIND_PENDING";
     private volatile boolean readyNotified,configureReturned;
     private volatile String configureFailure="NONE";
+    private volatile String terminalOrigin="NONE",terminalCategory="NONE";
+    private volatile String kernelState="NOT_OBSERVED",kernelError="NONE";
+    private volatile long kernelFlags;
     private volatile long payload,peakRss,peakCpuMs,initialCpu,closeAt=-1,finishedAt;
     private final ServiceConnection connection;
     private RemoteHttpsTransport(Context context,RuntimeRequest request,Policy policy,Counters counters,boolean transfer) throws Exception {
-        this.context=context.getApplicationContext();this.request=request;this.counters=counters;this.transfer=transfer;lease=new IsolatedLease(this.context,"https");
+        this.context=context.getApplicationContext();this.request=request;this.counters=counters;this.transfer=transfer;failureReturnBarrier=policy.failureReturnBarrier;lease=new IsolatedLease(this.context,"https");
         if(!ProcessIdentity.read("/proc/self/cmdline",512).split("\u0000",2)[0].equals(context.getPackageName()))throw new IOException("BROKER_OWNER_REQUIRED");
         RemoteHttpsTransport previous=LIVE.get();if(previous!=null && previous.terminated())LIVE.compareAndSet(previous,null);
         if(!LIVE.compareAndSet(null,this))throw new IOException("BROKER_BUSY");
@@ -87,11 +95,11 @@ public final class RemoteHttpsTransport implements IsolatedTransport {
         connection=new ServiceConnection() {
             public void onServiceConnected(ComponentName name,IBinder value) {
                 connected=true;binder=value;remote=IRemoteHttps.Stub.asInterface(value);connectionWorkDone=false;
-                try {value.linkToDeath(()->{binderDead=true;fail(RuntimeResult.WORKER_DIED);},0);
+                try {value.linkToDeath(()->{binderDead=true;beginClose(RuntimeResult.WORKER_DIED,"BINDER_DEATH","DEAD_OBJECT");},0);
                     connectionIo.execute(()->connect(policy));
                 }catch(Exception e) {connectionWorkDone=true;fail(RuntimeResult.IPC_ERROR);}
             }
-            public void onServiceDisconnected(ComponentName name) {binderDead=true;fail(RuntimeResult.WORKER_DIED);}
+            public void onServiceDisconnected(ComponentName name) {binderDead=true;beginClose(RuntimeResult.WORKER_DIED,"SERVICE_DISCONNECTED","DEAD_OBJECT");}
             public void onBindingDied(ComponentName name) {onServiceDisconnected(name);}
             public void onNullBinding(ComponentName name) {fail(RuntimeResult.IPC_ERROR);}
         };
@@ -128,14 +136,20 @@ public final class RemoteHttpsTransport implements IsolatedTransport {
             if(!closed) {handshake="READY";ready.complete(true);}
         }catch(Exception invalid) {
             configureFailure=invalid instanceof DeadObjectException?"DEAD_OBJECT":invalid instanceof RemoteException?"REMOTE":"PROTOCOL";
-            fail(invalid instanceof DeadObjectException?RuntimeResult.WORKER_DIED:RuntimeResult.IPC_ERROR);
+            beginClose(invalid instanceof DeadObjectException?RuntimeResult.WORKER_DIED:RuntimeResult.IPC_ERROR,"CONFIGURE",configureFailure);
         }
         finally {connectionWorkDone=true;if(closed)lifecycle.post(this::reap);}
     }
     private int remaining() throws ChildNetworkGate.Failure {
-        if(closed)throw new ChildNetworkGate.Failure(fatal==0?RuntimeResult.CANCELED:fatal);
+        synchronized(this) {if(closed)throw terminalFailure();}
         long left=request.deadline-SystemClock.elapsedRealtime();
-        if(left<=0) {fail(RuntimeResult.TIMEOUT);throw new ChildNetworkGate.Failure(RuntimeResult.TIMEOUT);}return (int)left;
+        if(left<=0)throw retireFailure(RuntimeResult.TIMEOUT,"DEADLINE","DEADLINE");return (int)left;
+    }
+    // Read closed and its first cause under the same lock. A provisional RPC error must
+    // never replace a peer death, deadline or explicit close which already won retirement.
+    private synchronized ChildNetworkGate.Failure terminalFailure() {return new ChildNetworkGate.Failure(fatal==0?RuntimeResult.CANCELED:fatal);}
+    private ChildNetworkGate.Failure retireFailure(int candidate,String origin,String category) {
+        beginClose(candidate,origin,category);return terminalFailure();
     }
     public IsolatedReply reply(String url,String method) throws ChildNetworkGate.Failure {
         if(transfer)throw new ChildNetworkGate.Failure(RuntimeResult.OUT_OF_SCOPE);
@@ -158,12 +172,17 @@ public final class RemoteHttpsTransport implements IsolatedTransport {
             }
             synchronized(this) {remaining();return new IsolatedReply(0,body,first.status,first.finalUrl,first.contentType,first.declaredBytes);}
         }catch(ChildNetworkGate.Failure failed) {
-            if(failed.code==RuntimeResult.TIMEOUT || failed.code==RuntimeResult.WORKER_DIED)fail(failed.code);
+            if(failed.code==RuntimeResult.TIMEOUT || failed.code==RuntimeResult.WORKER_DIED)throw retireFailure(failed.code,"REPLY","TYPED_FAILURE");
+            synchronized(this) {if(closed)throw terminalFailure();}
             throw failed;
         }
-        catch(TimeoutException e) {fail(RuntimeResult.TIMEOUT);throw new ChildNetworkGate.Failure(RuntimeResult.TIMEOUT);}
-        catch(InterruptedException e) {Thread.currentThread().interrupt();fail(RuntimeResult.CANCELED);throw new ChildNetworkGate.Failure(RuntimeResult.CANCELED);}
-        catch(Exception failed) {int code=fatal!=0?fatal:closed?RuntimeResult.CANCELED:failed instanceof DeadObjectException?RuntimeResult.WORKER_DIED:RuntimeResult.IPC_ERROR;fail(code);throw new ChildNetworkGate.Failure(code);}
+        catch(TimeoutException e) {throw retireFailure(RuntimeResult.TIMEOUT,"REPLY_WAIT","TIMEOUT");}
+        catch(InterruptedException e) {Thread.currentThread().interrupt();throw retireFailure(RuntimeResult.CANCELED,"REPLY_WAIT","INTERRUPTED");}
+        catch(Exception failed) {
+            int candidate=failed instanceof DeadObjectException?RuntimeResult.WORKER_DIED:RuntimeResult.IPC_ERROR;
+            if(failureReturnBarrier!=null)failureReturnBarrier.run();
+            throw retireFailure(candidate,"REPLY_RPC",failed instanceof DeadObjectException?"DEAD_OBJECT":failed instanceof RemoteException?"REMOTE":"PROTOCOL");
+        }
         finally {fetching.set(false);if(closed)lifecycle.post(this::reap);}
     }
     /** Trusted app transfer only; no Python operation is submitted or bound. Same admission/kill/lease proof. */
@@ -239,21 +258,29 @@ public final class RemoteHttpsTransport implements IsolatedTransport {
         BrokerHello value=hello;
         if(value!=null)try {
             BrokerProcess actual=BrokerProcess.read(value.pid);
-            if(actual.start!=value.start) {fail(RuntimeResult.WORKER_DIED);return;}
+            kernelState=actual.state;kernelFlags=actual.flags;
+            if(actual.start!=value.start) {beginClose(RuntimeResult.WORKER_DIED,"KERNEL_WATCH","PID_REUSED");return;}
+            if(actual.dying()) {
+                beginClose(RuntimeResult.WORKER_DIED,"KERNEL_WATCH",actual.exiting()?"PF_EXITING":"DYING_OR_REUSED");return;
+            }
             peakRss=Math.max(peakRss,actual.rss);peakCpuMs=Math.max(peakCpuMs,(actual.cpu-initialCpu)*1000/ProcessIdentity.CLOCK_TICKS);
             if(actual.rss>policy.rss) {fail(RuntimeResult.MEMORY_LIMIT);return;}
             if(peakCpuMs>policy.cpu) {fail(RuntimeResult.CPU_LIMIT);return;}
         }catch(android.system.ErrnoException unknown) {
-            fail(unknown.errno==android.system.OsConstants.ENOENT || unknown.errno==android.system.OsConstants.ESRCH?RuntimeResult.WORKER_DIED:RuntimeResult.IPC_ERROR);return;
-        }catch(Exception unknown) {fail(RuntimeResult.IPC_ERROR);return;}
+            boolean gone=unknown.errno==android.system.OsConstants.ENOENT || unknown.errno==android.system.OsConstants.ESRCH;
+            beginClose(gone?RuntimeResult.WORKER_DIED:RuntimeResult.IPC_ERROR,"KERNEL_WATCH",gone?"PROC_ABSENT":"PROC_UNREADABLE");return;
+        }catch(Exception unknown) {kernelError=BrokerProcess.observationCategory(unknown);beginClose(RuntimeResult.IPC_ERROR,"KERNEL_WATCH",kernelError);return;}
         lifecycle.postDelayed(()->watch(policy),40);
     }
     private void fail(int code) {beginClose(code);}
     @Override public int failure() {return fatal;}
     @Override public void close() {beginClose(0);}
     private void beginClose(int code) {
-        synchronized(this) {if(closed)return;fatal=code;closed=true;closeAt=SystemClock.elapsedRealtime();}
-        if(code!=0)android.util.Log.w("TheKaiNHttps","BROKER_RETIRE_"+code+"_"+handshake);
+        beginClose(code,code==0?"OWNER_CLOSE":"SUPERVISOR","TYPED");
+    }
+    private void beginClose(int code,String origin,String category) {
+        synchronized(this) {if(closed)return;fatal=code;terminalOrigin=origin;terminalCategory=category;closed=true;closeAt=SystemClock.elapsedRealtime();}
+        if(code!=0)android.util.Log.w("TheKaiNHttps","BROKER_RETIRE_"+code+"_"+handshake+"_"+origin+"_"+category);
         // A queued handshake must run its closed check/finally; removing it would leave a false in-flight flag.
         ready.completeExceptionally(new IOException("BROKER_RETIRED"));connectionIo.shutdown();lifecycle.post(this::reap);
         // The local write end is owned by the draining RPC task. Killing the broker releases its
@@ -301,6 +328,8 @@ public final class RemoteHttpsTransport implements IsolatedTransport {
             .put("lease_clean",leaseClean).put("terminated",terminated()).put("failure",fatal).put("peak_rss_bytes",peakRss).put("observed_cpu_ms",peakCpuMs)
             .put("rss_source","kernel_VmRSS_kB_x_1024")
             .put("handshake_phase",handshake)
+            .put("terminal_origin",terminalOrigin).put("terminal_category",terminalCategory)
+            .put("kernel_state",kernelState).put("kernel_flags",kernelFlags).put("kernel_error",kernelError)
             .put("ready_notification_seen",readyNotified).put("configure_returned",configureReturned)
             .put("ready_published",ready.isDone() && !ready.isCompletedExceptionally()).put("configure_failure",configureFailure)
             .put("service_absent",serviceGone)
