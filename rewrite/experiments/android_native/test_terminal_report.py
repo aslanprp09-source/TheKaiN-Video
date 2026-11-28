@@ -29,12 +29,16 @@ class TerminalIntakeTest(unittest.TestCase):
                 race['rows'].append(dict(mode=mode, attempt=attempt, returned=code, before=before, retired=retired, fresh=fresh))
         kernel = dict(case='kernel', source_commit=source, api=36, pages=16384, production_ready=False,
             simulated_parser_only=True, dying_missing_rss=True, zombie_not_absent=True, unknown_refused=True,
-            malformed_refused=True, access_denied_refused=True, pid_change_refused=True, actual_absence_errno_only=True, pid_reuse=True)
+            malformed_refused=True, access_denied_refused=True, pid_change_refused=True, actual_absence_errno_only=True, pid_reuse=True,
+            exiting_flag_before_zombie=True, exiting_not_absent=True, invalid_flags_refused=True, exit_regression_refused=True)
         return race, kernel, source
 
     def test_no_pass_for_missing_or_mismatched_cause_stale_process_or_unconfirmed_cleanup(self):
         race, kernel, source = self.fixture()
         self.assertEqual(inspect(race, kernel, source, 36, 16384)['real_worker_proofs'], 18)
+        exiting = deepcopy(race)
+        exiting['rows'][0]['retired'].update(terminal_origin='KERNEL_WATCH',terminal_category='PF_EXITING',kernel_flags=4)
+        self.assertEqual(inspect(exiting,kernel,source,36,16384)['real_worker_proofs'],18)
         changes = [
             lambda r, k: r.update(source_commit='e'*40), lambda r, k: k.update(pages=4096),
             lambda r, k: r['rows'].pop(), lambda r, k: r.update(actual_tls=False),
@@ -54,6 +58,9 @@ class TerminalIntakeTest(unittest.TestCase):
             lambda r, k: r['rows'][6]['retired'].update(terminal_origin='KERNEL_WATCH'),
             lambda r, k: k.update(zombie_not_absent=False), lambda r, k: k.update(access_denied_refused=False),
             lambda r, k: k.update(simulated_parser_only=False), lambda r, k: k.update(pid_change_refused=False),
+            lambda r, k: k.update(exiting_flag_before_zombie=False), lambda r, k: k.update(exiting_not_absent=False),
+            lambda r, k: k.update(invalid_flags_refused=False), lambda r, k: k.update(exit_regression_refused=False),
+            lambda r, k: r['rows'][0]['retired'].update(terminal_origin='KERNEL_WATCH',terminal_category='PF_EXITING',kernel_flags=0),
         ]
         for index, change in enumerate(changes):
             r, k = deepcopy(race), deepcopy(kernel); change(r, k)

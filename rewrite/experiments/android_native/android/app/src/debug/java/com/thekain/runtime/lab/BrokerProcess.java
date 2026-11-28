@@ -5,9 +5,25 @@ import java.nio.charset.StandardCharsets;
 
 /** Kernel identity; a zombie leader, Binder death or an unreadable proc file is not process absence. */
 final class BrokerProcess {
-    final int pid;final long start,cpu,rss;final String state;
-    BrokerProcess(int pid,long start,long cpu,long rss,String state) {this.pid=pid;this.start=start;this.cpu=cpu;this.rss=rss;this.state=state;}
-    boolean dying() {return state.equals("Z") || state.equals("X");}
+    // /proc stat field9 exports task->flags. Linux sets PF_EXITING before exit_mm,
+    // which can remove VmRSS while the task state is still R (before EXIT_ZOMBIE).
+    static final long PF_EXITING=0x00000004L;
+    final int pid;final long start,cpu,rss,flags;final String state;
+    BrokerProcess(int pid,long start,long cpu,long rss,String state,long flags) {this.pid=pid;this.start=start;this.cpu=cpu;this.rss=rss;this.state=state;this.flags=flags;}
+    boolean exiting() {return (flags&PF_EXITING)!=0;}
+    boolean dying() {return state.equals("Z") || state.equals("X") || exiting();}
+    static String observationCategory(Exception error) {
+        if(error instanceof MissingRss)return "RSS_MISSING";
+        if(error instanceof NumberFormatException)return "PROC_NUMBER";
+        String code=error.getMessage();
+        if("BROKER_PID_CHANGED".equals(code))return "PROC_IDENTITY_CHANGED";
+        if("BROKER_RSS".equals(code))return "RSS_INVALID";
+        if("BROKER_PROC".equals(code))return "PROC_PARSE";
+        if("BROKER_FLAGS".equals(code))return "FLAGS_INVALID";
+        if("BROKER_PROC_LIMIT".equals(code))return "PROC_OVERSIZED";
+        if("BROKER_EXIT_REGRESSED".equals(code))return "EXIT_REGRESSED";
+        return "PROC_OTHER"; // Never log arbitrary exception text.
+    }
     interface ProcReader {String read(String path,int max) throws Exception;}
     private static final class MissingRss extends IOException {MissingRss() {super("BROKER_RSS_MISSING");}}
     private static String kernel(String path,int max) throws Exception {
@@ -31,9 +47,11 @@ final class BrokerProcess {
         int end=raw.lastIndexOf(')');if(!raw.startsWith(pid+" (") || end<0)throw new IOException("BROKER_PROC");
         String[] fields=raw.substring(end+2).trim().split(" +");if(fields.length<22)throw new IOException("BROKER_PROC");
         try {
+            if(!fields[6].matches("[0-9]{1,10}"))throw new IOException("BROKER_FLAGS");
+            long flags=Long.parseLong(fields[6]);if(flags>0xffffffffL)throw new IOException("BROKER_FLAGS");
             long start=Long.parseLong(fields[19]),user=Long.parseLong(fields[11]),system=Long.parseLong(fields[12]);
             if(start<=0 || user<0 || system<0 || user>Long.MAX_VALUE-system || !fields[0].matches("[RSDZTWtXxKPI]"))throw new IOException("BROKER_PROC");
-            return new BrokerProcess(pid,start,user+system,0,fields[0]);
+            return new BrokerProcess(pid,start,user+system,0,fields[0],flags);
         }catch(NumberFormatException invalid) {throw new IOException("BROKER_PROC");}
     }
     static BrokerProcess read(int pid) throws Exception {return read(pid,BrokerProcess::kernel);}
@@ -46,10 +64,11 @@ final class BrokerProcess {
         if(!before.dying())try {rss=rssFromStatus(reader.read(path+"/status",32768));}catch(MissingRss absent) {missing=absent;}
         BrokerProcess after=stat(pid,reader.read(path+"/stat",8192));
         if(after.start!=before.start)throw new IOException("BROKER_PID_CHANGED");
+        if(before.dying() && !after.dying())throw new IOException("BROKER_EXIT_REGRESSED");
         // A running process may lose VmRSS between stat/status while it becomes a zombie.
         // Only a confirmed same-identity dying state explains missing RSS. Unknown is an error.
         if(missing!=null && !after.dying())throw missing;
-        return new BrokerProcess(pid,after.start,after.cpu,after.dying()?0:rss,after.state);
+        return new BrokerProcess(pid,after.start,after.cpu,after.dying()?0:rss,after.state,after.flags);
     }
     static boolean absent(int pid,long start) throws Exception {return absent(pid,start,BrokerProcess::kernel);}
     static boolean absent(int pid,long start,ProcReader reader) throws Exception {

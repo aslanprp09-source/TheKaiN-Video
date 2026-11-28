@@ -95,7 +95,10 @@ public final class RemoteTerminalTest {
         record("race",new JSONObject().put("actual_tls",true).put("actual_binder",true).put("rows",rows));
     }
     private static String stat(String state,long start) {
-        String[] f=new String[22];Arrays.fill(f,"0");f[0]=state;f[11]="2";f[12]="3";f[19]=Long.toString(start);return "123 (owned) "+String.join(" ",f);
+        return statFlags(state,start,"0");
+    }
+    private static String statFlags(String state,long start,String flags) {
+        String[] f=new String[22];Arrays.fill(f,"0");f[0]=state;f[6]=flags;f[11]="2";f[12]="3";f[19]=Long.toString(start);return "123 (owned) "+String.join(" ",f);
     }
     private static BrokerProcess.ProcReader transition(String before,String status,String after) {
         AtomicInteger reads=new AtomicInteger();return (path,max)->path.endsWith("/status")?status:reads.getAndIncrement()==0?before:after;
@@ -109,6 +112,13 @@ public final class RemoteTerminalTest {
         assertTrue(observed.dying());assertEquals(0,observed.rss);assertEquals(7,observed.start);
         assertFalse(BrokerProcess.absent(123,7,transition(stat("R",7),"Name:\towned\n",stat("Z",7))));
         assertFalse(BrokerProcess.absent(123,7,transition(stat("Z",7),"unused",stat("Z",7))));
+        // exit_signals sets PF_EXITING before exit_mm removes VmRSS and before state Z.
+        BrokerProcess exiting=BrokerProcess.read(123,transition(stat("R",7),"Name:\towned\n",statFlags("R",7,"4")));
+        assertTrue(exiting.exiting());assertTrue(exiting.dying());assertEquals("R",exiting.state);assertEquals(0,exiting.rss);
+        assertFalse(BrokerProcess.absent(123,7,transition(stat("R",7),"Name:\towned\n",statFlags("R",7,"4"))));
+        assertFalse(BrokerProcess.absent(123,7,transition(statFlags("R",7,"4"),"unused",statFlags("R",7,"4"))));
+        for(String flags:new String[]{"-4","4294967296","invalid"})rejected(transition(statFlags("R",7,flags),"unused",stat("Z",7)));
+        rejected(transition(statFlags("R",7,"4"),"unused",stat("R",7)));
         rejected(transition(stat("R",7),"Name:\towned\n",stat("R",7)));
         rejected(transition(stat("R",7),"VmRSS:\t2 MB\n",stat("Z",7)));
         rejected(transition(stat("R",7),"VmRSS:\t2 kB\nVmRSS:\t3 kB\n",stat("Z",7)));
@@ -121,7 +131,8 @@ public final class RemoteTerminalTest {
         assertTrue(BrokerProcess.absent(123,7,transition(stat("R",8),"VmRSS:\t2 kB\n",stat("R",8))));
         record("kernel",new JSONObject().put("simulated_parser_only",true).put("dying_missing_rss",true).put("zombie_not_absent",true)
             .put("unknown_refused",true).put("malformed_refused",true).put("access_denied_refused",true).put("pid_change_refused",true)
-            .put("actual_absence_errno_only",true).put("pid_reuse",true));
+            .put("actual_absence_errno_only",true).put("pid_reuse",true).put("exiting_flag_before_zombie",true)
+            .put("exiting_not_absent",true).put("invalid_flags_refused",true).put("exit_regression_refused",true));
     }
     @After public void cleanup() throws Exception {
         try {for(RemoteHttpsTransport value:owned) {value.close();long end=SystemClock.elapsedRealtime()+5000;

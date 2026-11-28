@@ -76,6 +76,8 @@ public final class RemoteHttpsTransport implements IsolatedTransport {
     private volatile boolean readyNotified,configureReturned;
     private volatile String configureFailure="NONE";
     private volatile String terminalOrigin="NONE",terminalCategory="NONE";
+    private volatile String kernelState="NOT_OBSERVED",kernelError="NONE";
+    private volatile long kernelFlags;
     private volatile long payload,peakRss,peakCpuMs,initialCpu,closeAt=-1,finishedAt;
     private final ServiceConnection connection;
     private RemoteHttpsTransport(Context context,RuntimeRequest request,Policy policy,Counters counters,boolean transfer) throws Exception {
@@ -256,14 +258,18 @@ public final class RemoteHttpsTransport implements IsolatedTransport {
         BrokerHello value=hello;
         if(value!=null)try {
             BrokerProcess actual=BrokerProcess.read(value.pid);
-            if(actual.start!=value.start || actual.dying()) {beginClose(RuntimeResult.WORKER_DIED,"KERNEL_WATCH","DYING_OR_REUSED");return;}
+            kernelState=actual.state;kernelFlags=actual.flags;
+            if(actual.start!=value.start) {beginClose(RuntimeResult.WORKER_DIED,"KERNEL_WATCH","PID_REUSED");return;}
+            if(actual.dying()) {
+                beginClose(RuntimeResult.WORKER_DIED,"KERNEL_WATCH",actual.exiting()?"PF_EXITING":"DYING_OR_REUSED");return;
+            }
             peakRss=Math.max(peakRss,actual.rss);peakCpuMs=Math.max(peakCpuMs,(actual.cpu-initialCpu)*1000/ProcessIdentity.CLOCK_TICKS);
             if(actual.rss>policy.rss) {fail(RuntimeResult.MEMORY_LIMIT);return;}
             if(peakCpuMs>policy.cpu) {fail(RuntimeResult.CPU_LIMIT);return;}
         }catch(android.system.ErrnoException unknown) {
             boolean gone=unknown.errno==android.system.OsConstants.ENOENT || unknown.errno==android.system.OsConstants.ESRCH;
             beginClose(gone?RuntimeResult.WORKER_DIED:RuntimeResult.IPC_ERROR,"KERNEL_WATCH",gone?"PROC_ABSENT":"PROC_UNREADABLE");return;
-        }catch(Exception unknown) {beginClose(RuntimeResult.IPC_ERROR,"KERNEL_WATCH","PROC_INVALID");return;}
+        }catch(Exception unknown) {kernelError=BrokerProcess.observationCategory(unknown);beginClose(RuntimeResult.IPC_ERROR,"KERNEL_WATCH",kernelError);return;}
         lifecycle.postDelayed(()->watch(policy),40);
     }
     private void fail(int code) {beginClose(code);}
@@ -323,6 +329,7 @@ public final class RemoteHttpsTransport implements IsolatedTransport {
             .put("rss_source","kernel_VmRSS_kB_x_1024")
             .put("handshake_phase",handshake)
             .put("terminal_origin",terminalOrigin).put("terminal_category",terminalCategory)
+            .put("kernel_state",kernelState).put("kernel_flags",kernelFlags).put("kernel_error",kernelError)
             .put("ready_notification_seen",readyNotified).put("configure_returned",configureReturned)
             .put("ready_published",ready.isDone() && !ready.isCompletedExceptionally()).put("configure_failure",configureFailure)
             .put("service_absent",serviceGone)

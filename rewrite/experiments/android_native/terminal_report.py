@@ -34,7 +34,10 @@ def inspect(race, kernel, source, api, pages):
         assert fresh['terminal_origin'] == 'OWNER_CLOSE'
         if mode == 'death':
             assert retired['terminal_origin'] in ('BINDER_DEATH', 'SERVICE_DISCONNECTED', 'KERNEL_WATCH')
-            assert retired['terminal_category'] in ('DEAD_OBJECT', 'DYING_OR_REUSED', 'PROC_ABSENT')
+            assert retired['terminal_category'] in ('DEAD_OBJECT', 'DYING_OR_REUSED', 'PROC_ABSENT', 'PF_EXITING', 'PID_REUSED')
+            if retired['terminal_category'] == 'PF_EXITING':
+                assert type(retired['kernel_flags']) is int and 0 <= retired['kernel_flags'] <= 0xffffffff
+                assert retired['kernel_flags'] & 4
         elif mode == 'cancel':
             assert retired['terminal_origin'] == 'OWNER_CLOSE'
         else:
@@ -42,7 +45,8 @@ def inspect(race, kernel, source, api, pages):
         proofs += [retired, fresh]
     assert len({p['id'] for p in proofs}) == len({p['instance'] for p in proofs}) == 18
     assert all(kernel[k] is True for k in ('simulated_parser_only', 'dying_missing_rss', 'zombie_not_absent',
-        'unknown_refused', 'malformed_refused', 'access_denied_refused', 'pid_change_refused', 'actual_absence_errno_only', 'pid_reuse'))
+        'unknown_refused', 'malformed_refused', 'access_denied_refused', 'pid_change_refused', 'actual_absence_errno_only', 'pid_reuse',
+        'exiting_flag_before_zombie', 'exiting_not_absent', 'invalid_flags_refused', 'exit_regression_refused'))
     return dict(https_terminal_cause='PASS', source_commit=source, api=api, pages=pages, additional_tests=2,
         forced_races=9, real_worker_proofs=18, kernel_checks='SIMULATED_PARSER_ONLY', original95='SEPARATE_MANDATORY_GATES',
         peak_sampled_rss_bytes=max(p['peak_rss_bytes'] for p in proofs), max_observed_cpu_ms=max(p['observed_cpu_ms'] for p in proofs),

@@ -26,6 +26,13 @@ assertion accepts alternative error codes, and no old test is removed.
 
 ## Correction and fail-closed observation
 
+The refreshed source492dda failed native294 API29 job140903079248 in the
+unchanged strict crash case (expected4, got5). The new origin log identified
+`BROKER_RETIRE_5_READY_KERNEL_WATCH_PROC_INVALID`, not an RPC/configure error.
+The exact underlying parser exception was not logged on that source; its
+specific subtype remains unconfirmed. This actual failure is retained and
+is not rerun as a correction.
+
 The former reply exception handler read `fatal` and `closed` separately and
 returned its provisional local error even if another thread won retirement.
 A caller could observe an old zero failure and a new closed flag, returning
@@ -41,9 +48,29 @@ Previously missing VmRSS always caused an IPC error. A specific missing-RSS
 condition is now accepted only if the second stat proves the same identity
 is dying. Wrong units, duplicate RSS, malformed/unknown process state,
 unreadable data, and changing identity within the snapshot remain errors.
-A dying worker can initiate WORKER_DIED retirement, but a zombie is still
+The kernel's `exit_signals()` sets `PF_EXITING=0x00000004` before `exit_mm()`
+removes the memory map and before EXIT_ZOMBIE. Consequently a same-identity
+second stat may still say R while VmRSS has already disappeared. Stat field9
+exports task flags; the observer now validates its unsigned32-bit value and
+recognizes PF_EXITING as a kernel-observed beginning of exit. This explains
+the missing-RSS-before-Z class without delaying sampling or permitting an
+unknown observation. State/flags and fixed parser-error categories are added
+to evidence. The earlier PROC_INVALID log establishes the failing component,
+not proof of that exact missing-RSS subcase; the new diagnostics distinguish it.
+
+Kernel source references (read-only research, no kernel code bundled):
+[Linux4.4 flags](https://github.com/torvalds/linux/blob/v4.4/include/linux/sched.h),
+[Linux6.6 flags](https://github.com/torvalds/linux/blob/v6.6/include/linux/sched.h),
+[exit ordering](https://github.com/torvalds/linux/blob/v6.6/kernel/exit.c), and
+[exported stat flags](https://github.com/torvalds/linux/blob/v6.6/fs/proc/array.c).
+Both examined kernel versions use the same flag value and exit ordering.
+
+A dying worker can initiate WORKER_DIED retirement, but PF_EXITING or a zombie is still
 **not kernel absence**. Only ENOENT/ESRCH or a confirmed reused identity
 prove absence. No Binder-only or RSS-only proof permits reuse.
+Missing RSS in an unflagged running task, invalid/overflowing flags and an
+impossible exit-to-live regression still fail closed as IPC errors. No grace,
+retry loop or operation/cleanup deadline is added.
 
 Fixed `terminal_origin`/`terminal_category` evidence and lifecycle messages
 distinguish reply, Binder, configure and kernel observation without URL,
@@ -73,7 +100,9 @@ adapter capability.
 2. Explicitly simulated kernel-parser transitions and negative observations:
    missing RSS in a still-running process, zombie-not-absence, malformed or
    duplicate RSS, changed identity, unknown state, denied reads, legitimate
-   absence errnos and PID reuse. These are parser checks, not measurements
+   absence errnos and PID reuse. It also proves that R+PF_EXITING can explain
+   missing RSS but cannot prove absence; invalid flags and exit regression
+   are refused. These are parser checks, not measurements
    on a physical process or proof of the API29 root cause.
 
 `terminal-smoke.sh` requires both raw JUnit results and current-source/API/
