@@ -26,6 +26,13 @@ public final class IsolatedRuntime implements AutoCloseable {
         new ArrayBlockingQueue<>(1),task->{Thread t=new Thread(task,"isolated-diagnostic-query");t.setDaemon(true);return t;});
     private final ExecutorService preparation=Executors.newSingleThreadExecutor();
     private volatile Operation active;
+    // Trusted local test seam only: never configured by IPC or source analysis.
+    volatile java.util.function.Consumer<Operation> protocolRefusalProbe;
+    synchronized long liveFrameProbeSequence(Operation o) {
+        if(!current(o) || o.retiring || o.mode!=IsolatedInput.CHILD_FRAME || o.request.operation!=RuntimeRequest.PROBE
+                || !o.pythonEntered || o.kernel==null || o.kernel.dead)throw new IllegalStateException("FRAME_CHILD_NOT_LIVE");
+        return o.sequence;
+    }
     private boolean closed;
     public IsolatedRuntime(Context context) {
         this(context,null);
@@ -332,6 +339,13 @@ public final class IsolatedRuntime implements AutoCloseable {
                 }
             }
             @Override public void completed(String capability,RuntimeResult result,int denials) {
+                java.util.function.Consumer<Operation> probe=protocolRefusalProbe;
+                if(probe!=null && o.mode==IsolatedInput.CHILD_FRAME && o.request.operation==RuntimeRequest.PROBE
+                        && result!=null && o.id.equals(result.id) && result.error==RuntimeResult.IPC_ERROR) {
+                    synchronized(IsolatedRuntime.this) {if(!sender(o,capability) || o.result!=null)return;}
+                    // Outside the Runtime monitor: authenticated kernel samples must still progress.
+                    probe.accept(o);
+                }
                 synchronized(IsolatedRuntime.this) {
                     if(!sender(o,capability) || o.result!=null)return;
                     try {

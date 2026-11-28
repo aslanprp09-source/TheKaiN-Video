@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 import re
 
+FRAME_MODE=6  # IsolatedInput.CHILD_FRAME; IPC_FLOOD is a different mode (5).
+
 
 def validate(rows):
     assert rows, 'Missing isolated evidence'
@@ -61,9 +63,36 @@ def validate(rows):
     }
 
 
+def validate_frame(frame, rows, source, api, pages):
+    assert re.fullmatch('[0-9a-f]{40}', source)
+    assert frame['case']=='frame-refusal' and frame['source_commit']==source
+    assert frame['api']==api and frame['pages']==pages and frame['production_ready'] is False
+    assert len(frame['cycles'])==3
+    indexed={r['id']:r for r in rows};assert len(indexed)==len(rows)
+    identities=[];gaps=[]
+    for cycle in frame['cycles']:
+        assert cycle['returned']==5
+        before,after=cycle['before_sequence'],cycle['after_sequence']
+        assert type(before) is int and type(after) is int and before>0 and after>=before+5
+        gaps.append(after-before)
+        old,fresh=indexed[cycle['id']],indexed[cycle['fresh_id']]
+        assert old['operation']==1 and old['mode']==FRAME_MODE and old['error']==5 and old['samples']>=after
+        assert fresh['operation']==2 and fresh['mode']==0 and fresh['error']==0 and fresh['requests']==1 and fresh['payload_bytes']>0
+        for row,prefix in ((old,''),(fresh,'fresh_')):
+            assert re.fullmatch('[0-9a-f-]{36}',row['id'])
+            assert row['worker_pid']==cycle[prefix+'pid'] and row['start_ticks']==cycle[prefix+'start_ticks']
+            assert row['death_confirmed'] is True and row['owner_canary_intact'] is True and row['python_entered'] is True
+            assert row['child_protection']==255 and row['observer_python_loaded'] is False
+            identities.append((row['id'],row['instance']))
+    assert len({p[0] for p in identities})==len({p[1] for p in identities})==6
+    return dict(frame_refusal_before_channel_close='PASS',cycles=3,real_process_proofs=6,
+        live_samples_while_callback_held_min=min(gaps),production_ready=False)
+
+
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--evidence',type=Path,required=True)
     parser.add_argument('--api',type=int,required=True);parser.add_argument('--pages',type=int,required=True)
+    parser.add_argument('--source',required=True)
     args=parser.parse_args();folder=args.evidence
     text=(folder/'isolated-instrumentation.txt').read_text()
     assert re.search(r'^OK \(27 tests\)\s*$',text,re.M), text[-12000:]
@@ -71,7 +100,9 @@ def main():
     assert int((folder/'api.txt').read_text())==args.api
     assert int((folder/'page-size.txt').read_text())==args.pages
     rows=[json.loads(line) for line in (folder/'isolated-evidence.jsonl').read_text().splitlines()]
-    report=validate(rows);report.update(api=args.api,actual_page_size=args.pages,tests=27)
+    frame=folder/'frame-refusal.json';assert 0<frame.stat().st_size<=65536
+    report=validate(rows);report['frame_refusal']=validate_frame(json.loads(frame.read_text()),rows,args.source,args.api,args.pages)
+    report.update(api=args.api,actual_page_size=args.pages,tests=27)
     snapshots=sum('MEMINFO in pid' in p.read_text(errors='replace') for p in folder.glob('meminfo-isolated-*.txt'))
     assert snapshots>0,'No independent isolated-worker dumpsys meminfo snapshot'
     report['independent_meminfo_snapshots']=snapshots

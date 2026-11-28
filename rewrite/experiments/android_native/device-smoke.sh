@@ -177,7 +177,8 @@ adb -s "$ANDROID_SERIAL" exec-out run-as com.thekain.runtime.lab cat files/isola
 for label in entry suite-result recreated-cancelled; do
   adb -s "$ANDROID_SERIAL" exec-out run-as com.thekain.runtime.lab cat "files/isolated-qa-evidence/$label.png" > "$evidence/isolated-qa-$label.png" 2>/dev/null || true
 done
-python3 rewrite/experiments/android_native/isolated_report.py --evidence "$evidence" --api "$api" --pages "$pages"
+adb -s "$ANDROID_SERIAL" exec-out run-as com.thekain.runtime.lab cat files/frame-refusal.json > "$evidence/frame-refusal.json"
+python3 rewrite/experiments/android_native/isolated_report.py --evidence "$evidence" --api "$api" --pages "$pages" --source "$(git rev-parse HEAD)"
 adb -s "$ANDROID_SERIAL" shell pidof system_server | tr -d '\r' > "$evidence/system-server-after-isolated.txt"
 cmp "$evidence/system-server-before.txt" "$evidence/system-server-after-isolated.txt"
 

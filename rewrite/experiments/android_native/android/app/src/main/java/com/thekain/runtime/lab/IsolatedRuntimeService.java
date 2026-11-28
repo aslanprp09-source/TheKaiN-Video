@@ -97,6 +97,11 @@ public final class IsolatedRuntimeService extends Service {
         if(request.operation==RuntimeRequest.SOURCE_ANALYZE)
             android.util.Log.i("TheKaiNIsolated","SOURCE_PHASE_"+stage+"_id="+request.id);
     }
+    private static boolean protocolRefusal(Throwable error) {
+        String code=error.getMessage();
+        return error instanceof IOException && ("CHILD_PROTOCOL".equals(code) || "CHILD_REQUEST_BOUNDS".equals(code)
+            || "CHILD_OUTPUT_BOUNDS".equals(code) || "CHILD_MESSAGE_BUDGET".equals(code));
+    }
     private void run(IsolatedInput input) {
         String stage="SUPERVISOR_IDENTITY";
         try(IsolatedInput ignored=input) {
@@ -132,6 +137,7 @@ public final class IsolatedRuntimeService extends Service {
                 try(ParcelFileDescriptor channel=ParcelFileDescriptor.adoptFd(spawned[1])) {
                     DataInputStream in=new DataInputStream(new FileInputStream(channel.getFileDescriptor()));
                     DataOutputStream out=new DataOutputStream(new FileOutputStream(channel.getFileDescriptor()));
+                    try {
                     stage="CHILD_EXEC_READY";
                     int hello=in.readInt();
                     if(hello==6) {int code=in.readInt();stage="CHILD_CODE_"+(code>=100 && code<=127?code:0);throw new IOException("CHILD_STARTUP");}
@@ -231,6 +237,16 @@ public final class IsolatedRuntimeService extends Service {
                     }
                     if(!retiring)throw new IOException("CHILD_MESSAGE_BUDGET");
                     }
+                    }catch(IOException rejected) {
+                        if(!protocolRefusal(rejected))throw rejected;
+                        // Publish the verified refusal before closing the channel. The child
+                        // is waiting for an ACK; closing first lets its death replace IPC_ERROR.
+                        android.util.Log.w("TheKaiNIsolated","CHILD_PROTOCOL_REFUSED_"+rejected.getMessage()+"_id="+request.id);
+                        if(!retiring && !completed) {
+                            completed=true;owner.completed(request.id,new RuntimeResult(request.id,RuntimeResult.IPC_ERROR),0);
+                        }
+                        return;
+                    }
                 }
             }
         }catch(Throwable e) {
@@ -239,9 +255,7 @@ public final class IsolatedRuntimeService extends Service {
             android.util.Log.e("TheKaiNIsolated","SUPERVISOR_FAILED_"+stage+"_"+e.getClass().getSimpleName()+"_errno="+errno);
             if(!retiring && !completed)try {
                 int error="RESOURCE_HASH".equals(e.getMessage())?RuntimeResult.INVALID_REQUEST:
-                    (e.getMessage()!=null && (e.getMessage().equals("CHILD_PROTOCOL")
-                        || e.getMessage().equals("CHILD_REQUEST_BOUNDS") || e.getMessage().equals("CHILD_OUTPUT_BOUNDS")
-                        || e.getMessage().equals("CHILD_MESSAGE_BUDGET")))?RuntimeResult.IPC_ERROR:
+                    protocolRefusal(e)?RuntimeResult.IPC_ERROR:
                     e instanceof EOFException?RuntimeResult.WORKER_DIED:RuntimeResult.NATIVE_FAILED;
                 completed=true;owner.completed(request.id,new RuntimeResult(request.id,error),0);
             }catch(Exception ignored) { }
